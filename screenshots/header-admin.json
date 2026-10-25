@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/admin",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Operations · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 199,
+      "bodyTextHash": "640a6a069f69e200afa6216f4274d6942df8579b687e716886cea3743b9510d8",
+      "bodyTextPrefix": "ACCOUNT HOLDING OPERATIONS Admin sign in Enter the desk credenti",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/header-admin.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Operations · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 199,
+      "bodyTextHash": "640a6a069f69e200afa6216f4274d6942df8579b687e716886cea3743b9510d8",
+      "bodyTextPrefix": "ACCOUNT HOLDING OPERATIONS Admin sign in Enter the desk credenti",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/header-admin-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/header-admin.json"
+}

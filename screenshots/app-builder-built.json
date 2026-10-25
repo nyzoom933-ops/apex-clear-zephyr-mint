@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Application · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 812,
+      "bodyTextHash": "5f9dd74e983666ca3a14e33ae1355af217074a940cdf45c013de74ae216acb4a",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR APPLICATION Open an account relationshi",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Application · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 701,
+      "bodyTextHash": "91c070fbef008786249c5bf7f5c2641dff5cb1c64c8b3bceb44067122d65c6a2",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR APPLICATION Open an account relationshi",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}

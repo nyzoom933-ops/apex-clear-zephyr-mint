@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/portal",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Sign in · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 230,
+      "bodyTextHash": "aebcd4b2c35795a342ac15bcbc81013d4c9302870193525c23c9a01e0e36c902",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR ACCESS Begin an application Sign in Ent",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/portal-smoke.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Sign in · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 230,
+      "bodyTextHash": "aebcd4b2c35795a342ac15bcbc81013d4c9302870193525c23c9a01e0e36c902",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR ACCESS Begin an application Sign in Ent",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/portal-smoke-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/portal-smoke.json"
+}

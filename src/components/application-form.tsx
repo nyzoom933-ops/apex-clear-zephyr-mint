@@ -1,0 +1,627 @@
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronLeft, FileText, IdCard, MapPin, ShieldCheck } from "lucide-react";
+import {
+  ACCOUNT_TYPES,
+  ADDRESS_DOCS,
+  COUNTRIES,
+  DAYS,
+  EMPTY_FORM,
+  FUND_SOURCES,
+  ID_TYPES,
+  MONTHS,
+  NET_WORTH,
+  OCCUPATIONS,
+  PHONE_COUNTRIES,
+  PURPOSES,
+  STEP_NAMES,
+  US_STATES,
+  WEALTH_SOURCES,
+  YEARS,
+  validateStep,
+  type FormState,
+} from "@/lib/application-data";
+import { getInvestorSession, investorLogout, submitApplication, type InvestorSession } from "@/lib/admin.functions";
+import { AppCover, headerActionClass, SiteHeader } from "@/components/site-header";
+import { SignaturePad } from "@/components/signature-pad";
+
+const STORAGE_KEY = "account-holding-application";
+
+const PREPARE = [
+  { icon: IdCard, title: "Government-issued identification", body: "Passport, driver’s license, or national identity card." },
+  { icon: MapPin, title: "Proof of address", body: "A recent statement or bill showing your residential address." },
+  { icon: FileText, title: "Tax information", body: "Your tax residence and taxpayer identification number." },
+  { icon: ShieldCheck, title: "A few minutes", body: "Most applicants finish in a single sitting." },
+] as const;
+
+const DECLARATIONS = [
+  { key: "d1", label: "I confirm the information in this application is accurate and complete." },
+  { key: "d2", label: "I am the beneficial owner of the assets that will be held in this account." },
+  { key: "d3", label: "I understand the portfolio stays unavailable until this application is approved." },
+  { key: "d4", label: "I agree to the account terms and to electronic delivery of statements." },
+] as const;
+
+function loadDraft(): FormState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return EMPTY_FORM;
+    const parsed = JSON.parse(raw) as Partial<FormState>;
+    return { ...EMPTY_FORM, ...parsed, password: "", confirmPassword: "" };
+  } catch {
+    return EMPTY_FORM;
+  }
+}
+
+function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium">{label}</span>
+      {children}
+      {hint ? <span className="mt-1 block text-xs text-fg">{hint}</span> : null}
+    </label>
+  );
+}
+
+const controlClass =
+  "w-full rounded-md border border-border bg-surface px-3.5 py-3 text-base text-fg outline-none transition focus:border-primary";
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly string[];
+  placeholder?: string;
+}) {
+  return (
+    <Field label={label}>
+      <select className={controlClass} value={value} onChange={(event) => onChange(event.target.value)}>
+        {placeholder ? <option value="">{placeholder}</option> : null}
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+export function ApplicationForm() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [step, setStep] = useState(0);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [submitted, setSubmitted] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [session, setSession] = useState<InvestorSession | null | undefined>(undefined);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void getInvestorSession()
+      .then((value) => {
+        if (value?.destination === "portal") {
+          void navigate({ to: "/portal" });
+          return;
+        }
+        setSession(value);
+      })
+      .catch(() => setSession(null));
+  }, [navigate]);
+
+  useEffect(() => {
+    setForm(loadDraft());
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready || submitted || session) return;
+    const rest = { ...form, password: "", confirmPassword: "" };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+  }, [form, ready, submitted, session]);
+
+  const percent = useMemo(() => (step / (STEP_NAMES.length - 1)) * 100, [step]);
+
+  function patch<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function go(next: number) {
+    setErrors([]);
+    setStep(next);
+    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function onContinue() {
+    const nextErrors = validateStep(step, form);
+    if (nextErrors.length) {
+      setErrors(nextErrors);
+      cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (step === STEP_NAMES.length - 1) {
+      try {
+        await submitApplication({ data: { ...form, currency: "USD" } });
+      } catch {
+        setErrors(["The application could not be saved. Try again."]);
+        return;
+      }
+      localStorage.removeItem(STORAGE_KEY);
+      setSubmitted(true);
+      return;
+    }
+    go(step + 1);
+  }
+
+  async function signOut() {
+    await investorLogout();
+    setSession(null);
+    void navigate({ to: "/login" });
+  }
+
+  if (session === undefined) {
+    return (
+      <div className="min-h-screen">
+        <SiteHeader eyebrow="Investor application" />
+        <AppCover />
+        <main className="mx-auto max-w-3xl px-4 py-10 text-sm text-fg">Checking your application…</main>
+      </div>
+    );
+  }
+
+  if (session && session.status !== "approved") {
+    return (
+      <div className="min-h-screen">
+        <SiteHeader
+          eyebrow="Investor application"
+          action={
+            <button type="button" className={headerActionClass} onClick={() => void signOut()}>
+              Sign out
+            </button>
+          }
+        />
+        <AppCover />
+        <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+          <section className="rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10">
+            <p className="text-xs font-semibold tracking-widest text-primary uppercase">
+              {session.status === "hold" ? "On hold" : "In review"}
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold">Application sent</h1>
+            <p className="mx-auto mt-3 max-w-md text-fg">
+              {session.name}, your application is with the desk. Your investor portal opens when it is approved.
+            </p>
+            <p className="mt-6 text-sm text-fg">
+              {session.accountType}
+              <br />
+              {session.email}
+            </p>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  if (submitted) {
+    return (
+      <div className="min-h-screen">
+        <SiteHeader
+          eyebrow="Investor application"
+          action={
+            <Link to="/login" className={headerActionClass}>
+              Sign in
+            </Link>
+          }
+        />
+        <AppCover />
+        <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+          <section className="rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10">
+            <span className="mx-auto mb-5 flex size-14 items-center justify-center rounded-full bg-soft text-primary">
+              <ShieldCheck className="size-7" aria-hidden="true" />
+            </span>
+            <p className="text-xs font-semibold tracking-widest text-primary uppercase">Submitted</p>
+            <h1 className="mt-2 text-3xl font-semibold">Application received</h1>
+            <p className="mx-auto mt-3 max-w-md text-fg">
+              {form.firstName}, sign in with the email and password from this application. The investor portal opens
+              after the desk approves it.
+            </p>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen">
+      <SiteHeader
+        eyebrow="Investor application"
+        action={
+          <Link to="/login" className={headerActionClass}>
+            Sign in
+          </Link>
+        }
+      />
+      <AppCover />
+      <main className="mx-auto my-6 max-w-3xl rounded-lg border border-border bg-surface px-4 py-8 shadow-sm sm:my-10 sm:px-8 sm:py-12">
+        <header className="mb-8 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Open an account relationship</h1>
+          <p className="mx-auto mt-3 max-w-xl text-fg">
+            Complete each section in one session. Your portfolio remains unavailable until the compliance team
+            approves the application.
+          </p>
+        </header>
+
+        <div className="mb-8">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm font-semibold text-step">
+              Step {step + 1} of {STEP_NAMES.length}
+            </p>
+            <p className="text-sm text-fg">{Math.round(percent)}%</p>
+          </div>
+          <p className="mt-1 text-lg font-semibold text-primary">{STEP_NAMES[step]}</p>
+          <div className="relative mt-3 h-1.5 overflow-hidden rounded-full bg-step-track" aria-hidden="true">
+            <div className="progress-fill relative h-full rounded-full bg-step-fill" style={{ width: `${percent}%` }} />
+          </div>
+          <ol className="mt-4 flex items-center justify-between gap-1">
+            {STEP_NAMES.map((name, index) => {
+              const done = index < step;
+              const active = index === step;
+              return (
+                <li key={name} className={index < STEP_NAMES.length - 1 ? "flex flex-1 items-center" : "shrink-0"}>
+                  <button
+                    type="button"
+                    className={
+                      "flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold " +
+                      (active ? "bg-step text-on-primary" : done ? "bg-step-done text-on-primary" : "bg-step-idle text-step")
+                    }
+                    aria-current={active ? "step" : undefined}
+                    aria-label={name}
+                    disabled={index > step}
+                    onClick={() => index < step && go(index)}
+                  >
+                    {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
+                  </button>
+                  {index < STEP_NAMES.length - 1 ? (
+                    <span className={"mx-1 h-0.5 flex-1 rounded-full " + (index < step ? "bg-step-done" : "bg-step-idle")} aria-hidden="true" />
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        <div ref={cardRef}>
+          {errors.length > 0 ? (
+            <div className="mb-6 rounded-md bg-danger-bg px-4 py-3 text-sm text-danger" role="alert">
+              <p className="font-semibold">Check the following fields:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {errors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div key={step} className="step-enter">
+            {step === 0 ? <Prepare /> : null}
+            {step === 1 ? (
+              <div className="grid gap-10">
+                <Account form={form} patch={patch} />
+                <Personal form={form} patch={patch} />
+              </div>
+            ) : null}
+            {step === 2 ? <Address form={form} patch={patch} /> : null}
+            {step === 3 ? (
+              <div className="grid gap-10">
+                <Financial form={form} patch={patch} />
+                <Funding form={form} patch={patch} />
+              </div>
+            ) : null}
+            {step === 4 ? <Documents form={form} patch={patch} /> : null}
+            {step === 5 ? <Declarations form={form} patch={patch} /> : null}
+          </div>
+          <div className="mt-8 flex items-center justify-between gap-3">
+            {step > 0 ? (
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center gap-1 rounded-md border border-border px-5 py-3 font-semibold text-primary"
+                onClick={() => go(step - 1)}
+              >
+                <ChevronLeft className="size-4" aria-hidden="true" />
+                Back
+              </button>
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              className="min-h-11 rounded-md bg-action px-6 py-3 font-semibold text-on-primary hover:bg-action-deep"
+              onClick={() => void onContinue()}
+            >
+              {step === STEP_NAMES.length - 1 ? "Submit application" : "Continue"}
+            </button>
+          </div>
+        </div>
+        <p className="mt-6 text-center text-sm text-fg">
+          Keep this page open until your application has been submitted.{" "}
+          <Link to="/login" className="font-semibold text-primary underline">
+            Return to sign in
+          </Link>
+        </p>
+      </main>
+    </div>
+  );
+}
+
+function SectionIntro({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
+  return (
+    <div className="mb-6">
+      <p className="text-xs font-semibold tracking-widest text-primary uppercase">{eyebrow}</p>
+      <h2 className="mt-2 text-2xl font-semibold">{title}</h2>
+      <p className="mt-2 text-fg">{body}</p>
+    </div>
+  );
+}
+
+function Prepare() {
+  return (
+    <div>
+      <SectionIntro
+        eyebrow="Preparation"
+        title="Before you begin"
+        body="You will need the following to complete the application in one session."
+      />
+      <ul className="grid gap-4">
+        {PREPARE.map((item) => (
+          <li key={item.title} className="flex gap-3 rounded-md border border-border px-4 py-3">
+            <item.icon className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden="true" />
+            <span>
+              <span className="block font-semibold text-primary">{item.title}</span>
+              <span className="text-sm text-fg">{item.body}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Account({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  return (
+    <div className="grid gap-5">
+      <SectionIntro
+        eyebrow="Section"
+        title="Account and contact"
+        body="Choose the legal account structure and create the primary holder’s access."
+      />
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">Account type</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {ACCOUNT_TYPES.map((type) => (
+            <label key={type} className="flex min-h-11 items-center gap-3 rounded-md border border-border px-4 py-3">
+              <input type="radio" name="accountType" checked={form.accountType === type} onChange={() => patch("accountType", type)} />
+              {type}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="First name">
+          <input className={controlClass} value={form.firstName} onChange={(event) => patch("firstName", event.target.value)} />
+        </Field>
+        <Field label="Middle name">
+          <input className={controlClass} value={form.middleName} onChange={(event) => patch("middleName", event.target.value)} />
+        </Field>
+      </div>
+      <Field label="Surname">
+        <input className={controlClass} value={form.surname} onChange={(event) => patch("surname", event.target.value)} />
+      </Field>
+      <Field label="Email address">
+        <input type="email" className={controlClass} value={form.email} onChange={(event) => patch("email", event.target.value)} />
+      </Field>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <SelectField label="Telephone country" value={form.phoneCountry} options={PHONE_COUNTRIES} onChange={(value) => patch("phoneCountry", value as FormState["phoneCountry"])} />
+        <Field label="Telephone number">
+          <input className={controlClass} value={form.phone} onChange={(event) => patch("phone", event.target.value)} />
+        </Field>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Password" hint="At least 8 characters. This becomes your portal sign-in.">
+          <input type="password" className={controlClass} value={form.password} onChange={(event) => patch("password", event.target.value)} />
+        </Field>
+        <Field label="Confirm password">
+          <input type="password" className={controlClass} value={form.confirmPassword} onChange={(event) => patch("confirmPassword", event.target.value)} />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function Personal({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  return (
+    <div className="grid gap-5">
+      <SectionIntro eyebrow="Section" title="Personal information" body="Provide information exactly as it appears on official records." />
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">Date of birth</legend>
+        <div className="grid grid-cols-3 gap-3">
+          <select className={controlClass} value={form.dobMonth} onChange={(event) => patch("dobMonth", event.target.value)}>
+            <option value="">Month</option>
+            {MONTHS.map((month) => (
+              <option key={month}>{month}</option>
+            ))}
+          </select>
+          <select className={controlClass} value={form.dobDay} onChange={(event) => patch("dobDay", event.target.value)}>
+            <option value="">Day</option>
+            {DAYS.map((day) => (
+              <option key={day}>{day}</option>
+            ))}
+          </select>
+          <select className={controlClass} value={form.dobYear} onChange={(event) => patch("dobYear", event.target.value)}>
+            <option value="">Year</option>
+            {YEARS.map((year) => (
+              <option key={year}>{year}</option>
+            ))}
+          </select>
+        </div>
+      </fieldset>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <SelectField label="Nationality" value={form.nationality} options={COUNTRIES} onChange={(value) => patch("nationality", value)} />
+        <SelectField label="Country of residence" value={form.residence} options={COUNTRIES} onChange={(value) => patch("residence", value)} />
+      </div>
+      <SelectField label="Occupation" value={form.occupation} options={OCCUPATIONS} placeholder="Select occupation" onChange={(value) => patch("occupation", value)} />
+    </div>
+  );
+}
+
+function Address({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  const unitedStates = form.country === "United States";
+  return (
+    <div className="grid gap-5">
+      <SectionIntro eyebrow="Section" title="Address and tax" body="Provide your residential address and tax residency information." />
+      <Field label="Street address">
+        <input className={controlClass} value={form.street} onChange={(event) => patch("street", event.target.value)} />
+      </Field>
+      <Field label="Apartment or suite">
+        <input className={controlClass} value={form.apt} onChange={(event) => patch("apt", event.target.value)} />
+      </Field>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="City">
+          <input className={controlClass} value={form.city} onChange={(event) => patch("city", event.target.value)} />
+        </Field>
+        {unitedStates ? (
+          <SelectField label="State" value={form.region} options={US_STATES} placeholder="Select state" onChange={(value) => patch("region", value)} />
+        ) : (
+          <Field label="State or region">
+            <input className={controlClass} value={form.region} onChange={(event) => patch("region", event.target.value)} />
+          </Field>
+        )}
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Postal code">
+          <input className={controlClass} value={form.postal} onChange={(event) => patch("postal", event.target.value)} />
+        </Field>
+        <SelectField label="Country" value={form.country} options={COUNTRIES} onChange={(value) => patch("country", value)} />
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <SelectField label="Tax residence" value={form.taxResidence} options={COUNTRIES} onChange={(value) => patch("taxResidence", value)} />
+        <Field label="Taxpayer identification number">
+          <input className={controlClass} value={form.taxId} onChange={(event) => patch("taxId", event.target.value)} />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function Financial({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  return (
+    <div className="grid gap-5">
+      <SectionIntro eyebrow="Section" title="Financial profile" body="Tell us about your sources of wealth and investment objectives." />
+      <SelectField label="Source of wealth" value={form.sourceOfWealth} options={WEALTH_SOURCES} placeholder="Select a source" onChange={(value) => patch("sourceOfWealth", value)} />
+      <SelectField label="Source of funds" value={form.sourceOfFunds} options={FUND_SOURCES} placeholder="Select a source" onChange={(value) => patch("sourceOfFunds", value)} />
+      <SelectField label="Investment purpose" value={form.investmentPurpose} options={PURPOSES} placeholder="Select a purpose" onChange={(value) => patch("investmentPurpose", value)} />
+      <SelectField label="Estimated net worth" value={form.netWorth} options={NET_WORTH} placeholder="Select a range" onChange={(value) => patch("netWorth", value)} />
+    </div>
+  );
+}
+
+function Documents({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  return (
+    <div className="grid gap-5">
+      <SectionIntro eyebrow="Section" title="Verification documents" body="Choose the document types and attach files for identity and address verification." />
+      <SelectField label="Identity document" value={form.idType} options={ID_TYPES} onChange={(value) => patch("idType", value as FormState["idType"])} />
+      <Field label="Identity file" hint={form.idFileName || "PDF or image"}>
+        <input
+          type="file"
+          className={controlClass}
+          onChange={(event) => patch("idFileName", event.target.files?.[0]?.name ?? "")}
+        />
+      </Field>
+      <SelectField label="Proof of address" value={form.addressDocType} options={ADDRESS_DOCS} onChange={(value) => patch("addressDocType", value as FormState["addressDocType"])} />
+      <Field label="Address file" hint={form.addressFileName || "PDF or image"}>
+        <input
+          type="file"
+          className={controlClass}
+          onChange={(event) => patch("addressFileName", event.target.files?.[0]?.name ?? "")}
+        />
+      </Field>
+    </div>
+  );
+}
+
+function Funding({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  return (
+    <div className="grid gap-5">
+      <SectionIntro eyebrow="Section" title="Funding information" body="Please confirm the details of the bank that you will be making payment from." />
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Bank name *">
+          <input className={controlClass} value={form.bankName} onChange={(event) => patch("bankName", event.target.value)} />
+        </Field>
+        <Field label="Account holder's name *">
+          <input className={controlClass} value={form.accountHolder} onChange={(event) => patch("accountHolder", event.target.value)} />
+        </Field>
+      </div>
+      <div className="grid gap-5 border-t border-border pt-5">
+        <p className="text-sm font-medium">Bank address and postcode</p>
+        <Field label="Street address">
+          <input className={controlClass} value={form.bankStreet} onChange={(event) => patch("bankStreet", event.target.value)} />
+        </Field>
+        <Field label="Address line 2">
+          <input className={controlClass} value={form.bankLine2} onChange={(event) => patch("bankLine2", event.target.value)} />
+        </Field>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="City">
+            <input className={controlClass} value={form.bankCity} onChange={(event) => patch("bankCity", event.target.value)} />
+          </Field>
+          <SelectField label="State" value={form.bankState} options={US_STATES} placeholder="Select state" onChange={(value) => patch("bankState", value)} />
+        </div>
+        <Field label="ZIP code">
+          <input className={controlClass} value={form.bankZip} onChange={(event) => patch("bankZip", event.target.value)} />
+        </Field>
+      </div>
+      <div className="grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
+        <Field label="Routing number *">
+          <input className={controlClass} inputMode="numeric" value={form.routingNumber} onChange={(event) => patch("routingNumber", event.target.value)} />
+        </Field>
+        <Field label="Account number *">
+          <input className={controlClass} inputMode="numeric" value={form.accountNumber} onChange={(event) => patch("accountNumber", event.target.value)} />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function Declarations({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  return (
+    <div className="grid gap-5">
+      <SectionIntro eyebrow="Section" title="Declarations" body="Review each statement, then sign. This signature is used on your account documents." />
+      {DECLARATIONS.map((item) => (
+        <label key={item.key} className="flex min-h-11 items-start gap-3 rounded-md border border-border px-4 py-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={form[item.key]}
+            onChange={(event) => patch(item.key, event.target.checked)}
+          />
+          <span>{item.label}</span>
+        </label>
+      ))}
+      <div>
+        <p className="text-sm font-medium">Signature</p>
+        <p className="mt-1 text-sm text-fg">Draw the signature that will appear on your certificates.</p>
+        {form.signature ? (
+          <img src={form.signature} alt="Your signature" className="mt-3 h-32 w-full rounded-md border border-border bg-white object-contain" />
+        ) : (
+          <SignaturePad onChange={(value) => patch("signature", value ?? "")} />
+        )}
+        {form.signature ? (
+          <button type="button" className="mt-1 text-sm font-semibold text-primary" onClick={() => patch("signature", "")}>
+            Clear
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/login?redirectTo=%2F",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Sign in · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 193,
+      "bodyTextHash": "08382b640612fa8dbac9396cabc3e820ccb029146f06eb1500713b54c3717d89",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR ACCESS Sign in Enter your credentials t",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/btn-login.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Sign in · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 193,
+      "bodyTextHash": "08382b640612fa8dbac9396cabc3e820ccb029146f06eb1500713b54c3717d89",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR ACCESS Sign in Enter your credentials t",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/btn-login-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/btn-login.json"
+}

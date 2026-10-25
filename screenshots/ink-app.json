@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/application",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Application · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 813,
+      "bodyTextHash": "e1b5e3f193d4d1a5a928e7ba6391c807de918a1222159bf909133463b3a49d1c",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR APPLICATION Open an account relationshi",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/ink-app.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Application · Account Holding",
+      "hasCanvas": false,
+      "bodyTextLen": 702,
+      "bodyTextHash": "7d882ecf1fa63849024129c5ba889b644b8d8ef93e8cfd11cbc8fd1f7b440050",
+      "bodyTextPrefix": "ACCOUNT HOLDING INVESTOR APPLICATION Open an account relationshi",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/ink-app-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/ink-app.json"
+}
