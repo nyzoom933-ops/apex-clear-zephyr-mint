@@ -125,7 +125,7 @@ export function SiteHeader({ eyebrow, action }: { eyebrow: string; action?: Reac
           ) : (
             <p className="text-sm font-bold tracking-wide text-primary">{name.toUpperCase()}</p>
           )}
-          <p className="text-xs font-semibold tracking-widest text-action uppercase">{eyebrow}</p>
+          <p className="mt-2 text-xs font-semibold tracking-widest text-action uppercase">{eyebrow}</p>
         </div>
         {action}
       </div>

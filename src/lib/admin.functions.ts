@@ -1498,14 +1498,30 @@ export const listMyNotifications = createServerFn({ method: "GET" }).handler(asy
   const { ensureMailColumn } = await import("@/lib/mail.server");
   const sql = await getSql();
   await ensureMailColumn(sql);
-  const rows = await sql<{ id: string; created_at: string; subject: string; body: string; html: string; step: string }>`
-    select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at, subject, body, html, step
+  const rows = await sql<{ id: string; created_at: string; subject: string; read_at: string | null }>`
+    select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at, subject, read_at
     from notifications
     where audience = 'client' and lower(recipient) = ${email.toLowerCase()}
     order by created_at desc
     limit 50
   `;
-  return rows.map((row) => ({ id: row.id, createdAt: row.created_at, subject: row.subject, body: row.body, html: row.html ?? "", step: row.step }));
+  return rows.map((row) => ({ id: row.id, createdAt: row.created_at, subject: row.subject, unread: !row.read_at }));
+});
+
+export const markMyNotificationsRead = createServerFn({ method: "POST" }).handler(async () => {
+  const { getCookie } = await import("@tanstack/react-start/server");
+  const email = getCookie("ah_investor");
+  if (!email) throw new Error("Sign in required.");
+  const { getSql } = await import("@/lib/db");
+  const { ensureMailColumn } = await import("@/lib/mail.server");
+  const sql = await getSql();
+  await ensureMailColumn(sql);
+  await sql`
+    update notifications
+    set read_at = now()
+    where audience = 'client' and lower(recipient) = ${email.toLowerCase()} and read_at is null
+  `;
+  return { ok: true };
 });
 
 

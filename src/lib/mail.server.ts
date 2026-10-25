@@ -9,6 +9,7 @@ const ADMIN_EMAIL = "admin@accountholding.com";
 
 export async function ensureMailColumn(sql: Sql) {
   await sql`alter table notifications add column if not exists html text not null default ''`;
+  await sql`alter table notifications add column if not exists read_at timestamptz`;
 }
 
 export async function notifyStep(

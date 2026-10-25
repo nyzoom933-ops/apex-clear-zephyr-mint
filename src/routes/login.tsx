@@ -143,11 +143,6 @@ function LoginPage() {
           Begin an application
         </Link>
       </p>
-      <p className="mt-3 text-center text-sm">
-        <Link to="/admin" className="font-semibold text-primary">
-          Operations desk
-        </Link>
-      </p>
       </div>
     </main>
     </div>

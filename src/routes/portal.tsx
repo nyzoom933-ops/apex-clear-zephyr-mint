@@ -1,10 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { BadgePercent, Banknote, CalendarClock, CalendarRange, Check, Landmark, LayoutDashboard, Lock, Mail, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
+import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { headerActionClass, SiteHeader } from "@/components/site-header";
-import { cancelFunding, downloadInvestmentPdf, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
+import { cancelFunding, downloadInvestmentPdf, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
 import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, promoMonths, type PromoOffer } from "@/lib/promo";
 
 export const Route = createFileRoute("/portal")({
@@ -49,9 +49,12 @@ function PortalPage() {
       <SiteHeader
         eyebrow="Investor portal"
         action={
-          <button type="button" className={headerActionClass} onClick={() => void signOut()}>
-            Sign out
-          </button>
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <button type="button" className={headerActionClass} onClick={() => void signOut()}>
+              Sign out
+            </button>
+          </div>
         }
       />
       <main className="mx-auto max-w-6xl px-4 py-8">
@@ -65,7 +68,7 @@ function PortalPage() {
   );
 }
 
-type PortalTab = "dashboard" | "active" | "investments" | "fund" | "manage" | "messages";
+type PortalTab = "dashboard" | "active" | "investments" | "fund" | "manage";
 
 const PromoContext = createContext<PromoOffer>(EMPTY_PROMO);
 
@@ -79,7 +82,6 @@ const PORTAL_TABS: { id: PortalTab; label: string; icon: LucideIcon }[] = [
   { id: "investments", label: "Investments", icon: Wallet },
   { id: "fund", label: "Add investment", icon: Plus },
   { id: "manage", label: "Manage", icon: SlidersHorizontal },
-  { id: "messages", label: "Messages", icon: Mail },
 ];
 
 function PortalMenu({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalTab) => void }) {
@@ -93,37 +95,52 @@ function PortalMenu({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalT
 
   return (
     <div className="relative border-b border-border">
-      <div className="flex items-center justify-between py-2 md:hidden">
-        <p className="flex items-center gap-2 text-sm font-semibold text-primary">
-          <current.icon className="menu-icon size-4 text-action" aria-hidden="true" />
-          {current.label}
-        </p>
+      <div className="py-2 md:hidden">
         <button
           type="button"
-          className="inline-flex size-11 items-center justify-center rounded-md text-primary"
+          className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-1"
           aria-expanded={open}
           aria-label={open ? "Close menu" : "Open menu"}
           onClick={() => setOpen((value) => !value)}
         >
-          {open ? <X className="size-5" /> : <Menu className="size-5" />}
+          <span className="flex items-center gap-3 text-sm font-semibold text-primary">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-step-idle/40 text-action">
+              <current.icon className="size-4" aria-hidden="true" />
+            </span>
+            {current.label}
+          </span>
+          <span className="flex size-9 items-center justify-center rounded-lg border border-border bg-surface text-primary">
+            {open ? <X className="size-4" /> : <Menu className="size-4" />}
+          </span>
         </button>
       </div>
       {open ? (
-        <ul className="menu-drop absolute inset-x-0 top-full z-20 border-b border-border bg-surface shadow-lg md:hidden">
-          {PORTAL_TABS.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className={"menu-link flex min-h-11 w-full items-center gap-3 px-1 text-sm " + (tab === item.id ? "font-semibold text-action" : "text-primary")}
-                aria-current={tab === item.id ? "page" : undefined}
-                onClick={() => choose(item.id)}
-              >
-                <item.icon className="menu-icon size-4" aria-hidden="true" />
-                {item.label}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <button type="button" className="fixed inset-0 z-20 bg-primary/20 md:hidden" aria-label="Close menu" onClick={() => setOpen(false)} />
+          <ul className="menu-drop absolute inset-x-0 top-full z-30 grid gap-1 rounded-xl border border-border bg-surface p-2 shadow-lg md:hidden">
+            {PORTAL_TABS.map((item) => {
+              const selected = tab === item.id;
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={
+                      "menu-link flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-sm " +
+                      (selected ? "bg-step-idle/40 font-semibold text-action" : "text-primary")
+                    }
+                    aria-current={selected ? "page" : undefined}
+                    onClick={() => choose(item.id)}
+                  >
+                    <span className={"flex size-8 items-center justify-center rounded-md " + (selected ? "bg-surface text-action" : "bg-bg text-primary")}>
+                      <item.icon className="menu-icon size-4" aria-hidden="true" />
+                    </span>
+                    {item.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       ) : null}
       <ul className="hidden gap-1 md:flex">
         {PORTAL_TABS.map((item) => {
@@ -181,8 +198,8 @@ function PortalBody({ account }: { account: PortalAccount }) {
           onView={() => setTab("investments")}
         />
       ) : null}
-      {tab === "active" ? <ActiveCds positions={holdings} account={account} /> : null}
-      {tab === "investments" ? <InvestmentList positions={pipeline} onSigned={() => void refresh()} /> : null}
+      {tab === "active" ? <ActiveCds positions={holdings} waiting={pipeline.length} account={account} onAdd={() => setTab("fund")} /> : null}
+      {tab === "investments" ? <InvestmentList positions={pipeline} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
       {tab === "fund" ? (
         <FundingPanel
           onSubmitted={() => {
@@ -192,8 +209,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
           }}
         />
       ) : null}
-      {tab === "manage" ? <ManageInvestments positions={positions} onChanged={() => void refresh()} /> : null}
-      {tab === "messages" ? <Messages /> : null}
+      {tab === "manage" ? <ManageInvestments positions={positions} onAdd={() => setTab("fund")} onChanged={() => void refresh()} /> : null}
       </div>
     </PromoContext.Provider>
   );
@@ -263,7 +279,8 @@ function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
     <div className="mt-8">
       <div className="rounded-xl bg-[#f3f4f6] px-4 py-6 sm:px-6">
         <h3 className="text-center text-2xl font-semibold text-[#3d3d3d]">Browse all available CD terms</h3>
-        <div ref={scroller} className="mt-6 flex gap-3 overflow-x-auto scroll-smooth px-1 pt-4 pb-2">
+        <div ref={scroller} className="mt-6 overflow-x-auto scroll-smooth pb-2">
+          <div className="mx-auto flex w-max min-w-full items-stretch justify-center gap-3 px-1 pt-4">
           {orderedTerms.map((term) => {
             const active = term.id === selectedId;
             const promo = promoMonths(offer).includes(term.months);
@@ -274,8 +291,7 @@ function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
                 role="button"
                 tabIndex={0}
                 className={
-                  "relative mt-3 flex min-w-[220px] shrink-0 cursor-pointer flex-col rounded-xl border bg-white px-5 text-left shadow-sm " +
-                  (term.featured || promo ? "pt-16 pb-5 " : "py-6 ") +
+                  "relative mt-3 flex min-h-48 min-w-[220px] shrink-0 cursor-pointer flex-col rounded-xl border bg-white px-5 pt-16 pb-5 text-left shadow-sm " +
                   (active ? "border-[#006fcf]" : "border-[#e7e7e7]")
                 }
                 onClick={() => {
@@ -318,7 +334,7 @@ function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
                 {promo ? (
                   <button
                     type="button"
-                    className="mt-4 self-start text-left text-sm font-semibold text-[#006fcf]"
+                    className="mt-auto self-start pt-4 text-left text-sm font-semibold text-[#006fcf]"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedId(term.id);
@@ -332,6 +348,7 @@ function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
               </div>
             );
           })}
+          </div>
         </div>
         <div className="mt-4 flex items-center justify-center gap-3">
           <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Previous terms" onClick={() => move(-1)}>
@@ -871,7 +888,15 @@ function Dashboard({
     <section className="mt-6">
       <p className="text-xs font-semibold tracking-widest text-primary uppercase">Dashboard</p>
       <h1 className="mt-2 text-3xl font-semibold">Welcome, {account.payload.firstName}</h1>
-      <p className="mt-2 max-w-2xl text-fg">A certificate becomes active only after your advisor confirms the payment. Figures below use active CDs.</p>
+      <p className="mt-2 max-w-2xl text-fg">
+        {holdings.length === 0 && pipeline.length === 0
+          ? "You do not have a certificate yet."
+          : pipeline.length > 0 && holdings.length === 0
+            ? "A certificate becomes active only after your advisor confirms the payment."
+            : pipeline.length > 0
+              ? "A certificate becomes active only after your advisor confirms the payment. Figures below use active CDs."
+              : "Figures below use active CDs."}
+      </p>
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Committed" value={money(total)} icon={Wallet} />
         <Stat label="Interest to maturity" value={money(interest)} icon={Landmark} />
@@ -898,64 +923,39 @@ function Dashboard({
             <TermChart items={allocation} />
           )}
         </div>
-        <div>
-          <h2 className="text-lg font-semibold text-primary">Status</h2>
-          {waiting.length === 0 ? (
-            <p className="mt-2 text-sm text-fg">No certificates are waiting on payment.</p>
-          ) : (
-            <ul className="mt-3 grid gap-2">
-              {waiting.map((line) => (
-                <li key={line.position.id} className="rounded-md border border-border bg-surface px-3 py-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-primary">{certificateTitle(line.position, line.months, line.final)}</span>
-                    <StatusBadge status={line.position.status} />
-                  </div>
-                  <p className="mt-1 text-sm text-fg">{statusDetail(line.position)}</p>
-                </li>
-              ))}
+        <PromoBanner onAdd={onAdd} />
+        <div className="overflow-hidden rounded-lg border border-border bg-surface p-4">
+          <h2 className="text-lg font-semibold text-primary">Needs attention</h2>
+          {waiting.length === 0 ? <p className="mt-2 text-sm text-fg">Nothing is waiting on you.</p> : null}
+          {waiting.length === 0 ? null : (
+            <ul className="mt-4 grid gap-3">
+              {waiting.map((line) => {
+                const action = !line.position.signed
+                  ? "Accept terms"
+                  : line.position.status === "instructions_sent" && !line.position.paymentFileName
+                    ? "Upload payment"
+                    : "";
+                return (
+                  <li key={line.position.id} className="rounded-md border border-border px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold text-primary">{certificateTitle(line.position, line.months, line.final)}</p>
+                      <StatusBadge status={line.position.status} />
+                    </div>
+                    <p className="mt-1 text-sm text-fg">
+                      {money(line.principal)} · {line.final} final APY
+                    </p>
+                    <DealProgress step={fundStep(line.position)} />
+                    {action ? null : <p className="mt-3 text-sm text-fg">{statusDetail(line.position)}</p>}
+                    {action ? (
+                      <button type="button" className="mt-3 min-h-11 rounded-md bg-action px-5 py-2 text-sm font-semibold text-on-primary" onClick={onView}>
+                        {action}
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-primary">Needs attention</h2>
-          <div className="mt-3 overflow-hidden rounded-lg border border-border bg-surface">
-            <div className="grid sm:grid-cols-3">
-              {(
-                [
-                  ["Accept terms", toSign.length],
-                  ["Advisor call", awaitingCall.length],
-                  ["Upload payment", uploadPayment.length],
-                ] as const
-              ).map(([label, count], index) => (
-                <button
-                  key={label}
-                  type="button"
-                  className={"px-4 py-4 text-left " + (index < 2 ? "border-b border-border sm:border-r sm:border-b-0" : "")}
-                  onClick={onView}
-                >
-                  <p className="text-xs font-semibold tracking-widest text-primary uppercase">{label}</p>
-                  <p className="mt-2 text-xl font-semibold">{count}</p>
-                </button>
-              ))}
-            </div>
-            {toSign.length + awaitingCall.length + uploadPayment.length === 0 ? (
-              <p className="border-t border-border px-4 py-3 text-sm text-fg">Nothing is waiting on you.</p>
-            ) : (
-              <ul>
-                {[...toSign, ...awaitingCall, ...uploadPayment].map((line) => (
-                  <li key={line.position.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm">
-                    <span>
-                      <span className="font-semibold text-primary">{certificateTitle(line.position, line.months, line.final)}</span>
-                      <span className="mt-0.5 block text-fg">{money(line.principal)} · {line.final} final APY</span>
-                    </span>
-                    <button type="button" className="min-h-11 font-semibold text-action" onClick={onView}>
-                      {!line.position.signed ? "Accept terms" : line.position.status === "instructions_sent" ? "Upload payment" : "Advisor call"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
         </div>
       </div>
       <div className="mt-8">
@@ -963,7 +963,9 @@ function Dashboard({
         <p className="mt-1 text-sm text-fg">
           {nextMaturity?.date
             ? `Next maturity ${formatDate(nextMaturity.date)} · ${money(nextMaturity.payout)} expected.`
-            : "Active certificates appear here after payment is confirmed."}
+            : pipeline.length > 0
+              ? "Active certificates appear here after payment is confirmed."
+              : "You do not have a certificate yet."}
         </p>
         {schedule.length === 0 ? null : (
           <ul className="mt-3 grid gap-2">
@@ -990,7 +992,113 @@ function Dashboard({
           </ul>
         )}
       </div>
+      <div className="mt-8">
+        <ProtectionBanner />
+      </div>
     </section>
+  );
+}
+
+function PromoBanner({ onAdd }: { onAdd: () => void }) {
+  const offer = usePromo();
+  const [terms, setTerms] = useState<CdTerm[]>([]);
+  useEffect(() => {
+    void getCdTerms().then(setTerms).catch(() => setTerms([]));
+  }, []);
+  const panes = terms
+    .map((term) => ({ term, tiers: offer.tiers.filter((tier) => tier.months.includes(term.months)) }))
+    .filter((pane) => pane.tiers.length > 0);
+  return (
+    <article className="relative overflow-hidden rounded-xl border border-border">
+      <img src="/dash-promo.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
+      <div className="absolute inset-0 bg-white/55" />
+      <div className="relative flex h-full min-h-72 flex-col p-6">
+        <p className="text-xs font-semibold tracking-widest text-action uppercase">Best current promo</p>
+        <h2 className="mt-2 text-2xl font-semibold text-primary">Give the next dollar a stronger rate.</h2>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {panes.length === 0 ? <p className="text-sm text-fg">Selected terms include a new-money bonus for a limited time.</p> : null}
+          {panes.map((pane) => (
+            <div key={pane.term.id} className="rounded-lg border border-border bg-white/85 px-3 py-3">
+              <p className="text-sm font-semibold text-primary">{pane.term.months}-month</p>
+              <p className="text-xs text-fg">{pane.term.apy.includes("APY") ? pane.term.apy : `${pane.term.apy} APY`} base</p>
+              <ul className="mt-2 divide-y divide-border text-sm">
+                {pane.tiers.map((tier) => (
+                  <li key={tier.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <span>{amountRange(tier)}</span>
+                    <span className="font-semibold text-primary">{formatBonus(tier.bonusPercent)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <button type="button" className="mt-5 min-h-11 w-fit rounded-md bg-action px-5 py-2 font-semibold text-on-primary" onClick={onAdd}>
+          Add investment
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function ProtectionBanner() {
+  return (
+    <article className="relative min-h-48 overflow-hidden rounded-xl border border-border">
+      <img src="/dash-shield.jpg" alt="" className="absolute inset-0 h-full w-full object-cover" />
+      <div className="absolute inset-0 bg-white/50" />
+      <div className="relative p-6">
+        <p className="text-xs font-semibold tracking-widest text-action uppercase">Your protection</p>
+        <h2 className="mt-2 max-w-sm text-2xl font-semibold text-primary">The principal stays covered.</h2>
+        <p className="mt-3 max-w-xl text-sm leading-6 text-fg">
+          FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. The certificate is non-callable, so the rate holds for the full term.
+        </p>
+      </div>
+    </article>
+  );
+}
+
+function EmptyBanners({ onAdd }: { onAdd: () => void }) {
+  return (
+    <div className="mt-6 grid gap-4">
+      <PromoBanner onAdd={onAdd} />
+      <ProtectionBanner />
+    </div>
+  );
+}
+
+const DEAL_STEPS = ["Accept terms", "Advisor call", "Upload payment"];
+
+function DealProgress({ step }: { step: number }) {
+  const percent = Math.min(100, ((Math.min(step, DEAL_STEPS.length - 1) + 1) / DEAL_STEPS.length) * 100);
+  return (
+    <div className="mt-3">
+      <div className="relative h-1.5 overflow-hidden rounded-full bg-step-track" aria-hidden="true">
+        <div className="progress-fill relative h-full rounded-full bg-step-fill" style={{ width: `${percent}%` }} />
+      </div>
+      <ol className="mt-3 flex items-start">
+        {DEAL_STEPS.map((label, index) => {
+          const done = index < step;
+          const active = index === step;
+          return (
+            <li key={label} className={index < DEAL_STEPS.length - 1 ? "flex min-w-0 flex-1 items-center" : "shrink-0"}>
+              <div className="flex min-w-0 flex-col items-center gap-1">
+                <span
+                  className={
+                    "flex size-7 items-center justify-center rounded-full text-xs font-semibold " +
+                    (active ? "bg-step text-on-primary" : done ? "bg-step-done text-on-primary" : "bg-step-idle text-step")
+                  }
+                >
+                  {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
+                </span>
+                <span className={"max-w-16 text-center text-[11px] leading-tight " + (active ? "font-semibold text-step" : "text-fg")}>{label}</span>
+              </div>
+              {index < DEAL_STEPS.length - 1 ? (
+                <span className={"mx-1 mb-4 h-0.5 flex-1 rounded-full " + (done ? "bg-step-done" : "bg-step-idle")} aria-hidden="true" />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
@@ -1003,13 +1111,20 @@ function StatusBadge({ status }: { status: FundingPosition["status"] }) {
   );
 }
 
-function ActiveCds({ positions, account }: { positions: FundingPosition[]; account: PortalAccount }) {
+function ActiveCds({ positions, waiting, account, onAdd }: { positions: FundingPosition[]; waiting: number; account: PortalAccount; onAdd: () => void }) {
+  const empty = positions.length === 0;
   return (
     <section className="mt-6">
       <h1 className="text-3xl font-semibold">Active CDs ({positions.length})</h1>
-      <p className="mt-2 text-fg">These certificates are active because your advisor confirmed the payment.</p>
-      {positions.length === 0 ? (
-        <p className="mt-4 text-sm text-fg">No active CDs yet.</p>
+      <p className="mt-2 text-fg">
+        {empty
+          ? waiting > 0
+            ? "You do not have an active certificate yet. A CD appears here after your advisor confirms the payment."
+            : "You do not have an active certificate yet."
+          : "These certificates are active because your advisor confirmed the payment."}
+      </p>
+      {empty ? (
+        <EmptyBanners onAdd={onAdd} />
       ) : (
         <ul className="mt-4 grid gap-4">
           {positions.map((position) => (
@@ -1107,13 +1222,17 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function InvestmentList({ positions, onSigned }: { positions: FundingPosition[]; onSigned: () => void }) {
+function InvestmentList({ positions, onAdd, onSigned }: { positions: FundingPosition[]; onAdd: () => void; onSigned: () => void }) {
   return (
     <section className="mt-6">
       <h1 className="text-3xl font-semibold">Investments</h1>
-      <p className="mt-2 text-fg">Certificates still being opened. They move to Active CDs after your advisor confirms payment.</p>
+      <p className="mt-2 text-fg">
+        {positions.length === 0
+          ? "You do not have a certificate in progress."
+          : "Certificates still being opened. They move to Active CDs after your advisor confirms payment."}
+      </p>
       {positions.length === 0 ? (
-        <p className="mt-4 text-sm text-fg">Nothing to show yet.</p>
+        <EmptyBanners onAdd={onAdd} />
       ) : (
         <ul className="mt-4 grid gap-3">
           {positions.map((position) => (
@@ -1496,38 +1615,79 @@ function SheetTable({ title, rows }: { title: string; rows: [string, string][] }
   );
 }
 
-function Messages() {
-  const [rows, setRows] = useState<Array<{ id: string; createdAt: string; subject: string; body: string; html: string }>>([]);
+function NotificationBell() {
+  const root = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<Array<{ id: string; createdAt: string; subject: string; unread: boolean }>>([]);
   const [error, setError] = useState("");
+  const unread = rows.some((row) => row.unread);
 
   useEffect(() => {
     void listMyNotifications()
       .then(setRows)
-      .catch(() => setError("Messages could not be loaded."));
+      .catch(() => setError("Notifications could not be loaded."));
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: MouseEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (!next || !rows.some((row) => row.unread)) return;
+    try {
+      await markMyNotificationsRead();
+      setRows((current) => current.map((row) => ({ ...row, unread: false })));
+    } catch {
+      setError("Notifications could not be updated.");
+    }
+  }
+
   return (
-    <section className="mt-6">
-      <h1 className="text-3xl font-semibold">Messages</h1>
-      <p className="mt-2 text-fg">Notes sent to you as an application or certificate moves forward.</p>
-      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
-      {rows.length === 0 && !error ? <p className="mt-4 text-sm text-fg">No messages yet.</p> : null}
-      <ul className="mt-4 grid gap-3">
-        {rows.map((row) => (
-          <li key={row.id} className="rounded-md border border-border bg-surface px-4 py-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <p className="font-semibold text-primary">{row.subject}</p>
-              <p className="text-xs text-fg">{row.createdAt} UTC</p>
-            </div>
-            {row.html ? <iframe title={row.subject} srcDoc={row.html} className="mt-3 h-72 w-full rounded-md border border-border bg-white" /> : <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{row.body}</p>}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <div className="relative" ref={root}>
+      <button
+        type="button"
+        className="relative inline-flex size-11 items-center justify-center rounded-md border border-border bg-surface text-primary"
+        aria-label={unread ? "Notifications, unread" : "Notifications"}
+        aria-expanded={open}
+        onClick={() => void toggle()}
+      >
+        <Bell className="size-5" aria-hidden="true" />
+        {unread ? <span className="absolute top-2 right-2 size-2 rounded-full bg-[#e23b3b]" /> : null}
+      </button>
+      {open ? (
+        <div className="fixed inset-x-4 top-24 z-40 max-h-[70vh] overflow-hidden rounded-md border border-border bg-surface shadow-lg sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 sm:w-80">
+          <p className="border-b border-border px-3 py-2 text-sm font-semibold text-primary">Notifications</p>
+          {error ? <p className="px-3 py-3 text-sm text-danger">{error}</p> : null}
+          {rows.length === 0 && !error ? <p className="px-3 py-3 text-sm text-fg">No notifications yet.</p> : null}
+          <ul className="max-h-80 overflow-y-auto">
+            {rows.map((row) => (
+              <li key={row.id} className="grid gap-0.5 border-b border-border px-3 py-2 text-sm last:border-b-0">
+                <span className="text-fg">{row.subject}</span>
+                <span className="text-xs text-fg">{row.createdAt.slice(5)} UTC</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
-function ManageInvestments({ positions, onChanged }: { positions: FundingPosition[]; onChanged: () => void }) {
+function ManageInvestments({ positions, onAdd, onChanged }: { positions: FundingPosition[]; onAdd: () => void; onChanged: () => void }) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -1547,10 +1707,14 @@ function ManageInvestments({ positions, onChanged }: { positions: FundingPositio
   return (
     <section className="mt-6">
       <h1 className="text-3xl font-semibold">Manage</h1>
-      <p className="mt-2 text-fg">Review each certificate and cancel one that is still awaiting an advisor.</p>
+      <p className="mt-2 text-fg">
+        {positions.length === 0
+          ? "You do not have a certificate to manage."
+          : "Review each certificate and cancel one that is still awaiting an advisor."}
+      </p>
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
       {positions.length === 0 ? (
-        <p className="mt-4 text-sm text-fg">No investments to manage.</p>
+        <EmptyBanners onAdd={onAdd} />
       ) : (
         <ul className="mt-4 grid gap-3">
           {positions.map((position) => (
