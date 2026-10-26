@@ -23,7 +23,8 @@ export async function runBackup() {
   try {
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const to = (await readSetting(sql, "backup_email")) || env("BACKUP_EMAIL") || env("ADMIN_EMAIL") || ADMIN_EMAIL;
+    const desk = await sql<{ value: string }>`select value from site_settings where key = 'desk_email'`;
+    const to = (await readSetting(sql, "backup_email")) || desk[0]?.value?.trim() || env("BACKUP_EMAIL") || env("ADMIN_EMAIL") || ADMIN_EMAIL;
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
     const dump = await dumpDatabase(sql);
     const zip = zipStore(`database-${stamp}.sql`, Buffer.from(dump, "utf8"));

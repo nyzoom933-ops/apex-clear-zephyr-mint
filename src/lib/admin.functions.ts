@@ -6,6 +6,7 @@ import type { Sql } from "@/lib/db";
 import { isWorkspacePreview } from "@/lib/env.server";
 import type { MailStep } from "@/lib/mail.server";
 import { formatBonus, matchTier, type PromoOffer, type PromoTier } from "@/lib/promo";
+import { resolveInvoiceBilling, type InvoiceBilling } from "@/lib/invoice-billing";
 
 export type ApplicationPayload = Omit<FormState, "password" | "confirmPassword">;
 
@@ -255,6 +256,22 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
     }
     await sql`delete from investor_users where application_id = ${data.id}`;
     return { ok: true as const, loginEmail: null };
+  });
+
+export const signInAsClient = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ email: string; status: string }>`
+      select email, status from applications where id = ${data.id}
+    `;
+    if (!rows[0] || rows[0].status !== "approved") throw new Error("Only an approved client can be opened.");
+    const email = String(rows[0].email).trim().toLowerCase();
+    const { setCookie } = await import("@tanstack/react-start/server");
+    setCookie("ah_investor", email, cookieOptions(60 * 60 * 12));
+    return { ok: true as const };
   });
 
 export const investorLogin = createServerFn({ method: "POST" })
@@ -901,7 +918,7 @@ export const cancelFunding = createServerFn({ method: "POST" })
 
 export type Advisor = { id: string; name: string; phone: string; email: string };
 
-export type AdminFunding = FundingPosition & { email: string; advisorId: string };
+export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling };
 
 export const listAdvisors = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
@@ -937,10 +954,15 @@ export const deleteAdvisor = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+async function ensureInvoiceBillingColumn(sql: Sql) {
+  await sql`alter table fundings add column if not exists invoice_billing jsonb not null default '{}'::jsonb`;
+}
+
 export const listFundings = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
+  await ensureInvoiceBillingColumn(sql);
   const { ensureDemoApplications } = await import("@/lib/seed-applications.server");
   await ensureDemoApplications(sql);
   const rows = await sql<{
@@ -972,6 +994,7 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
     account_number: string;
     reference_number: string;
     payment_file_name: string;
+    invoice_billing: unknown;
     created_at: string;
   }>`
     select f.id, f.email, f.type_id, t.name, t.issuer, t.structure, t.currency, t.jurisdiction,
@@ -983,7 +1006,7 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
            to_char(f.signed_at at time zone 'UTC', 'YYYY-MM-DD') as signed_on,
            to_char(coalesce(f.payment_uploaded_at, f.created_at) at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
            f.deposit_code, f.deposit_number, f.account_number, f.reference_number,
-           f.payment_file_name,
+           f.payment_file_name, f.invoice_billing,
            to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at
     from fundings f
     join investment_types t on t.id = f.type_id
@@ -1020,6 +1043,7 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
     referenceNumber: row.reference_number ?? "",
     paymentFileName: row.payment_file_name ?? "",
     createdAt: row.created_at,
+    billing: resolveInvoiceBilling(row.invoice_billing, row.signer_name || row.email, row.reference_number ?? ""),
   }));
 });
 
@@ -1101,7 +1125,7 @@ export const uploadPaymentConfirmation = createServerFn({ method: "POST" })
       where id = ${data.id} and email = ${email} and status = 'instructions_sent'
       returning id
     `;
-    if (!rows[0]) throw new Error("Funding instructions have not been sent for this investment.");
+    if (!rows[0]) throw new Error("The invoice has not been generated for this investment.");
     const detail = await fundingDetail(sql, data.id);
     await sendStep(sql, {
       step: "payment_uploaded",
@@ -1162,27 +1186,32 @@ export const approvePayment = createServerFn({ method: "POST" })
   });
 
 export const signFunding = createServerFn({ method: "POST" })
-  .validator((input: { id: string }) => input)
+  .validator((input: { id: string; signature?: string }) => input)
   .handler(async ({ data }) => {
     const { getCookie } = await import("@tanstack/react-start/server");
     const email = getCookie("ah_investor");
     if (!email) throw new Error("Sign in required.");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const apps = await sql<{ applicant_name: string; payload: ApplicationPayload | string }>`
-      select applicant_name, payload from applications
+    const apps = await sql<{ id: string; applicant_name: string; payload: ApplicationPayload | string }>`
+      select id, applicant_name, payload from applications
       where lower(email) = ${email.toLowerCase()}
       order by submitted_at desc nulls last
       limit 1
     `;
     const payload = apps[0]?.payload ? (typeof apps[0].payload === "string" ? (JSON.parse(apps[0].payload) as ApplicationPayload) : apps[0].payload) : null;
-    const signature = payload?.signature ?? "";
-    if (!signature.startsWith("data:image/png;base64,")) throw new Error("Your application has no signature.");
+    const drawn = data.signature?.startsWith("data:image/png;base64,") ? data.signature : "";
+    const signature = drawn || payload?.signature || "";
+    if (!signature.startsWith("data:image/png;base64,")) throw new Error("Draw your signature.");
+    if (drawn && apps[0]) {
+      const next = { ...(payload ?? {}), signature: drawn };
+      await sql`update applications set payload = ${JSON.stringify(next)}::jsonb where id = ${apps[0].id}`;
+    }
     const signerName = apps[0]?.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || email;
     const rows = await sql<{ id: string }>`
       update fundings
       set signer_name = ${signerName}, signature = ${signature}, signed_at = now()
-      where id = ${data.id} and email = ${email} and status = 'pending' and signed_at is null
+      where id = ${data.id} and lower(email) = ${email.toLowerCase()} and status in ('pending', 'approved_phone', 'instructions_sent') and signed_at is null
       returning id
     `;
     if (!rows[0]) throw new Error("These terms cannot be accepted.");
@@ -1333,6 +1362,119 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
     };
   });
 
+export const downloadInvoicePdf = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    const email = getCookie("ah_investor");
+    const admin = await readSignedIn();
+    if (!email && !admin) throw new Error("Sign in required.");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureInvoiceBillingColumn(sql);
+    const rows = await sql<{
+      id: string;
+      status: string;
+      email: string;
+      amount: string;
+      term_label: string;
+      reference_number: string;
+      signature: string;
+      signed_on: string | null;
+      applicant_name: string | null;
+      payload: ApplicationPayload | string | null;
+      advisor_phone: string | null;
+      invoice_billing: unknown;
+    }>`
+      select f.id, f.status, f.email, f.amount, f.term_label, f.reference_number, f.signature,
+             to_char(f.signed_at at time zone 'UTC', 'YYYY-MM-DD') as signed_on,
+             app.applicant_name, app.payload, a.phone as advisor_phone, f.invoice_billing
+      from fundings f
+      left join advisors a on a.id = f.advisor_id
+      left join lateral (
+        select applicant_name, payload from applications
+        where email = f.email
+        order by submitted_at desc nulls last
+        limit 1
+      ) app on true
+      where f.id = ${data.id}
+    `;
+    const row = rows[0];
+    const signed = Boolean(row?.signature) || Boolean(row?.signed_on);
+    const generated = row?.status === "instructions_sent";
+    const preview = generated || row?.status === "approved_phone";
+    if (!row || !signed || !preview || (!admin && !generated) || (!admin && row.email !== email)) throw new Error("Invoice not found.");
+    const payload = row.payload ? (typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload) : null;
+    const clientName = row.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || row.email;
+    const address = [
+      [payload?.street, payload?.apt].filter(Boolean).join(" "),
+      [payload?.city, payload?.region, payload?.postal].filter(Boolean).join(", "),
+      payload?.country ?? "",
+    ].filter(Boolean);
+    const { buildInvoicePdf } = await import("@/lib/investment-pdf.server");
+    const pdf = await buildInvoicePdf({
+      clientName,
+      address,
+      amount: row.amount,
+      billing: resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number),
+    });
+    return { pdf };
+  });
+
+export const saveInvoiceBilling = createServerFn({ method: "POST" })
+  .validator((input: { id: string; billing: InvoiceBilling }) => {
+    const billing = { ...input.billing };
+    (Object.keys(billing) as Array<keyof InvoiceBilling>).forEach((key) => {
+      billing[key] = String(billing[key] ?? "").trim();
+    });
+    if (!billing.bankName || !billing.accountName || !billing.beneficiaryAddress || !billing.accountNumber || !billing.routingNumber || !billing.crn || !billing.purpose) {
+      throw new Error("Fill in every billing field.");
+    }
+    return { id: input.id, billing };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureInvoiceBillingColumn(sql);
+    await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
+    return { billing: data.billing };
+  });
+
+export const approveInvoice = createServerFn({ method: "POST" })
+  .validator((input: { id: string; billing: InvoiceBilling }) => {
+    const billing = { ...input.billing };
+    (Object.keys(billing) as Array<keyof InvoiceBilling>).forEach((key) => {
+      billing[key] = String(billing[key] ?? "").trim();
+    });
+    if (!billing.bankName || !billing.accountName || !billing.beneficiaryAddress || !billing.accountNumber || !billing.routingNumber || !billing.crn || !billing.purpose) {
+      throw new Error("Fill in every billing field.");
+    }
+    return { id: input.id, billing };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureInvoiceBillingColumn(sql);
+    const current = await fundingDetail(sql, data.id);
+    const signed = await sql<{ signed: boolean }>`select signed_at is not null as signed from fundings where id = ${data.id}`;
+    if (!current || !signed[0]?.signed) throw new Error("The client has not accepted the terms.");
+    if (current.status !== "approved_phone" && current.status !== "instructions_sent") throw new Error("Approve the call before generating the invoice.");
+    await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
+    if (current.status === "approved_phone") {
+      await sql`update fundings set status = 'instructions_sent' where id = ${data.id}`;
+      await sendStep(sql, {
+        step: "instructions_sent",
+        clientEmail: current.email,
+        clientName: await investorName(sql, current.email),
+        detail: await detailText(sql, { ...current, status: "instructions_sent" }),
+        relatedId: data.id,
+      });
+    }
+    return { ok: true as const };
+  });
+
 function usDate(iso: string) {
   const [year, month, day] = iso.split("-");
   if (!year || !month || !day) return iso;
@@ -1420,7 +1562,7 @@ async function detailText(sql: Sql, row: FundingMail | null) {
 const STATUS_LABEL: Record<string, string> = {
   pending: "Pending",
   approved_phone: "Approved by phone",
-  instructions_sent: "Funding instructions sent",
+  instructions_sent: "Invoice generated",
   payment_approved: "Active",
   cancelled: "Cancelled",
 };

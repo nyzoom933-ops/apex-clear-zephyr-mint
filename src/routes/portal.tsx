@@ -4,7 +4,8 @@ import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, Land
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { headerActionClass, SiteHeader } from "@/components/site-header";
-import { cancelFunding, downloadInvestmentPdf, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
+import { SignaturePad } from "@/components/signature-pad";
+import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
 import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, promoMonths, type PromoOffer } from "@/lib/promo";
 
 export const Route = createFileRoute("/portal")({
@@ -24,6 +25,7 @@ type PortalAccount = {
 function PortalPage() {
   const navigate = useNavigate();
   const [account, setAccount] = useState<PortalAccount | null>(null);
+  const [desk, setDesk] = useState(false);
 
   useEffect(() => {
     void getInvestorPortal()
@@ -39,6 +41,12 @@ function PortalPage() {
       });
   }, [navigate]);
 
+  useEffect(() => {
+    void getAdminSession()
+      .then((session) => setDesk(session.signedIn))
+      .catch(() => setDesk(false));
+  }, []);
+
   async function signOut() {
     await investorLogout();
     void navigate({ to: "/login" });
@@ -50,6 +58,11 @@ function PortalPage() {
         eyebrow="Investor portal"
         action={
           <div className="flex items-center gap-2">
+            {desk ? (
+              <button type="button" className={headerActionClass} onClick={() => void navigate({ to: "/admin" })}>
+                Back to desk
+              </button>
+            ) : null}
             <NotificationBell />
             <button type="button" className={headerActionClass} onClick={() => void signOut()}>
               Sign out
@@ -199,7 +212,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
         />
       ) : null}
       {tab === "active" ? <ActiveCds positions={holdings} waiting={pipeline.length} account={account} onAdd={() => setTab("fund")} /> : null}
-      {tab === "investments" ? <InvestmentList positions={pipeline} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
+      {tab === "investments" ? <InvestmentList positions={pipeline} signature={account.payload.signature} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
       {tab === "fund" ? (
         <FundingPanel
           onSubmitted={() => {
@@ -759,16 +772,16 @@ const FUND_STEPS = ["Terms", "Advisor call", "Fund"];
 
 function fundStep(position: FundingPosition) {
   if (position.status === "payment_approved") return 3;
+  if (!position.signed) return 0;
   if (position.status === "instructions_sent" || position.status === "approved_phone") return 2;
-  if (position.status === "pending" && position.signed) return 1;
-  if (position.status === "pending") return 0;
+  if (position.status === "pending") return 1;
   return 0;
 }
 
 function statusLabel(status: FundingPosition["status"]) {
   if (status === "cancelled") return "Cancelled";
   if (status === "approved_phone") return "Approved by phone";
-  if (status === "instructions_sent") return "Funding instructions sent";
+  if (status === "instructions_sent") return "Invoice generated";
   if (status === "payment_approved") return "Active";
   return "Pending";
 }
@@ -787,11 +800,11 @@ function certificateTitle(position: FundingPosition, months = 0, apy = "") {
 function statusDetail(position: FundingPosition) {
   if (position.status === "cancelled") return "This investment was cancelled.";
   if (position.status === "payment_approved") return "This certificate is active through maturity.";
+  if (!position.signed) return "Accept the terms to continue.";
   if (position.status === "instructions_sent" && position.paymentFileName) return "Wire confirmation is with your advisor.";
-  if (position.status === "instructions_sent") return "Upload your wire confirmation.";
-  if (position.status === "approved_phone") return "Waiting for funding instructions.";
-  if (position.signed) return "Terms are signed. Waiting for the advisor call.";
-  return "Accept the terms to continue.";
+  if (position.status === "instructions_sent") return "Your invoice is ready. Send the wire, then upload the confirmation.";
+  if (position.status === "approved_phone") return "Your advisor approved the call. The invoice is being prepared.";
+  return "Terms are signed. Waiting for the advisor call.";
 }
 
 function money(value: number) {
@@ -863,9 +876,10 @@ function Dashboard({
   const total = lines.reduce((sum, line) => sum + line.principal, 0);
   const interest = lines.reduce((sum, line) => sum + line.principal * (Math.pow(1 + line.rate, line.months / 12) - 1), 0);
   const blended = total > 0 ? lines.reduce((sum, line) => sum + line.principal * line.rate, 0) / total : 0;
-  const toSign = waiting.filter((line) => line.position.status === "pending" && !line.position.signed);
+  const toSign = waiting.filter((line) => !line.position.signed && line.position.status !== "cancelled");
   const awaitingCall = waiting.filter((line) => line.position.status === "pending" && line.position.signed);
-  const uploadPayment = waiting.filter((line) => line.position.status === "instructions_sent" && !line.position.paymentFileName);
+  const uploadPayment = waiting.filter((line) => line.position.signed && line.position.status === "instructions_sent" && !line.position.paymentFileName);
+  const preparingInvoice = waiting.filter((line) => line.position.signed && line.position.status === "approved_phone");
   const allocation = lines
     .map((line) => {
       const start = line.position.createdAt;
@@ -882,7 +896,7 @@ function Dashboard({
     .filter((line) => line.date)
     .sort((a, b) => a.date!.getTime() - b.date!.getTime());
   const nextMaturity = schedule[0];
-  const next = toSign.length ? "Accept terms" : awaitingCall.length ? "Advisor call" : uploadPayment.length ? "Upload payment" : holdings.length ? "Active" : "Add a CD";
+  const next = toSign.length ? "Accept terms" : awaitingCall.length ? "Advisor call" : preparingInvoice.length ? "Invoice" : uploadPayment.length ? "Upload payment" : holdings.length ? "Active" : "Add a CD";
 
   return (
     <section className="mt-6">
@@ -1222,7 +1236,107 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function InvestmentList({ positions, onAdd, onSigned }: { positions: FundingPosition[]; onAdd: () => void; onSigned: () => void }) {
+function invoiceReady(position: FundingPosition) {
+  return position.signed && position.status === "instructions_sent";
+}
+
+function InvoiceDownload({ position }: { position: FundingPosition }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [bytes, setBytes] = useState<Uint8Array | null>(null);
+  const [viewing, setViewing] = useState(false);
+  const ready = invoiceReady(position);
+
+  async function loadPdf() {
+    if (bytes) return bytes;
+    const { pdf } = await downloadInvoicePdf({ data: { id: position.id } });
+    const file = Uint8Array.from(atob(pdf), (char) => char.charCodeAt(0));
+    setBytes(file);
+    return file;
+  }
+
+  async function view() {
+    setError("");
+    setPending(true);
+    try {
+      await loadPdf();
+      setViewing(true);
+    } catch {
+      setError("The invoice could not be opened.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function download() {
+    setError("");
+    setPending(true);
+    try {
+      const file = await loadPdf();
+      const url = URL.createObjectURL(new Blob([file], { type: "application/pdf" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "payment-invoice.pdf";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("The invoice could not be created.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-border bg-white px-4 py-3">
+      <p className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Payment invoice</p>
+      {ready ? (
+        <>
+          <p className="mt-1 text-sm text-fg">Use this invoice for the wire. Include the customer reference on the payment.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void view()}>
+              {pending ? "Opening…" : "View PDF"}
+            </button>
+            <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void download()}>
+              Download PDF
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="mt-1 text-sm text-fg">
+          {position.signed
+            ? "Your terms are accepted. The invoice appears after it is approved."
+            : "Accept the terms first. The invoice appears after it is approved."}
+        </p>
+      )}
+      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      {viewing && bytes ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setViewing(false)}>
+          <div role="dialog" aria-modal="true" aria-label="Payment invoice" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <h2 className="text-lg font-semibold text-primary">Payment invoice</h2>
+              <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setViewing(false)}>
+                Close
+              </button>
+            </div>
+            <PdfPages data={bytes} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function savePdf(pdf: string, filename: string) {
+  const bytes = Uint8Array.from(atob(pdf), (char) => char.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function InvestmentList({ positions, signature, onAdd, onSigned }: { positions: FundingPosition[]; signature: string; onAdd: () => void; onSigned: () => void }) {
   return (
     <section className="mt-6">
       <h1 className="text-3xl font-semibold">Investments</h1>
@@ -1236,7 +1350,7 @@ function InvestmentList({ positions, onAdd, onSigned }: { positions: FundingPosi
       ) : (
         <ul className="mt-4 grid gap-3">
           {positions.map((position) => (
-            <InvestmentCard key={position.id} position={position} onSigned={onSigned} />
+            <InvestmentCard key={position.id} position={position} signature={signature} onSigned={onSigned} />
           ))}
         </ul>
       )}
@@ -1244,7 +1358,7 @@ function InvestmentList({ positions, onAdd, onSigned }: { positions: FundingPosi
   );
 }
 
-function InvestmentCard({ position, onSigned }: { position: FundingPosition; onSigned: () => void }) {
+function InvestmentCard({ position, signature, onSigned }: { position: FundingPosition; signature: string; onSigned: () => void }) {
   const rates = investmentRates(position, usePromo());
   const step = fundStep(position);
   const percent = Math.min(100, (step / (FUND_STEPS.length - 1)) * 100);
@@ -1260,6 +1374,7 @@ function InvestmentCard({ position, onSigned }: { position: FundingPosition; onS
         {position.amount} · {position.createdAt}
       </p>
       <p className="mt-2 text-sm text-fg">{statusDetail(position)}</p>
+      {position.status === "cancelled" ? null : <InvoiceDownload position={position} />}
       <div className="mt-3 grid grid-cols-2 gap-3">
         <p>
           <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Promo APY</span>
@@ -1302,8 +1417,8 @@ function InvestmentCard({ position, onSigned }: { position: FundingPosition; onS
         </div>
       )}
       {position.status === "cancelled" ? null : <TermsPdf id={position.id} />}
-      {position.status === "pending" && !position.signed ? <SignTerms position={position} rates={rates} onSigned={onSigned} /> : null}
-      {position.status === "instructions_sent" && !position.paymentFileName ? <PaymentUpload id={position.id} onUploaded={onSigned} /> : null}
+      {position.status !== "cancelled" && position.status !== "payment_approved" && !position.signed ? <SignTerms position={position} signature={signature} rates={rates} onSigned={onSigned} /> : null}
+      {position.signed && position.status === "instructions_sent" && !position.paymentFileName ? <PaymentUpload id={position.id} onUploaded={onSigned} /> : null}
       {position.paymentFileName ? <PaymentFileNote id={position.id} name={position.paymentFileName} approved={position.status === "payment_approved"} /> : null}
     </div>
   );
@@ -1386,13 +1501,17 @@ function PaymentUpload({ id, onUploaded }: { id: string; onUploaded: () => void 
 
 function SignTerms({
   position,
+  signature,
   rates,
   onSigned,
 }: {
   position: FundingPosition;
+  signature: string;
   rates: { promo: string; final: string };
   onSigned: () => void;
 }) {
+  const saved = signature.startsWith("data:image/png;base64,");
+  const [drawn, setDrawn] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -1400,10 +1519,10 @@ function SignTerms({
     setPending(true);
     setError("");
     try {
-      await signFunding({ data: { id: position.id } });
+      await signFunding({ data: { id: position.id, signature: saved ? "" : drawn } });
       onSigned();
-    } catch {
-      setError("The terms could not be accepted.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The terms could not be accepted.");
       setPending(false);
     }
   }
@@ -1411,7 +1530,9 @@ function SignTerms({
   return (
     <form className="mt-4 border-t border-border pt-4" onSubmit={(event) => { event.preventDefault(); void sign(); }}>
       <h3 className="text-sm font-semibold text-primary">Accept the investment terms</h3>
-      <p className="mt-1 text-sm text-fg">Your application signature is applied to this certificate. No further signature is required.</p>
+      <p className="mt-1 text-sm text-fg">
+        {saved ? "Your application signature is applied to this certificate. No further signature is required." : "This account has no signature yet. Draw it once. It is saved on the account and used on this certificate."}
+      </p>
       <ul className="mt-3 divide-y divide-border overflow-hidden rounded-md border border-border">
         <TermLine icon={CalendarRange} label="Term" value={position.termLabel} />
         <TermLine icon={Wallet} label="Amount" value={position.amount} />
@@ -1422,8 +1543,9 @@ function SignTerms({
         <TermLine icon={TriangleAlert} label="Early withdrawal" value="Penalties may apply" />
         <TermLine icon={Shield} label="Capital protection" value="First $250,000 per individual or $500,000 per joint account" />
       </ul>
+      {saved ? null : <SignaturePad onChange={(value) => setDrawn(value ?? "")} />}
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
-      <button type="submit" disabled={pending} className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60">
+      <button type="submit" disabled={pending || (!saved && !drawn)} className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60">
         {pending ? "Saving…" : "Accept terms"}
       </button>
     </form>

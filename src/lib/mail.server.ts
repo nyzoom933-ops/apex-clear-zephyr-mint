@@ -12,6 +12,11 @@ export async function ensureMailColumn(sql: Sql) {
   await sql`alter table notifications add column if not exists read_at timestamptz`;
 }
 
+async function readDeskEmail(sql: Sql) {
+  const rows = await sql<{ value: string }>`select value from site_settings where key = 'desk_email'`;
+  return rows[0]?.value?.trim().toLowerCase() || "";
+}
+
 export async function notifyStep(
   sql: Sql,
   input: { step: MailStep; clientEmail: string; clientName: string; detail: string; relatedId?: string },
@@ -25,7 +30,7 @@ export async function notifyStep(
     companyName,
     emailLogo,
   });
-  const adminTo = env("ADMIN_EMAIL") || ADMIN_EMAIL;
+  const adminTo = (await readDeskEmail(sql)) || env("ADMIN_EMAIL") || ADMIN_EMAIL;
   const messages = [
     { audience: "client" as const, recipient: input.clientEmail, mail: pair.client },
     { audience: "admin" as const, recipient: adminTo, mail: pair.admin },

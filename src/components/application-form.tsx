@@ -528,25 +528,39 @@ function Financial({ form, patch }: { form: FormState; patch: <K extends keyof F
 }
 
 function Documents({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  const [fileError, setFileError] = useState("");
+
+  function take(file: File | undefined, nameKey: "idFileName" | "addressFileName", dataKey: "idFile" | "addressFile") {
+    if (!file) {
+      patch(nameKey, "");
+      patch(dataKey, "");
+      return;
+    }
+    if (file.size > 5_000_000 || !/^(application\/pdf|image\/png|image\/jpeg)$/.test(file.type)) {
+      setFileError("Attach a PDF, PNG, or JPEG under 5 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      patch(nameKey, file.name);
+      patch(dataKey, typeof reader.result === "string" ? reader.result : "");
+      setFileError("");
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div className="grid gap-5">
       <SectionIntro eyebrow="Section" title="Verification documents" body="Choose the document types and attach files for identity and address verification." />
       <SelectField label="Identity document" value={form.idType} options={ID_TYPES} onChange={(value) => patch("idType", value as FormState["idType"])} />
-      <Field label="Identity file" hint={form.idFileName || "PDF or image"}>
-        <input
-          type="file"
-          className={controlClass}
-          onChange={(event) => patch("idFileName", event.target.files?.[0]?.name ?? "")}
-        />
+      <Field label="Identity file" hint={form.idFileName || "PDF, PNG, or JPEG"}>
+        <input type="file" accept="application/pdf,image/png,image/jpeg" className={controlClass} onChange={(event) => take(event.target.files?.[0], "idFileName", "idFile")} />
       </Field>
       <SelectField label="Proof of address" value={form.addressDocType} options={ADDRESS_DOCS} onChange={(value) => patch("addressDocType", value as FormState["addressDocType"])} />
-      <Field label="Address file" hint={form.addressFileName || "PDF or image"}>
-        <input
-          type="file"
-          className={controlClass}
-          onChange={(event) => patch("addressFileName", event.target.files?.[0]?.name ?? "")}
-        />
+      <Field label="Address file" hint={form.addressFileName || "PDF, PNG, or JPEG"}>
+        <input type="file" accept="application/pdf,image/png,image/jpeg" className={controlClass} onChange={(event) => take(event.target.files?.[0], "addressFileName", "addressFile")} />
       </Field>
+      {fileError ? <p className="text-sm text-danger">{fileError}</p> : null}
     </div>
   );
 }
@@ -610,17 +624,8 @@ function Declarations({ form, patch }: { form: FormState; patch: <K extends keyo
       ))}
       <div>
         <p className="text-sm font-medium">Signature</p>
-        <p className="mt-1 text-sm text-fg">Draw the signature that will appear on your certificates.</p>
-        {form.signature ? (
-          <img src={form.signature} alt="Your signature" className="mt-3 h-32 w-full rounded-md border border-border bg-white object-contain" />
-        ) : (
-          <SignaturePad onChange={(value) => patch("signature", value ?? "")} />
-        )}
-        {form.signature ? (
-          <button type="button" className="mt-1 text-sm font-semibold text-primary" onClick={() => patch("signature", "")}>
-            Clear
-          </button>
-        ) : null}
+        <p className="mt-1 text-sm text-fg">Draw the signature that will appear on your certificates. You can lift the pointer and keep drawing.</p>
+        <SignaturePad onChange={(value) => patch("signature", value ?? "")} />
       </div>
     </div>
   );

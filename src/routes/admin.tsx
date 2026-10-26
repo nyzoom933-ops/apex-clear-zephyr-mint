@@ -17,12 +17,16 @@ import {
   listAdvisors,
   listApplications,
   listFundings,
+  downloadInvoicePdf,
+  saveInvoiceBilling,
+  approveInvoice,
   listNotifications,
   saveAdvisor,
   saveCdTerms,
   saveInvestmentType,
   savePromo,
   setApplicationStatus,
+  signInAsClient,
   setSiteBrand,
   runDatabaseBackup,
   saveMailSetup,
@@ -35,6 +39,7 @@ import {
   type NotificationRow,
 } from "@/lib/admin.functions";
 import type { PromoOffer, PromoTier } from "@/lib/promo";
+import type { InvoiceBilling } from "@/lib/invoice-billing";
 import { templateCatalog } from "@/lib/email-templates";
 
 export const Route = createFileRoute("/admin")({
@@ -153,7 +158,7 @@ function AdminLogin({ needsSetup, onSuccess }: { needsSetup: boolean; onSuccess:
 }
 
 function Cabinet({ onSignOut }: { onSignOut: () => void }) {
-  const [tab, setTab] = useState<"dashboard" | "applications" | "investments" | "promos" | "funding" | "advisors" | "emails" | "settings">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "applications" | "clients" | "investments" | "promos" | "funding" | "invoices" | "advisors" | "emails" | "settings">("dashboard");
   const [rows, setRows] = useState<ApplicationRow[] | null>(null);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -184,8 +189,10 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
     };
   }, [rows]);
 
-  const visible = (rows ?? []).filter((row) => filter === "all" || row.status === filter);
-  const selected = (rows ?? []).find((row) => row.id === selectedId) ?? null;
+  const applications = rows ?? [];
+  const clients = applications.filter((row) => row.status === "approved");
+  const visible = applications.filter((row) => filter === "all" || row.status === filter);
+  const selected = visible.find((row) => row.id === selectedId) ?? null;
 
   async function signOut() {
     await adminLogout();
@@ -223,6 +230,9 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
           <TabButton active={tab === "applications"} onClick={() => setTab("applications")}>
             Applications
           </TabButton>
+          <TabButton active={tab === "clients"} onClick={() => setTab("clients")}>
+            Clients
+          </TabButton>
           <TabButton active={tab === "investments"} onClick={() => setTab("investments")}>
             Investments
           </TabButton>
@@ -231,6 +241,9 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
           </TabButton>
           <TabButton active={tab === "funding"} onClick={() => setTab("funding")}>
             Funding
+          </TabButton>
+          <TabButton active={tab === "invoices"} onClick={() => setTab("invoices")}>
+            Invoices
           </TabButton>
           <TabButton active={tab === "advisors"} onClick={() => setTab("advisors")}>
             Advisors
@@ -265,13 +278,15 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
               selectedId={selectedId}
               onSelect={(id) => {
                 setSelectedId(id);
-                setTab("applications");
+                const row = (rows ?? []).find((item) => item.id === id);
+                setTab(row?.status === "approved" ? "clients" : "applications");
               }}
             />
           </section>
         ) : tab === "applications" ? (
           <section>
             <h1 className="text-3xl font-semibold">Submitted applications</h1>
+            <p className="mt-2 text-fg">Select a row to open the full application, including the identity and address documents.</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {(["all", "pending", "approved", "hold"] as const).map((key) => (
                 <button
@@ -290,12 +305,16 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
             <ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />
             {selected ? <ApplicationDetail row={selected} onStatus={(status) => void updateStatus(selected.id, status)} /> : null}
           </section>
+        ) : tab === "clients" ? (
+          <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} />
         ) : tab === "investments" ? (
           <InvestmentTypesPanel />
         ) : tab === "promos" ? (
           <PromoPanel />
         ) : tab === "funding" ? (
           <FundingDesk />
+        ) : tab === "invoices" ? (
+          <InvoicesDesk />
         ) : tab === "advisors" ? (
           <AdvisorsPanel />
         ) : tab === "emails" ? (
@@ -998,6 +1017,156 @@ function ImageSetting({
   );
 }
 
+function InvoicesDesk() {
+  const [rows, setRows] = useState<AdminFunding[] | null>(null);
+  const [error, setError] = useState("");
+
+  function load() {
+    return listFundings()
+      .then((next) => setRows(next.filter((row) => row.signed && (row.status === "approved_phone" || row.status === "instructions_sent"))))
+      .catch(() => setError("Invoices could not be loaded."));
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  return (
+    <section>
+      <h1 className="text-3xl font-semibold">Invoices</h1>
+      <p className="mt-2 text-fg">Signed certificates approved by phone. Approve an invoice here to generate it for the client.</p>
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      {!rows ? (
+        <p className="mt-4 text-sm text-fg">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="mt-4 text-sm text-fg">No certificates are waiting for an invoice.</p>
+      ) : (
+        <ul className="mt-4 grid gap-4">
+          {rows.map((row) => (
+            <InvoiceCard key={row.id} row={row} onApproved={() => void load()} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const BILLING_FIELDS: Array<{ key: keyof InvoiceBilling; label: string; wide?: boolean }> = [
+  { key: "brand", label: "Header name" },
+  { key: "bankName", label: "Bank name" },
+  { key: "accountName", label: "Account name" },
+  { key: "beneficiaryAddress", label: "Beneficiary address", wide: true },
+  { key: "accountNumber", label: "Account number" },
+  { key: "routingNumber", label: "Routing number" },
+  { key: "crn", label: "CRN" },
+  { key: "purpose", label: "Purpose of wire" },
+  { key: "contactName", label: "Contact name" },
+  { key: "phone", label: "Phone" },
+  { key: "fdic", label: "FDIC certificate" },
+  { key: "contactAddress", label: "Contact address", wide: true },
+];
+
+function InvoiceCard({ row, onApproved }: { row: AdminFunding; onApproved: () => void }) {
+  const [billing, setBilling] = useState<InvoiceBilling>(row.billing);
+  const [pending, setPending] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  function setField(key: keyof InvoiceBilling, value: string) {
+    setBilling((current) => ({ ...current, [key]: value }));
+  }
+
+  async function save() {
+    setError("");
+    setNotice("");
+    setPending("save");
+    try {
+      const result = await saveInvoiceBilling({ data: { id: row.id, billing } });
+      setBilling(result.billing);
+      setNotice("Billing saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Billing could not be saved.");
+    } finally {
+      setPending("");
+    }
+  }
+
+  async function approve() {
+    setError("");
+    setNotice("");
+    setPending("approve");
+    try {
+      await approveInvoice({ data: { id: row.id, billing } });
+      setNotice(row.status === "instructions_sent" ? "Billing saved." : "Invoice generated. The client can open it now.");
+      onApproved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The invoice could not be approved.");
+    } finally {
+      setPending("");
+    }
+  }
+
+  const generated = row.status === "instructions_sent";
+
+  async function download() {
+    setError("");
+    setNotice("");
+    setPending("pdf");
+    try {
+      await saveInvoiceBilling({ data: { id: row.id, billing } });
+      const { pdf } = await downloadInvoicePdf({ data: { id: row.id } });
+      const bytes = Uint8Array.from(atob(pdf), (char) => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `payment-invoice-${row.email}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice("Preview uses the billing details above. The client does not see it until you approve the invoice.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The invoice could not be created.");
+    } finally {
+      setPending("");
+    }
+  }
+
+  return (
+    <li className="rounded-lg border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-semibold text-primary">{row.signerName || row.email}</p>
+        <p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p>
+      </div>
+      <p className="text-sm text-fg">{row.email}</p>
+      <p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {BILLING_FIELDS.map((field) => (
+          <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}>
+            <span className="mb-1.5 block text-sm font-medium">{field.label}</span>
+            {field.key === "contactAddress" ? (
+              <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={(event) => setField(field.key, event.target.value)} />
+            ) : (
+              <input className={controlClass} value={billing[field.key]} onChange={(event) => setField(field.key, event.target.value)} />
+            )}
+          </label>
+        ))}
+      </div>
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>
+          {pending === "save" ? "Saving…" : "Save billing"}
+        </button>
+        <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>
+          {pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}
+        </button>
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>
+          {pending === "pdf" ? "Creating…" : "Preview PDF"}
+        </button>
+      </div>
+    </li>
+  );
+}
+
 function FundingDesk() {
   const [rows, setRows] = useState<AdminFunding[] | null>(null);
   const [advisors, setAdvisors] = useState<Advisor[]>([]);
@@ -1012,7 +1181,7 @@ function FundingDesk() {
   }
 
   useEffect(() => {
-    void load().catch(() => setError("Investments could not be loaded."));
+    void load().catch((caught) => setError(caught instanceof Error ? caught.message : "Investments could not be loaded."));
   }, []);
 
   async function save(
@@ -1123,7 +1292,7 @@ function FundingRow({
           <select className={`${controlClass} mt-1`} value={status} onChange={(event) => setStatus(event.target.value as AdminFunding["status"])}>
             <option value="pending">Pending</option>
             <option value="approved_phone">Approved by phone</option>
-            <option value="instructions_sent">Funding instructions sent</option>
+            <option value="instructions_sent">Invoice generated</option>
             <option value="payment_approved">Payment approved</option>
             <option value="cancelled">Cancelled</option>
           </select>
@@ -1276,6 +1445,80 @@ function AdvisorsPanel() {
   );
 }
 
+function ClientsPanel({ rows, onStatus }: { rows: ApplicationRow[]; onStatus: (id: string, status: ApplicationRow["status"]) => void }) {
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const selected = rows.find((row) => row.id === selectedId) ?? null;
+
+  async function openAs(id: string) {
+    setError("");
+    setPendingId(id);
+    try {
+      await signInAsClient({ data: { id } });
+      window.location.assign("/portal");
+    } catch {
+      setError("Could not sign in as this client.");
+      setPendingId(null);
+    }
+  }
+
+  if (rows.length === 0) {
+    return (
+      <section>
+        <h1 className="text-3xl font-semibold">Clients</h1>
+        <p className="mt-4 rounded-lg border border-border bg-surface px-4 py-6 text-sm text-fg">No approved clients yet.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <h1 className="text-3xl font-semibold">Clients</h1>
+      <p className="mt-2 text-fg">Approved investors. Select a row to open the full application. Sign in as a client to open their portal.</p>
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
+            <tr>
+              <th className="px-4 py-3 font-semibold">Client</th>
+              <th className="px-4 py-3 font-semibold">Account</th>
+              <th className="px-4 py-3 font-semibold">Approved</th>
+              <th className="px-4 py-3 font-semibold" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className={"cursor-pointer border-b border-border last:border-0 " + (row.id === selectedId ? "bg-step-idle" : "")} onClick={() => setSelectedId(row.id)}>
+                <td className="px-4 py-3">
+                  <span className="block font-semibold text-primary">{row.applicantName}</span>
+                  <span className="text-fg">{row.email}</span>
+                </td>
+                <td className="px-4 py-3">{row.accountType}</td>
+                <td className="px-4 py-3">{row.submittedAt} UTC</td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60"
+                    disabled={pendingId === row.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void openAs(row.id);
+                    }}
+                  >
+                    {pendingId === row.id ? "Signing in…" : "Sign in as user"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {selected ? <ApplicationDetail row={selected} onStatus={(status) => onStatus(selected.id, status)} /> : null}
+    </section>
+  );
+}
+
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
   return (
     <button
@@ -1351,6 +1594,41 @@ function ApplicationTable({
   );
 }
 
+function StoredDocument({ label, name, file }: { label: string; name: string; file?: string }) {
+  const ready = Boolean(file?.startsWith("data:"));
+  return (
+    <div className="rounded-md border border-border px-4 py-3">
+      <p className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</p>
+      <p className="mt-1 text-sm text-fg">{name || "No file"}</p>
+      {ready ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => openStoredFile(file!, name, false)}>
+            View
+          </button>
+          <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => openStoredFile(file!, name, true)}>
+            Download
+          </button>
+        </div>
+      ) : name ? (
+        <p className="mt-2 text-sm text-fg">Only the file name was saved. Ask the applicant to submit the document again.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function openStoredFile(file: string, name: string, download: boolean) {
+  const [meta, data] = file.split(",");
+  const mime = meta.match(/data:(.*);base64/)?.[1] ?? "application/octet-stream";
+  const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  if (download) link.download = name || "document";
+  else link.target = "_blank";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 function ApplicationDetail({ row, onStatus }: { row: ApplicationRow; onStatus: (status: ApplicationRow["status"]) => void }) {
   const form = row.payload;
   const fields: Array<[string, string]> = [
@@ -1362,7 +1640,7 @@ function ApplicationDetail({ row, onStatus }: { row: ApplicationRow; onStatus: (
     ["Occupation", form.occupation],
     ["Address", [form.street, form.apt, form.city, form.region, form.postal, form.country].filter(Boolean).join(", ")],
     ["Tax residence", form.taxResidence],
-    ["Tax ID", form.taxId ? `•••${form.taxId.slice(-4)}` : ""],
+    ["Tax ID", form.taxId],
     ["Source of wealth", form.sourceOfWealth],
     ["Source of funds", form.sourceOfFunds],
     ["Purpose", form.investmentPurpose],
@@ -1373,7 +1651,7 @@ function ApplicationDetail({ row, onStatus }: { row: ApplicationRow; onStatus: (
     ["Account holder", form.accountHolder],
     ["Bank address", [form.bankStreet, form.bankLine2, form.bankCity, form.bankState, form.bankZip].filter(Boolean).join(", ")],
     ["Routing number", form.routingNumber],
-    ["Account number", form.accountNumber ? `••••${form.accountNumber.slice(-4)}` : ""],
+    ["Account number", form.accountNumber],
   ];
   return (
     <article className="mt-4 rounded-lg border border-border bg-surface p-5">
@@ -1407,6 +1685,16 @@ function ApplicationDetail({ row, onStatus }: { row: ApplicationRow; onStatus: (
           </div>
         ))}
       </dl>
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} />
+        <StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} />
+      </div>
+      {form.signature?.startsWith("data:image/") ? (
+        <div className="mt-4">
+          <p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p>
+          <img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" />
+        </div>
+      ) : null}
     </article>
   );
 }

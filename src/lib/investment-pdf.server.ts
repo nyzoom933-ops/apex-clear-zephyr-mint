@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import type { InvoiceBilling } from "@/lib/invoice-billing";
 
 export type InvestmentPdfInput = {
   investor: string;
@@ -279,6 +280,222 @@ export async function buildConfirmationPdf(input: ConfirmationPdfInput) {
 
   const bytes = await doc.save();
   return Buffer.from(bytes).toString("base64");
+}
+
+export type InvoicePdfInput = {
+  clientName: string;
+  address: string[];
+  amount: string;
+  billing: InvoiceBilling;
+};
+
+export async function buildInvoicePdf(input: InvoicePdfInput) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([612, 792]);
+  const blue = rgb(0, 0.435, 0.81);
+  const ink = rgb(0.11, 0.11, 0.11);
+  const muted = rgb(0.35, 0.35, 0.35);
+  const panel = rgb(0.953, 0.957, 0.961);
+  const rowAlt = rgb(0.965, 0.969, 0.973);
+  const white = rgb(1, 1, 1);
+  const hair = rgb(0.82, 0.84, 0.86);
+  const dark = rgb(0.13, 0.15, 0.17);
+  const bill = input.billing;
+  const left = 40;
+  const width = 532;
+  const railX = 386;
+  const railW = 186;
+
+  page.drawRectangle({ x: left, y: 734, width: 332, height: 42, color: blue });
+  page.drawText(fit(ascii(bill.brand), bold, 13, 300), { x: left + 16, y: 756, size: 13, font: bold, color: white });
+  page.drawText("CERTIFICATE OF DEPOSIT", { x: left + 16, y: 742, size: 8, font: bold, color: white });
+
+  page.drawRectangle({ x: railX, y: 588, width: railW, height: 188, color: panel });
+  let cy = 756;
+  page.drawText("CONTACT US", { x: railX + 14, y: cy, size: 8, font: bold, color: ink });
+  cy -= 16;
+  page.drawText("A", { x: railX + 14, y: cy, size: 8, font: bold, color: blue });
+  for (const row of [ascii(bill.contactName), ...asciiKeep(bill.contactAddress).split("\n").map((line) => line.trim()).filter(Boolean)].slice(0, 4)) {
+    page.drawText(fit(row, font, 7.5, railW - 40), { x: railX + 28, y: cy, size: 7.5, font, color: ink });
+    cy -= 10;
+  }
+  page.drawText("T", { x: railX + 14, y: cy, size: 8, font: bold, color: blue });
+  page.drawText(fit(ascii(bill.phone), font, 7.5, railW - 40), { x: railX + 28, y: cy, size: 7.5, font, color: ink });
+  cy -= 16;
+  page.drawText("Attention", { x: railX + 14, y: cy, size: 8, font: bold, color: ink });
+  cy -= 11;
+  for (const row of linesOf("Send US dollars only. Foreign currency is returned. Contact your adviser to pay in another currency.", font, 7, railW - 28)) {
+    if (cy < 648) break;
+    page.drawText(row, { x: railX + 14, y: cy, size: 7, font, color: muted });
+    cy -= 9;
+  }
+  page.drawRectangle({ x: railX, y: 588, width: railW, height: 52, color: dark });
+  page.drawText("Note", { x: railX + 14, y: 624, size: 7.5, font: bold, color: white });
+  linesOf("Payment must come from a bank account in the beneficiary account holder's name.", font, 7, railW - 28).forEach((row, index) => {
+    page.drawText(row, { x: railX + 14, y: 612 - index * 9, size: 7, font, color: white });
+  });
+
+  let y = 716;
+  page.drawText(fit(ascii(input.clientName).toUpperCase(), bold, 9, 320), { x: left, y, size: 9, font: bold, color: ink });
+  y -= 13;
+  for (const row of input.address.map((item) => ascii(item).toUpperCase()).filter(Boolean).slice(0, 4)) {
+    page.drawText(fit(row, font, 8, 320), { x: left, y, size: 8, font, color: muted });
+    y -= 11;
+  }
+  drawBarcode(page, left, y - 28, 220, 22, bill.accountNumber || bill.crn);
+
+  y = 560;
+  page.drawText("Payment Invoice", { x: left, y, size: 22, font: bold, color: ink });
+  y -= 22;
+  page.drawText("Billing information", { x: left, y, size: 11, font: bold, color: ink });
+  y -= 14;
+  for (const row of linesOf("Give these instructions to the bank processing the wire. If you pay online, match every field below.", font, 8.5, width)) {
+    page.drawText(row, { x: left, y, size: 8.5, font, color: muted });
+    y -= 11;
+  }
+
+  y -= 8;
+  page.drawRectangle({ x: left, y: y - 4, width: width, height: 3, color: blue });
+  y -= 6;
+  const rows: Array<[string, string]> = [
+    ["Bank name", ascii(bill.bankName)],
+    ["Account name", ascii(bill.accountName)],
+    ["Beneficiary address", ascii(bill.beneficiaryAddress)],
+    ["Account number", ascii(bill.accountNumber)],
+    ["Routing number", ascii(bill.routingNumber)],
+    ["Customer reference", ascii(bill.crn)],
+    ["Purpose of wire", ascii(bill.purpose)],
+  ];
+  const right = left + width - 12;
+  const valueMax = 250;
+  rows.forEach((row, index) => {
+    const top = y;
+    page.drawRectangle({ x: left, y: top - 16, width: width, height: 22, color: index % 2 === 0 ? rowAlt : white });
+    page.drawText(row[0].toUpperCase(), { x: left + 10, y: top - 10, size: 7, font: bold, color: muted });
+    let size = 9;
+    let value = row[1];
+    while (size > 6.5 && inkWidth(bold, value, size) > valueMax) size -= 0.25;
+    if (inkWidth(bold, value, size) > valueMax) value = fit(value, bold, size, valueMax);
+    page.drawText(value, { x: right - inkWidth(bold, value, size), y: top - 11, size, font: bold, color: ink });
+    y -= 22;
+  });
+  page.drawLine({ start: { x: left, y: y + 6 }, end: { x: left + width, y: y + 6 }, thickness: 0.6, color: hair });
+
+  y -= 12;
+  const crn = ascii(bill.crn);
+  page.drawText("Important", { x: left, y, size: 8, font: bold, color: ink });
+  linesOf(`Enter customer reference ${crn} on the wire. Payments without it can be delayed or returned.`, font, 8, width - 62).forEach((row, index) => {
+    page.drawText(row, { x: left + (index === 0 ? 58 : 0), y, size: 8, font, color: muted });
+    y -= 11;
+  });
+
+  y -= 8;
+  page.drawLine({ start: { x: left, y }, end: { x: left + width, y }, thickness: 1.2, color: ink });
+  y -= 22;
+  page.drawText("Total amount due", { x: left, y, size: 12, font: bold, color: ink });
+  const amount = ascii(input.amount);
+  page.drawText(amount, { x: left + width - bold.widthOfTextAtSize(amount, 16), y: y - 1, size: 16, font: bold, color: blue });
+  y -= 10;
+  page.drawLine({ start: { x: left, y }, end: { x: left + width, y }, thickness: 1.2, color: ink });
+
+  const boxTop = y - 18;
+  const boxH = 108;
+  const gap = 12;
+  const leftBox = (width - gap) * 0.58;
+  const rightBox = width - gap - leftBox;
+  page.drawRectangle({ x: left, y: boxTop - boxH, width: leftBox, height: boxH, color: white, borderColor: hair, borderWidth: 1 });
+  page.drawRectangle({ x: left + leftBox + gap, y: boxTop - boxH, width: rightBox, height: boxH, color: panel });
+  page.drawText("Useful information", { x: left + 12, y: boxTop - 16, size: 9, font: bold, color: ink });
+  let uy = boxTop - 30;
+  for (const row of linesOf("If your bank asks for a trading address or registration details, use the information below.", font, 7.5, leftBox - 24)) {
+    page.drawText(row, { x: left + 12, y: uy, size: 7.5, font, color: muted });
+    uy -= 10;
+  }
+  uy -= 4;
+  page.drawLine({ start: { x: left + 12, y: uy + 6 }, end: { x: left + leftBox - 12, y: uy + 6 }, thickness: 0.5, color: hair });
+  page.drawText(fit(ascii(bill.contactName), bold, 7.5, leftBox * 0.55), { x: left + 12, y: uy - 6, size: 7.5, font: bold, color: ink });
+  asciiKeep(bill.contactAddress)
+    .split("\n")
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .forEach((row, index) => page.drawText(fit(row, font, 7, leftBox * 0.55), { x: left + 12, y: uy - 17 - index * 9, size: 7, font, color: ink }));
+  page.drawText("FDIC CERTIFICATE", { x: left + leftBox * 0.58, y: uy - 6, size: 6.5, font: bold, color: muted });
+  page.drawText(fit(ascii(bill.fdic), bold, 11, leftBox * 0.36), { x: left + leftBox * 0.58, y: uy - 20, size: 11, font: bold, color: ink });
+
+  const assistX = left + leftBox + gap + 12;
+  page.drawText("Payment assistance", { x: assistX, y: boxTop - 16, size: 9, font: bold, color: ink });
+  let py = boxTop - 32;
+  for (const row of linesOf("Questions go to your introducing agent advisor.", font, 8, rightBox - 24)) {
+    page.drawText(row, { x: assistX, y: py, size: 8, font, color: muted });
+    py -= 11;
+  }
+  py -= 4;
+  page.drawText("Monday to Friday", { x: assistX, y: py, size: 8, font: bold, color: ink });
+  py -= 12;
+  page.drawText("9:00am to 5:00pm", { x: assistX, y: py, size: 8, font, color: ink });
+  py -= 14;
+  page.drawText(fit(ascii(bill.phone), bold, 9, rightBox - 24), { x: assistX, y: py, size: 9, font: bold, color: blue });
+
+  page.drawLine({ start: { x: left, y: 42 }, end: { x: left + width, y: 42 }, thickness: 0.6, color: hair });
+  const footer = fit(`${ascii(bill.contactName)}  ·  ${asciiKeep(bill.contactAddress).replace(/\n/g, ", ")}`, font, 7, 360);
+  page.drawText(footer, { x: left, y: 26, size: 7, font, color: muted });
+  const brand = fit(ascii(bill.brand), bold, 8, 150);
+  page.drawText(brand, { x: left + width - bold.widthOfTextAtSize(brand, 8), y: 26, size: 8, font: bold, color: blue });
+
+  const bytes = await doc.save();
+  return Buffer.from(bytes).toString("base64");
+}
+function inkWidth(face: Awaited<ReturnType<PDFDocument["embedFont"]>>, value: string, size: number) {
+  let total = 0;
+  for (const char of value) total += face.widthOfTextAtSize(char, size);
+  return total;
+}
+
+function ascii(value: string) {
+  return value.replace(/[^\x20-\x7E\n]/g, " ").replace(/[ \t]+/g, " ").trim();
+}
+
+function asciiKeep(value: string) {
+  return value.replace(/[^\x20-\x7E\n]/g, " ").replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+}
+
+function fit(value: string, face: Awaited<ReturnType<PDFDocument["embedFont"]>>, size: number, maxWidth: number) {
+  const text = ascii(value);
+  if (face.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let next = text;
+  while (next.length > 1 && face.widthOfTextAtSize(`${next}...`, size) > maxWidth) next = next.slice(0, -1);
+  return `${next.trim()}...`;
+}
+
+function drawBarcode(
+  page: ReturnType<PDFDocument["addPage"]>,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  seed: string,
+  vertical = false,
+) {
+  const digits = (seed.replace(/\D/g, "") || "27471").padEnd(24, "27471");
+  const modules: number[] = [1, 0, 1];
+  for (const char of digits) {
+    const n = Number(char);
+    modules.push(1, n % 2, 0, 1, n % 3 === 0 ? 1 : 0, 0);
+  }
+  modules.push(1, 0, 1);
+  const unit = (vertical ? height : width) / modules.reduce((sum, bit) => sum + (bit ? 1.6 : 1), 0);
+  let cursor = vertical ? y : x;
+  modules.forEach((bit) => {
+    const span = unit * (bit ? 1.6 : 1);
+    if (bit) {
+      if (vertical) page.drawRectangle({ x, y: cursor, width, height: Math.max(0.4, span * 0.72), color: rgb(0, 0, 0) });
+      else page.drawRectangle({ x: cursor, y, width: Math.max(0.4, span * 0.72), height, color: rgb(0, 0, 0) });
+    }
+    cursor += span;
+  });
 }
 
 function pdfSafe(value: string) {

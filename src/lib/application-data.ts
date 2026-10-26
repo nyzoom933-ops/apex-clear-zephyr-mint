@@ -221,7 +221,9 @@ export type FormState = {
   idType: (typeof ID_TYPES)[number];
   addressDocType: (typeof ADDRESS_DOCS)[number];
   idFileName: string;
+  idFile: string;
   addressFileName: string;
+  addressFile: string;
   bankName: string;
   accountHolder: string;
   bankStreet: string;
@@ -270,7 +272,9 @@ export const EMPTY_FORM: FormState = {
   idType: "Passport",
   addressDocType: "Bank or credit-card statement",
   idFileName: "",
+  idFile: "",
   addressFileName: "",
+  addressFile: "",
   bankName: "",
   accountHolder: "",
   bankStreet: "",
@@ -318,8 +322,8 @@ export function validateStep(step: number, form: FormState): string[] {
     if (form.accountNumber.replace(/\D/g, "").length < 4) errors.push("Enter the account number.");
   }
   if (step === 4) {
-    if (!form.idFileName) errors.push("Attach an identity document.");
-    if (!form.addressFileName) errors.push("Attach a proof-of-address document.");
+    if (!form.idFile.startsWith("data:")) errors.push("Attach an identity document.");
+    if (!form.addressFile.startsWith("data:")) errors.push("Attach a proof-of-address document.");
   }
   if (step === 5) {
     if (!form.d1 || !form.d2 || !form.d3 || !form.d4) {

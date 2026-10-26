@@ -3,18 +3,25 @@ import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 export function SignaturePad({ onChange }: { onChange: (value: string | null) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
+  const ready = useRef(false);
+  const ratio = useRef(1);
 
   function context() {
     const canvas = ref.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return null;
-    if (canvas.width === 0) {
-      canvas.width = canvas.offsetWidth * 2;
-      canvas.height = canvas.offsetHeight * 2;
-      ctx.scale(2, 2);
+    if (!ready.current) {
+      const rect = canvas.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
+      ratio.current = scale;
+      canvas.width = Math.max(1, Math.round(rect.width * scale));
+      canvas.height = Math.max(1, Math.round(rect.height * scale));
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
       ctx.lineWidth = 2;
       ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.strokeStyle = "#17201c";
+      ready.current = true;
     }
     return { canvas, ctx };
   }
@@ -64,7 +71,11 @@ export function SignaturePad({ onChange }: { onChange: (value: string | null) =>
     if (!pair) return;
     pair.ctx.setTransform(1, 0, 0, 1, 0, 0);
     pair.ctx.clearRect(0, 0, pair.canvas.width, pair.canvas.height);
-    pair.ctx.scale(2, 2);
+    pair.ctx.setTransform(ratio.current, 0, 0, ratio.current, 0, 0);
+    pair.ctx.lineWidth = 2;
+    pair.ctx.lineCap = "round";
+    pair.ctx.lineJoin = "round";
+    pair.ctx.strokeStyle = "#17201c";
     onChange(null);
   }
 
@@ -76,7 +87,7 @@ export function SignaturePad({ onChange }: { onChange: (value: string | null) =>
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={finish}
-        onPointerLeave={finish}
+        onPointerCancel={finish}
       />
       <button type="button" className="mt-1 text-sm font-semibold text-primary" onClick={clear}>
         Clear
