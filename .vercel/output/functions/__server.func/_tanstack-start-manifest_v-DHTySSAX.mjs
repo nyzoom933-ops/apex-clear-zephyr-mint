@@ -1,4 +1,4 @@
-//#region node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-D9jWwMQ0.js
+//#region node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-DHTySSAX.js
 var tsrStartManifest = () => ({ routes: {
 	__root__: {
 		filePath: "/workspace/src/routes/__root.tsx",
@@ -6,24 +6,26 @@ var tsrStartManifest = () => ({ routes: {
 			"/",
 			"/admin",
 			"/application",
+			"/email-logo",
 			"/login",
 			"/portal",
 			"/reset-password",
-			"/api/cron/backup"
+			"/api/cron/backup",
+			"/api/cron/lead-reminders"
 		],
-		preloads: ["/assets/index-BrxN_9LE.js", "/assets/site-header-BLxA8ivI.js"],
+		preloads: ["/assets/index-C3dLLDti.js", "/assets/site-header-CWO1Gp1_.js"],
 		scripts: [{ attrs: {
 			type: "module",
 			async: !0,
-			src: "/assets/index-BrxN_9LE.js"
+			src: "/assets/index-C3dLLDti.js"
 		} }]
 	},
 	"/admin": {
 		filePath: "/workspace/src/routes/admin.tsx",
 		children: void 0,
 		preloads: [
-			"/assets/admin-C37hx_VX.js",
-			"/assets/x-COoJUI0W.js",
+			"/assets/admin-BT85-ETR.js",
+			"/assets/x--_ZfN4V1.js",
 			"/assets/promo-DLZnnne4.js"
 		]
 	},
@@ -31,30 +33,30 @@ var tsrStartManifest = () => ({ routes: {
 		filePath: "/workspace/src/routes/application.tsx",
 		children: void 0,
 		preloads: [
-			"/assets/application-BCoao6iF.js",
-			"/assets/signature-pad-CgNq1Ui4.js",
+			"/assets/application-CK5_0Nc-.js",
+			"/assets/signature-pad-C_ag1zSN.js",
 			"/assets/promo-DLZnnne4.js"
 		]
 	},
 	"/login": {
 		filePath: "/workspace/src/routes/login.tsx",
 		children: void 0,
-		preloads: ["/assets/login-B-vagPLe.js"]
+		preloads: ["/assets/login-D_nljGDd.js"]
 	},
 	"/portal": {
 		filePath: "/workspace/src/routes/portal.tsx",
 		children: void 0,
 		preloads: [
-			"/assets/portal-eagUIk_o.js",
-			"/assets/signature-pad-CgNq1Ui4.js",
-			"/assets/x-COoJUI0W.js",
+			"/assets/portal-DDEfT2Om.js",
+			"/assets/signature-pad-C_ag1zSN.js",
+			"/assets/x--_ZfN4V1.js",
 			"/assets/promo-DLZnnne4.js"
 		]
 	},
 	"/reset-password": {
 		filePath: "/workspace/src/routes/reset-password.tsx",
 		children: void 0,
-		preloads: ["/assets/reset-password-D1yAprvL.js"]
+		preloads: ["/assets/reset-password-Dl42PLYo.js"]
 	}
 } });
 //#endregion

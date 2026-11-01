@@ -15,17 +15,21 @@ type InviteRow = {
   advisor_phone: string;
   advisor_email: string;
   advisor_mailbox: string;
+  advisor_role: string;
+  advisor_personal_phone: string;
   expires_at: string | Date;
 };
 
 export async function createLeadInvite(
   sql: Sql,
-  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo"; advisor: { name: string; phone: string; email: string; mailbox: string } },
+  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo"; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
 ) {
   const token = randomBytes(24).toString("hex");
   const expiresAt = new Date(Date.now() + 24 * HOUR).toISOString();
+  await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
+  await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
   await sql`
-    insert into lead_invites (token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, advisor_mailbox, expires_at)
+    insert into lead_invites (token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, advisor_mailbox, advisor_role, advisor_personal_phone, expires_at)
     values (
       ${token},
       ${input.email},
@@ -37,6 +41,8 @@ export async function createLeadInvite(
       ${input.advisor.phone},
       ${input.advisor.email},
       ${input.advisor.mailbox},
+      ${input.advisor.role || ""},
+      ${input.advisor.personalPhone || ""},
       ${expiresAt}
     )
   `;
@@ -87,9 +93,11 @@ export async function remindDueInvites() {
   const { inviteReminderLetter } = await import("@/lib/email-templates");
   const { notifyStep } = await import("@/lib/mail.server");
   const sql = await getSql();
+  await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
+  await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
   const due = new Date(Date.now() + REMINDER_WINDOW_MS).toISOString();
   const rows = await sql<InviteRow>`
-    select token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, expires_at
+    select token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone, expires_at
     from lead_invites
     where used_at is null
       and reminded_at is null
@@ -105,7 +113,7 @@ export async function remindDueInvites() {
     `;
     if (!claimed[0]) continue;
     try {
-      const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_name')`;
+      const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_name', 'company_phone')`;
       const origin = settings.find((item) => item.key === "public_domain")?.value || "";
       const link = inviteApplicationUrl(origin, row.token);
       const terms = await sql<{ apy: string }>`select apy from cd_terms where months = ${row.months} limit 1`;
@@ -119,7 +127,8 @@ export async function remindDueInvites() {
         link,
         logo: settings.find((item) => item.key === "email_logo")?.value || null,
         advisorName: row.advisor_name,
-        advisor: { name: row.advisor_name, phone: row.advisor_phone, email: row.advisor_email, mailbox: row.advisor_mailbox },
+        advisor: { name: row.advisor_name, phone: row.advisor_phone, email: row.advisor_email, mailbox: row.advisor_mailbox, role: row.advisor_role, personalPhone: row.advisor_personal_phone },
+        companyPhone: settings.find((item) => item.key === "company_phone")?.value || "",
       });
       await notifyStep(sql, {
         step: "lead_invite_reminder",

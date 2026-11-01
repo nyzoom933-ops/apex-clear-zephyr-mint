@@ -40,6 +40,7 @@ export async function notifyStep(
   },
 ) {
   const companyName = await readCompanyName(sql);
+  const companyPhone = await readCompanyPhone(sql);
   const emailLogo = await readEmailLogo(sql);
   const origin = await portalOrigin(sql);
   const client = renderStep(input.step, "client", {
@@ -47,6 +48,7 @@ export async function notifyStep(
     email: input.clientEmail,
     detail: input.detail,
     companyName,
+    companyPhone,
     emailLogo,
     portalUrl: origin,
     extraHtml: input.extraHtml,
@@ -56,6 +58,7 @@ export async function notifyStep(
     email: input.clientEmail,
     detail: input.adminDetail || input.detail,
     companyName,
+    companyPhone,
     emailLogo,
     extraHtml: input.extraHtml,
   });
@@ -110,6 +113,11 @@ async function requestOrigin() {
     return "";
   }
   return "";
+}
+
+async function readCompanyPhone(sql: Sql) {
+  const rows = await sql<{ value: string }>`select value from site_settings where key = 'company_phone'`;
+  return rows[0]?.value?.trim() || "";
 }
 
 async function readCompanyName(sql: Sql) {

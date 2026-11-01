@@ -1,4 +1,4 @@
-//#region node_modules/.nitro/vite/services/ssr/assets/db-CSLm5XxB.js
+//#region node_modules/.nitro/vite/services/ssr/assets/db-8lvi3Ffs.js
 var _0001_applications_default = "create table if not exists applications (\n  id text primary key,\n  status text not null default 'pending' check (status in ('pending', 'approved', 'hold')),\n  submitted_at timestamptz not null default now(),\n  applicant_name text not null,\n  email text not null,\n  account_type text not null,\n  currency text not null,\n  payload jsonb not null\n);\n\ncreate index if not exists applications_submitted_at_idx on applications (submitted_at desc);\n";
 var _0002_investor_users_default = "alter table applications add column if not exists password_hash text;\n\ncreate table if not exists investor_users (\n  email text primary key,\n  password_hash text not null,\n  application_id text,\n  created_at timestamptz not null default now()\n);\n";
 var _0003_site_settings_default = "create table if not exists site_settings (\n  key text primary key,\n  value text not null\n);\n";
@@ -21,6 +21,12 @@ var _0019_notification_read_default = "alter table notifications add column if n
 var _0020_invoice_billing_default = "alter table fundings add column if not exists invoice_billing jsonb not null default '{}'::jsonb;\n";
 var _0021_funding_contact_default = "alter table fundings add column if not exists contact_phone text not null default '';\nalter table fundings add column if not exists contact_by text not null default 'call';\n";
 var _0022_funding_snapshot_default = "alter table fundings add column if not exists promo_apy text not null default '';\nalter table fundings add column if not exists final_apy text not null default '';\nalter table fundings add column if not exists payment_approved_at timestamptz;\n";
+var _0023_lead_invites_default = "create table if not exists lead_invites (\n  token text primary key,\n  email text not null,\n  name text not null,\n  months integer not null,\n  promo_code text not null default '',\n  kind text not null,\n  advisor_name text not null default '',\n  advisor_phone text not null default '',\n  advisor_email text not null default '',\n  expires_at timestamptz not null,\n  reminded_at timestamptz,\n  used_at timestamptz,\n  created_at timestamptz not null default now()\n);\n";
+var _0024_mail_status_default = "alter table notifications add column if not exists resend_id text not null default '';\nalter table notifications add column if not exists mail_status text not null default '';\nalter table notifications add column if not exists status_at timestamptz;\n";
+var _0025_mail_provider_default = "alter table notifications add column if not exists mail_provider text not null default '';\n";
+var _0026_advisor_mailbox_default = "alter table advisors add column if not exists mailbox text not null default '';\nalter table lead_invites add column if not exists advisor_mailbox text not null default '';\n";
+var _0027_crm_leads_default = "create table if not exists crm_leads (\n  id text primary key,\n  name text not null,\n  email text not null default '',\n  phone text not null default '',\n  amount text not null default '',\n  term text not null default '',\n  objective text not null default '',\n  liquidity text not null default '',\n  source text not null default '',\n  received_at timestamptz not null default now(),\n  created_at timestamptz not null default now()\n);\n";
+var _0028_advisor_role_default = "alter table advisors add column if not exists role text not null default '';\nalter table lead_invites add column if not exists advisor_role text not null default '';\n";
 /**
 * Migration bookkeeping shared by the two appliers — `scripts/migrate.mjs`
 * (deploy, `readdir`) and `src/lib/db.ts` (PGLite preview, `import.meta.glob`).
@@ -160,7 +166,13 @@ async function createPgliteSql() {
 			"/migrations/0019_notification_read.sql": _0019_notification_read_default,
 			"/migrations/0020_invoice_billing.sql": _0020_invoice_billing_default,
 			"/migrations/0021_funding_contact.sql": _0021_funding_contact_default,
-			"/migrations/0022_funding_snapshot.sql": _0022_funding_snapshot_default
+			"/migrations/0022_funding_snapshot.sql": _0022_funding_snapshot_default,
+			"/migrations/0023_lead_invites.sql": _0023_lead_invites_default,
+			"/migrations/0024_mail_status.sql": _0024_mail_status_default,
+			"/migrations/0025_mail_provider.sql": _0025_mail_provider_default,
+			"/migrations/0026_advisor_mailbox.sql": _0026_advisor_mailbox_default,
+			"/migrations/0027_crm_leads.sql": _0027_crm_leads_default,
+			"/migrations/0028_advisor_role.sql": _0028_advisor_role_default
 		});
 		const done = (await pg.query("select name from _migrations")).rows.map((r) => r.name);
 		for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) await pg.transaction(async (tx) => {
@@ -209,17 +221,32 @@ function ensureDbReady() {
 	return getSql().then(() => void 0);
 }
 var globalBoot = globalThis;
-if (typeof window === "undefined" && dbSource === "pglite") globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().then(() => startBackupSchedule()).catch((err) => {
+if (typeof window === "undefined" && dbSource === "pglite") globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().then(() => {
+	startBackupSchedule();
+	startInviteReminders();
+}).catch((err) => {
 	globalBoot.__pgBootstrapPromise__ = void 0;
 	console.error("[db] PGLite bootstrap failed:", err);
 	throw err;
 });
-else if (typeof window === "undefined") startBackupSchedule();
+else if (typeof window === "undefined") {
+	startBackupSchedule();
+	startInviteReminders();
+}
+function startInviteReminders() {
+	const boot = globalThis;
+	if (boot.__inviteBoot) return;
+	boot.__inviteBoot = true;
+	import("./lead-invites.server-DBOhEbbT.mjs").then((mod) => mod.ensureInviteReminderSchedule()).catch((err) => {
+		boot.__inviteBoot = false;
+		console.error("[db] Invite reminder schedule failed:", err);
+	});
+}
 function startBackupSchedule() {
 	const boot = globalThis;
 	if (boot.__backupBoot) return;
 	boot.__backupBoot = true;
-	import("./backup.server-TfubgEnY.mjs").then((mod) => mod.ensureBackupSchedule()).catch((err) => {
+	import("./backup.server-skMXqjk0.mjs").then((mod) => mod.ensureBackupSchedule()).catch((err) => {
 		boot.__backupBoot = false;
 		console.error("[db] Backup schedule failed:", err);
 	});

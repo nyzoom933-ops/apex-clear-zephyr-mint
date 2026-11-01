@@ -191,7 +191,7 @@ const CERTIFICATE_STEPS = new Set<MailStep>([
 export function renderStep(
   step: MailStep,
   audience: MailAudience,
-  input: { name: string; email: string; detail: string; companyName?: string; emailLogo?: string | null; portalUrl?: string; extraHtml?: string; advisor?: MailAdvisor },
+  input: { name: string; email: string; detail: string; companyName?: string; companyPhone?: string; emailLogo?: string | null; portalUrl?: string; extraHtml?: string; advisor?: MailAdvisor },
 ): RenderedEmail {
   const item = STEPS[step];
   const company = input.companyName?.trim() || DEFAULT_COMPANY_NAME;
@@ -210,7 +210,7 @@ export function renderStep(
   const greeting = isFullLetter ? "" : audience === "client" ? `Hello ${name},` : "Operations desk,";
   const text = isFullLetter
     ? [input.detail.trim() || "The letter is in the HTML version.", portalUrl ? `Application\n${portalUrl}` : ""].filter(Boolean).join("\n\n")
-    : [greeting, "", lead, ...(input.detail.trim() ? ["", input.detail.trim()] : []), ...(next ? ["", "What happens next", next] : []), ...(portalUrl ? ["", "Open the investor portal", portalUrl] : []), "", company].join("\n");
+    : [greeting, "", lead, ...(input.detail.trim() ? ["", input.detail.trim()] : []), ...(next ? ["", "What happens next", next] : []), ...(portalUrl ? ["", "Open the investor portal", portalUrl] : []), "", "Please do not reply to this email. This mailbox is not monitored.", input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : "We're here to help.", "", company].join("\n");
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
@@ -221,7 +221,7 @@ export function renderStep(
     label: item.label,
     subject,
     text,
-    html: fullLetter || layout({ eyebrow: item.label, greeting, lead, lines, next, audience, company, logo: input.emailLogo, portalUrl, portalLabel: "Open the investor portal", extraHtml: fullLetterStep ? "" : input.extraHtml || "" }),
+    html: fullLetter || layout({ eyebrow: item.label, greeting, lead, lines, next, audience, company, companyPhone: input.companyPhone, logo: input.emailLogo, portalUrl, portalLabel: "Open the investor portal", extraHtml: fullLetterStep ? "" : input.extraHtml || "" }),
   };
 }
 
@@ -246,7 +246,7 @@ function applicationUrl(value: string | undefined) {
   return trimmed.replace(/\/$/, "") + "/application";
 }
 
-export type MailAdvisor = { name: string; phone: string; email: string; mailbox?: string };
+export type MailAdvisor = { name: string; phone: string; email: string; mailbox?: string; role?: string; personalPhone?: string };
 
 function contactLink(value: string, href: string) {
   const label = escapeHtml(value);
@@ -263,14 +263,25 @@ function mailLink(email: string) {
   return contactLink(email, /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? `mailto:${email}` : "");
 }
 
+function companyCredit(company: string, phone?: string) {
+  const number = phone?.trim();
+  return `${escapeHtml(company)}${number ? ` · ${escapeHtml(number)}` : ""}. © ${new Date().getFullYear()}`;
+}
+
 function advisorSignature(advisor: MailAdvisor | undefined, company: string) {
   const name = advisor?.name?.trim() || company;
-  const phone = advisor?.phone?.trim() || "";
+  const direct = advisor?.personalPhone?.trim() || advisor?.phone?.trim() || "";
   const email = advisor?.email?.trim() || "";
+  const role = advisor?.role?.trim() || "";
   const mailbox = advisor?.mailbox?.trim() && advisor.mailbox.trim().toLowerCase() !== email.toLowerCase() ? advisor.mailbox.trim() : "";
-  const html = `Best regards,<br><strong>${escapeHtml(name)}</strong>${phone ? `<br>${escapeHtml(phone)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}${mailbox ? `<br>${escapeHtml(mailbox)}` : ""}<br>${escapeHtml(company)}`;
-  const text = ["Best regards", name, phone, email, mailbox, company].filter(Boolean).join("\n");
+  const html = `Best regards,<br><strong>${escapeHtml(name)}</strong>${direct ? `<br>${escapeHtml(direct)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}${mailbox ? `<br>${escapeHtml(mailbox)}` : ""}${role ? `<br>${escapeHtml(role)}` : ""}`;
+  const text = ["Best regards", name, direct, email, mailbox, role].filter(Boolean).join("\n");
   return { html, text };
+}
+
+function companyHelp(phone?: string) {
+  const number = phone?.trim() || "";
+  return number ? `please call:<br>${phoneLink(number)}` : "please contact the main office.";
 }
 
 export type LeadCopy = {
@@ -295,7 +306,7 @@ export function defaultLeadCopy(input: { leadName: string; company: string; advi
     certificate: "Choose a term that fits your plans and earn a fixed rate for that term. A penalty may apply if you withdraw before maturity.",
     offer: input.offerIntro?.trim() || "A tiered introductory bonus for new clients. The bonus applies for the full duration of the CD and increases with the amount you place.",
     protection: input.protection?.trim() || "Deposits are FDIC insured. Capital protection covers the first $250,000 per individual or $500,000 per joint account.",
-    ready: "Opening a promotional CD starts with your advisor. Start an application, then confirm that the new-money and new-client rules apply to you.",
+    ready: "Opening a promotional CD starts with your advisor. Confirm that the new-money and new-client rules apply to you.",
     thanks: `Thank you for considering ${company}. We look forward to helping you with your savings plans.`,
   };
 }
@@ -310,6 +321,7 @@ export function leadLetter(input: {
   protection?: string;
   logo?: string | null;
   portalUrl?: string;
+  companyPhone?: string;
   copy?: LeadCopy | null;
 }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
@@ -340,8 +352,7 @@ export function leadLetter(input: {
     const apy = (term?.apy || "—").replace(/\s*APY/i, "");
     return { month, apy };
   });
-  const applyUrl = applicationUrl(input.portalUrl);
-  const logo = safeImage(input.logo);
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
@@ -374,10 +385,7 @@ export function leadLetter(input: {
     })
     .join("");
   const sign = advisorSignature(advisor, company);
-  const help = advisor?.phone ? `please call:<br>${phoneLink(advisor.phone)}` : advisor?.email ? `please write to:<br>${mailLink(advisor.email)}` : "please reply to this email.";
-  const button = applyUrl
-    ? `<p style="margin:16px 0 0 0;"><a href="${escapeHtml(applyUrl)}" style="display:inline-block; background:#006fcf; color:#ffffff; text-decoration:none; font-weight:700; font-size:14px; padding:14px 22px;">Start an application</a></p>`
-    : `<p style="margin:16px 0 0 0;"><a href="#" style="display:inline-block; background:#006fcf; color:#ffffff; text-decoration:none; font-weight:700; font-size:14px; padding:14px 22px;">Start an application</a></p>`;
+  const help = companyHelp(input.companyPhone);
   const preheader = cards.slice(0, 2).map((card) => `${card.month}-month CD ${card.apy} APY`).join(" and ") || "Current certificate rates";
   const text = [
     `Dear ${name},`,
@@ -389,9 +397,9 @@ export function leadLetter(input: {
     window,
     protectionText,
     ready,
-    applyUrl ? `Start an application: ${applyUrl}` : "",
     thanks,
     sign.text,
+    input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -470,7 +478,6 @@ export function leadLetter(input: {
             <td style="padding:16px 36px 8px 36px;">
               <p style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#12315c;">Ready to get started?</p>
               <p style="margin:0; font-size:14px; line-height:21px;">${escapeHtml(ready)}</p>
-              ${button}
               <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${escapeHtml(thanks)}</p>
               <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
             </td>
@@ -504,7 +511,7 @@ export function leadLetter(input: {
           <tr>
             <td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
               <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">${escapeHtml(fine || `This message was sent regarding a new-account promotion for a certificate of deposit. Promotional bonuses require ${minimum} in new money${window ? ` and are available ${window.replace("Offer available from ", "")}` : ""}. A penalty may be imposed for early withdrawal. Offer subject to account requirements and availability.`)}</p>
-              <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${escapeHtml(company)}. © ${new Date().getFullYear()}</p>
+              <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company, input.companyPhone)}</p>
             </td>
           </tr>
         </table>
@@ -558,6 +565,7 @@ export function applicationLetter(input: {
   logo?: string | null;
   portalUrl?: string;
   link?: string;
+  companyPhone?: string;
   variant?: "custom" | "promo";
   copy?: ApplicationCopy | null;
 }) {
@@ -591,12 +599,12 @@ export function applicationLetter(input: {
     })
     .join("");
   const link = input.link?.trim() || applicationLink(input.portalUrl, months, promoCode);
-  const logo = safeImage(input.logo);
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
   const sign = advisorSignature(advisor, company);
-  const help = advisor?.phone ? `please call:<br>${phoneLink(advisor.phone)}` : advisor?.email ? `please write to:<br>${mailLink(advisor.email)}` : "please reply to this email.";
+  const help = companyHelp(input.companyPhone);
   const buttonLabel = months ? `${months}-Month CD Application` : "CD Application";
   const buttonHref = link || "#";
   const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(buttonHref)}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">${escapeHtml(buttonLabel)}</a></td></tr></table>`;
@@ -621,7 +629,7 @@ export function applicationLetter(input: {
   const fine = input.variant === "promo"
     ? `This personal application link expires 24 hours after it is sent. The promotional APY is for new clients, requires ${minimum} in new money${window ? `, and is available ${window}` : ""}. A penalty may be imposed for early withdrawal.`
     : `This personal application link expires 24 hours after it is sent. Minimum to open: ${minimum}. A penalty may be imposed for early withdrawal.`;
-  const text = [`Dear ${name},`, hope, ready, instruction, promoCode ? `Promotional code: ${promoCode}` : "", `${months}-month CD ${apy} APY`, followUp, thanks, link ? `${buttonLabel}: ${link}` : "", sign.text].filter(Boolean).join("\n\n");
+  const text = [`Dear ${name},`, hope, ready, instruction, promoCode ? `Promotional code: ${promoCode}` : "", `${months}-month CD ${apy} APY`, followUp, thanks, link ? `${buttonLabel}: ${link}` : "", sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -690,7 +698,7 @@ export function applicationLetter(input: {
         </td></tr>
         <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
           <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">${escapeHtml(fine)}</p>
-          <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${escapeHtml(company)}. © ${new Date().getFullYear()}</p>
+          <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company, input.companyPhone)}</p>
         </td></tr>
       </table>
     </td></tr>
@@ -775,11 +783,11 @@ function sampleReminderLetter(portalUrl?: string, advisor?: MailAdvisor) {
   }).html;
 }
 
-export function inviteReminderLetter(input: { leadName: string; company: string; months: number; apy: string; promoCode: string; link: string; logo?: string | null; advisorName?: string; advisor?: MailAdvisor }) {
+export function inviteReminderLetter(input: { leadName: string; company: string; months: number; apy: string; promoCode: string; link: string; logo?: string | null; advisorName?: string; advisor?: MailAdvisor; companyPhone?: string }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.leadName.trim() || "Client";
   const apy = (input.apy || "—").replace(/\s*APY/i, "");
-  const logo = safeImage(input.logo);
+  const logo = emailLogoSrc(input.logo, input.link);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
@@ -788,6 +796,7 @@ export function inviteReminderLetter(input: { leadName: string; company: string;
     ? `<p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">Your promotional code is <strong>${escapeHtml(input.promoCode.trim())}</strong>.</p>`
     : "";
   const sign = advisorSignature(input.advisor ?? (input.advisorName ? { name: input.advisorName, phone: "", email: "" } : undefined), company);
+  const help = companyHelp(input.companyPhone);
   const subject = "Your application link expires soon";
   const text = [`Dear ${name},`, `Your ${input.months}-month certificate application link expires in about 2 hours.`, input.promoCode ? `Promotional code: ${input.promoCode}` : "", input.link ? `Open the application\n${input.link}` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
@@ -806,6 +815,10 @@ export function inviteReminderLetter(input: { leadName: string; company: string;
         <p style="margin:18px 0 0 0;">${button}</p>
         <p style="margin:18px 0 0 0; font-size:14px; line-height:21px;">If the link expires, ask ${escapeHtml(input.advisor?.name || input.advisorName || "your advisor")} for a new one.</p>
         <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+      </td></tr>
+      <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+        <p style="margin:0 0 4px 0; font-size:14px; font-weight:700;">We’re here to help.</p>
+        <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
       </td></tr>
     </table>
   </td></tr></table>
@@ -895,7 +908,17 @@ function fill(value: string, name: string, email: string, company: string) {
   return value.replaceAll("{{name}}", name).replaceAll("{{email}}", email).replaceAll("{{company}}", company);
 }
 
-function layout(input: { eyebrow: string; greeting: string; lead: string; lines: string[]; next?: string; audience: MailAudience; company: string; logo?: string | null; portalUrl?: string; portalLabel?: string; extraHtml?: string }) {
+function helpFooter(phone: string | undefined) {
+  const number = phone?.trim() || "";
+  const call = number ? `please call:<br>${phoneLink(number)}` : "please sign in to your investor portal.";
+  return `<tr><td style="background:#12315c; padding:18px 32px; color:#ffffff; font-family:Arial,sans-serif;">
+    <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+    <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${call}</p>
+  </td></tr>
+  <tr><td style="padding:12px 32px 4px; font-family:Arial,sans-serif; font-size:12px; line-height:18px; color:#8c8c8c;">Please do not reply to this email. This mailbox is not monitored.</td></tr>`;
+}
+
+function layout(input: { eyebrow: string; greeting: string; lead: string; lines: string[]; next?: string; audience: MailAudience; company: string; companyPhone?: string; logo?: string | null; portalUrl?: string; portalLabel?: string; extraHtml?: string }) {
   const facts = input.lines
     .map((line) => `<p style="margin:0 0 6px;font-size:14px;line-height:1.4;color:#3d3d3d;">${escapeHtml(line)}</p>`)
     .join("");
@@ -912,7 +935,7 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
     ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;"><a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:#006fcf;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 18px;border-radius:6px;">${escapeHtml(input.portalLabel || "Open the investor portal")}</a></td></tr>`
     : "";
   const who = input.audience === "client" ? "Investor note" : "Desk note";
-  const logo = safeImage(input.logo);
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(input.company)}" height="32" style="display:block;height:32px;width:auto;max-width:180px;border:0;">`
     : `<p style="margin:0;font-family:Arial,sans-serif;font-size:12px;letter-spacing:0.14em;color:#ffffff;">${escapeHtml(input.company.toUpperCase())}</p>`;
@@ -938,7 +961,8 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
         ${extra}
         ${next}
         ${portal}
-        <tr><td style="padding:8px 32px 28px;font-family:Arial,sans-serif;font-size:12px;color:#8c8c8c;">${escapeHtml(input.company)} · Investor accounts</td></tr>
+        ${helpFooter(input.companyPhone)}
+        <tr><td style="padding:8px 32px 28px;font-family:Arial,sans-serif;font-size:12px;color:#8c8c8c;">${escapeHtml(input.company)}${input.companyPhone?.trim() ? ` · ${escapeHtml(input.companyPhone.trim())}` : ""} · Investor accounts</td></tr>
       </table>
     </td></tr>
   </table>
@@ -946,9 +970,33 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
 </html>`;
 }
 
+function emailLogoSrc(logo: string | null | undefined, pageUrl: string | undefined) {
+  const stored = logo?.trim() || "";
+  const origin = publicOrigin(pageUrl);
+  if (stored.startsWith("data:image/") && origin) return `${origin}/email-logo?v=${logoVersion(stored)}`;
+  return safeImage(stored);
+}
+
+function publicOrigin(value: string | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!/^https?:\/\//i.test(trimmed)) return "";
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return "";
+  }
+}
+
+function logoVersion(value: string) {
+  let hash = 0;
+  const sample = `${value.length}:${value.slice(0, 240)}`;
+  for (let index = 0; index < sample.length; index += 1) hash = (hash * 33 + sample.charCodeAt(index)) >>> 0;
+  return hash.toString(36);
+}
+
 function safeImage(value: string | null | undefined) {
-  if (!value || !/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+$/.test(value)) return "";
-  return value;
+  if (!value || !/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/.test(value)) return "";
+  return value.replace(/\s/g, "");
 }
 
 function escapeHtml(value: string) {

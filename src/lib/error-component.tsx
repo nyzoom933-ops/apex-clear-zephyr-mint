@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { TriangleAlert } from "lucide-react";
 
@@ -9,7 +10,20 @@ function errorMessage(error: unknown): string {
   return FALLBACK_MESSAGE;
 }
 
+function staleModule(error: unknown) {
+  const message = errorMessage(error);
+  return message.includes("dynamically imported module") || message.includes("Importing a module script failed");
+}
+
 export function AppErrorComponent({ error }: ErrorComponentProps) {
+  useEffect(() => {
+    if (!staleModule(error)) return;
+    const key = "ah-chunk-reload";
+    if (sessionStorage.getItem(key) === "1") return;
+    sessionStorage.setItem(key, "1");
+    window.location.reload();
+  }, [error]);
+
   return (
     <main
       className={
@@ -22,8 +36,11 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
       </span>
       <h1 className="text-lg font-semibold">Something went wrong</h1>
       <p className="max-w-md text-sm break-words text-zinc-500 dark:text-zinc-400">
-        {errorMessage(error)}
+        {staleModule(error) ? "The page was updated. Reload to open the latest version." : errorMessage(error)}
       </p>
+      <button type="button" className="mt-2 min-h-11 rounded-md bg-[#006fcf] px-4 py-2 text-sm font-semibold text-white" onClick={() => window.location.reload()}>
+        Reload
+      </button>
     </main>
   );
 }

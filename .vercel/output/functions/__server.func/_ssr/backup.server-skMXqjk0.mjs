@@ -1,6 +1,6 @@
 import { s as env } from "./env.server-CXxi_iUv.mjs";
-import { readMailConfig } from "./mail.server-C6f7ynqb.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/backup.server-TfubgEnY.js
+import { readMailConfig } from "./mail.server-DvP07-0d.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/backup.server-skMXqjk0.js
 var DAY_MS = 864e5;
 var HOUR_MS = 36e5;
 var ADMIN_EMAIL = "admin@accountholding.com";
@@ -17,7 +17,7 @@ async function runBackup() {
 	};
 	globalRef.__backupRunning = true;
 	try {
-		const { getSql } = await import("./db-CSLm5XxB.mjs");
+		const { getSql } = await import("./db-8lvi3Ffs.mjs");
 		const sql = await getSql();
 		const desk = await sql`select value from site_settings where key = 'desk_email'`;
 		const to = await readSetting(sql, "backup_email") || desk[0]?.value?.trim() || env("BACKUP_EMAIL") || env("ADMIN_EMAIL") || ADMIN_EMAIL;
@@ -63,7 +63,7 @@ async function runBackup() {
 async function runIfDue() {
 	if (globalRef.__backupRunning) return;
 	try {
-		const { getSql } = await import("./db-CSLm5XxB.mjs");
+		const { getSql } = await import("./db-8lvi3Ffs.mjs");
 		const sql = await getSql();
 		const last = await readSetting(sql, "backup_at");
 		if (last && Date.now() - Date.parse(last) < DAY_MS) return;

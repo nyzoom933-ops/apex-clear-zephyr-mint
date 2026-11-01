@@ -32,6 +32,11 @@ export const Route = createRootRoute({
         <HeadContent />
       </head>
       <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var key="ah-chunk-reload";window.addEventListener("vite:preloadError",function(event){event.preventDefault();if(sessionStorage.getItem(key)==="1")return;sessionStorage.setItem(key,"1");window.location.reload();});window.addEventListener("load",function(){sessionStorage.removeItem(key);});})();`,
+          }}
+        />
         <PreviewHostBridge />
         <AuthProvider>
           <BrandProvider>

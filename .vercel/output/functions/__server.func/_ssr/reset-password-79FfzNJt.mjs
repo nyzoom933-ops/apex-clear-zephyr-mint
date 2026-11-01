@@ -1,7 +1,7 @@
 import { o as __toESM } from "../_runtime.mjs";
 import { S as require_jsx_runtime, X as require_react, y as Link } from "../_libs/@tanstack/react-router+[...].mjs";
-import { i as headerActionClass, r as SiteHeader } from "./router-B75_K_o9.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/reset-password-DJuMlbF6.js
+import { i as headerActionClass, r as SiteHeader } from "./router-BgWJKDCs.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/reset-password-79FfzNJt.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function ResetPasswordPage() {

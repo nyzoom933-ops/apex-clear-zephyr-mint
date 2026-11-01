@@ -1,10 +1,10 @@
 import { o as __toESM } from "../_runtime.mjs";
-import { a as matchTier, o as parseApy, r as formatBonus } from "./promo-a-oE9-Iz.mjs";
-import { n as templateCatalog } from "./email-templates-8axwok5k.mjs";
+import { a as matchTier, o as parseApy, r as formatBonus, s as promoMonths } from "./promo-a-oE9-Iz.mjs";
+import { a as leadLetter, n as defaultApplicationCopy, o as renderStep, r as defaultLeadCopy, s as templateCatalog, t as applicationLetter } from "./email-templates-C0jVmMQF.mjs";
 import { S as require_jsx_runtime, X as require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { t as X, u as Menu, y as ChevronDown } from "../_libs/lucide-react.mjs";
-import { A as listApplications, B as saveInvestmentType, C as getMailSetup, E as getPromo, F as rejectPayment, G as setSiteBrand, H as saveMailSetup, I as runDatabaseBackup, L as saveAdvisor, N as listNotifications, R as saveCdTerms, T as getPaymentFile, U as savePromo, V as saveInvoiceBilling, W as setApplicationStatus, X as updateFunding, _ as downloadInvoicePdf, a as useBrand, b as getInvestmentTypes, c as approveInvoice, d as clearDatabase, f as createDeskLogin, h as deleteFunding, i as headerActionClass, j as listFundings, k as listAdvisors, l as approvePayment, m as deleteApplication, o as adminLogin, p as deleteAdvisor, q as signInAsClient, r as SiteHeader, s as adminLogout, v as getAdminSession, y as getCdTerms, z as saveDeskLogin } from "./router-B75_K_o9.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/admin-DRdKYU0l.js
+import { $ as setSiteBrand, B as runDatabaseBackup, E as getMailSetup, F as listFundings, G as saveInvestmentType, H as saveCdTerms, J as savePromo, K as saveInvoiceBilling, L as listNotifications, M as listAdvisors, N as listApplications, O as getPaymentFile, P as listCrmLeads, Q as setApplicationStatus, S as getInvestmentTypes, U as saveCrmLead, V as saveAdvisor, W as saveDeskLogin, X as sendLeadApplication, Y as saveSmtpSetup, Z as sendLeadIntro, _ as deleteFunding, a as useBrand, at as updateFunding, b as getAdminSession, c as adminLogout, f as clearDatabase, g as deleteCrmLead, h as deleteApplication, i as headerActionClass, it as syncMailStatuses, k as getPromo, l as approveInvoice, m as deleteAdvisor, o as DEFAULT_THEME, p as createDeskLogin, q as saveMailSetup, r as SiteHeader, s as adminLogin, tt as signInAsClient, u as approvePayment, x as getCdTerms, y as downloadInvoicePdf, z as rejectPayment } from "./router-BgWJKDCs.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/admin-CchV_OX-.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var controlClass = "w-full rounded-md border border-border bg-surface px-3.5 py-3 text-base text-fg outline-none focus:border-primary";
@@ -367,14 +367,14 @@ function Cabinet({ onSignOut }) {
 							onStatus: (status) => void updateStatus(selected.id, status),
 							onRemove: () => void removeApplication(selected.id)
 						}) : null
-					] }) : tab === "clients" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ClientsPanel, {
+					] }) : tab === "pipeline-leads" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PipelineLeadsPanel, {}) : tab === "clients" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ClientsPanel, {
 						rows: clients,
 						onStatus: (id, status) => void updateStatus(id, status),
 						onRemove: (id) => void removeApplication(id)
 					}) : tab === "investments" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						className: "grid gap-12",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(InvestmentTypesPanel, {}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PromoPanel, {})]
-					}) : tab === "funding" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(FundingDesk, {}) : tab === "active" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ActiveCdsDesk, {}) : tab === "invoices" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(InvoicesDesk, {}) : tab === "advisors" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdvisorsPanel, {}) : tab === "emails" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmailsPanel, {}) : tab === "settings-logos" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "logos" }) : tab === "settings-misc" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "misc" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "general" })
+					}) : tab === "funding" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(FundingDesk, {}) : tab === "active" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ActiveCdsDesk, {}) : tab === "invoices" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(InvoicesDesk, {}) : tab === "advisors" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdvisorsPanel, {}) : tab === "leads" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LeadsPanel, {}) : tab === "mail-status" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MailStatusPanel, {}) : tab === "emails" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmailsPanel, {}) : tab === "settings-logos" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "logos" }) : tab === "settings-appearance" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "appearance" }) : tab === "settings-misc" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "misc" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SettingsPanel, { section: "general" })
 				]
 			})]
 		})]
@@ -382,16 +382,23 @@ function Cabinet({ onSignOut }) {
 }
 function EmailsPanel() {
 	const [rows, setRows] = (0, import_react.useState)(null);
+	const [advisors, setAdvisors] = (0, import_react.useState)([]);
+	const [signatureId, setSignatureId] = (0, import_react.useState)("");
 	const [error, setError] = (0, import_react.useState)("");
 	const [audience, setAudience] = (0, import_react.useState)("all");
 	const [origin, setOrigin] = (0, import_react.useState)("");
 	const brand = useBrand();
-	const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin).filter((item) => audience === "all" || item.audience === audience);
+	const signature = advisors.find((item) => item.id === signatureId) ?? advisors[0];
+	const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin, signature).filter((item) => audience === "all" || item.audience === audience);
 	(0, import_react.useEffect)(() => {
 		setOrigin(window.location.origin);
 	}, []);
 	(0, import_react.useEffect)(() => {
 		listNotifications().then(setRows).catch(() => setError("Emails could not be loaded."));
+		listAdvisors().then((people) => {
+			setAdvisors(people);
+			setSignatureId((current) => current || people[people.length - 1]?.id || "");
+		}).catch(() => void 0);
 	}, []);
 	const visible = (rows ?? []).filter((row) => audience === "all" || row.audience === audience);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
@@ -401,7 +408,29 @@ function EmailsPanel() {
 		}),
 		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-2 max-w-2xl text-fg",
-			children: "Each step has a client template and a desk template. Sent mail uses these layouts."
+			children: "Each step has a client template and a desk template. Lead letters sign off with the advisor you select."
+		}),
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+			className: "mt-4 block max-w-md text-sm",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+				className: "font-semibold text-primary",
+				children: "Signature"
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+				className: `${controlClass} mt-1`,
+				value: signature?.id ?? "",
+				onChange: (event) => setSignatureId(event.target.value),
+				children: [advisors.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+					value: "",
+					children: "No advisors yet"
+				}) : null, advisors.map((item) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("option", {
+					value: item.id,
+					children: [
+						item.name,
+						item.role ? ` · ${item.role}` : "",
+						item.email ? ` · ${item.email}` : ""
+					]
+				}, item.id))]
+			})]
 		}),
 		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 			className: "mt-4 flex flex-wrap gap-2",
@@ -436,7 +465,7 @@ function EmailsPanel() {
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("iframe", {
 						title: item.subject,
 						srcDoc: item.html,
-						className: "mt-3 h-80 w-full rounded-md border border-border bg-white"
+						className: "mt-3 h-[640px] w-full rounded-md border border-border bg-white"
 					})
 				]
 			}, `${item.step}-${item.audience}`))
@@ -490,6 +519,179 @@ function EmailsPanel() {
 					})
 				]
 			}, row.id))
+		})
+	] });
+}
+var MAIL_STATUS_LABEL = {
+	opened: "Opened",
+	clicked: "Clicked",
+	delivered: "Delivered",
+	sent: "Sent",
+	bounced: "Bounced",
+	complained: "Complained",
+	delivery_delayed: "Delayed"
+};
+function inviteExpiry(expiresAt, usedAt) {
+	if (!expiresAt) return "—";
+	if (usedAt) return "Used";
+	const remaining = new Date(expiresAt).getTime() - Date.now();
+	if (!Number.isFinite(remaining) || remaining <= 0) return "Expired";
+	const hours = Math.floor(remaining / 36e5);
+	const minutes = Math.floor(remaining % 36e5 / 6e4);
+	if (hours >= 1) return `Expires in ${hours}h ${minutes}m`;
+	return `Expires in ${Math.max(minutes, 1)}m`;
+}
+function MailStatusPanel() {
+	const [rows, setRows] = (0, import_react.useState)(null);
+	const [error, setError] = (0, import_react.useState)("");
+	const [notice, setNotice] = (0, import_react.useState)("");
+	const [pending, setPending] = (0, import_react.useState)(false);
+	function load() {
+		return listNotifications().then(setRows);
+	}
+	(0, import_react.useEffect)(() => {
+		load().catch(() => setError("Email status could not be loaded."));
+	}, []);
+	async function sync() {
+		setPending(true);
+		setError("");
+		setNotice("");
+		try {
+			const result = await syncMailStatuses();
+			await load();
+			setNotice(`Synced ${result.updated} of ${result.checked}. ${result.opened} opened or clicked.`);
+		} catch (caught) {
+			setError(caught instanceof Error && caught.message ? caught.message : "Mail status could not be synced.");
+		} finally {
+			setPending(false);
+		}
+	}
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "flex flex-wrap items-end justify-between gap-3",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
+				className: "text-3xl font-semibold",
+				children: "Email status"
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "mt-2 max-w-2xl text-fg",
+				children: "Advisor letters are sent through SMTP2GO, which records when they are opened. Other desk mail still uses Resend. Sync after the recipient has had time to open the letter."
+			})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60",
+				disabled: pending,
+				onClick: () => void sync(),
+				children: pending ? "Syncing…" : "Sync status"
+			})]
+		}),
+		error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-3 text-sm text-danger",
+			children: error
+		}) : null,
+		notice ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-3 text-sm text-fg",
+			children: notice
+		}) : null,
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "mt-4 overflow-x-auto rounded-lg border border-border bg-surface",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
+				className: "w-full min-w-[980px] text-left text-sm",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("thead", {
+					className: "border-b border-border text-xs tracking-wide text-primary uppercase",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", { children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "When"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "To"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Subject"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Sent"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Status"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Opened"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Link"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Expires"
+						})
+					] })
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", { children: (rows ?? []).map((row) => {
+					const opened = row.mailStatus === "opened" || row.mailStatus === "clicked";
+					const expiry = inviteExpiry(row.expiresAt, row.usedAt);
+					return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+						className: "border-b border-border last:border-0",
+						children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+								className: "px-4 py-3 whitespace-nowrap",
+								children: [row.createdAt, " UTC"]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+								className: "px-4 py-3",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "block",
+									children: row.recipient
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-xs text-[#8c8c8c]",
+									children: row.audience === "admin" ? "Desk" : "Client"
+								})]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-4 py-3",
+								children: row.subject
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-4 py-3",
+								children: row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-4 py-3",
+								children: MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-4 py-3",
+								children: opened ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "font-semibold text-[#0d6e4f]",
+									children: "Opened"
+								}) : "—"
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-4 py-3",
+								children: row.link ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", {
+									className: "block max-w-[220px] truncate font-semibold text-action",
+									href: row.link,
+									title: row.link,
+									target: "_blank",
+									rel: "noreferrer",
+									children: row.link.replace(/^https?:\/\/[^/]+/, "")
+								}) : "—"
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+								className: "px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : ""),
+								children: expiry
+							})
+						]
+					}, row.id);
+				}) })]
+			}), rows && rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "px-4 py-6 text-sm text-fg",
+				children: "No emails yet."
+			}) : null]
 		})
 	] });
 }
@@ -1023,12 +1225,24 @@ function SettingsPanel({ section }) {
 	const [footerText, setFooterText] = (0, import_react.useState)(brand.footerText);
 	const [backupEmail, setBackupEmail] = (0, import_react.useState)(brand.backupEmail);
 	const [publicDomain, setPublicDomain] = (0, import_react.useState)(brand.publicDomain);
+	const [colorAction, setColorAction] = (0, import_react.useState)(brand.colorAction);
+	const [colorHeading, setColorHeading] = (0, import_react.useState)(brand.colorHeading);
+	const [colorText, setColorText] = (0, import_react.useState)(brand.colorText);
+	const [colorLabel, setColorLabel] = (0, import_react.useState)(brand.colorLabel);
+	const [colorBorder, setColorBorder] = (0, import_react.useState)(brand.colorBorder);
+	const [colorBackground, setColorBackground] = (0, import_react.useState)(brand.colorBackground);
+	const [pageBackground, setPageBackground] = (0, import_react.useState)(brand.pageBackground);
+	const [wantImage, setWantImage] = (0, import_react.useState)(Boolean(brand.pageBackground?.startsWith("data:image/")));
 	const [lastBackupAt, setLastBackupAt] = (0, import_react.useState)(brand.lastBackupAt);
 	const [backupPending, setBackupPending] = (0, import_react.useState)(false);
 	const [resendKey, setResendKey] = (0, import_react.useState)("");
 	const [mailFrom, setMailFrom] = (0, import_react.useState)("");
 	const [keyHint, setKeyHint] = (0, import_react.useState)("");
 	const [hasKey, setHasKey] = (0, import_react.useState)(false);
+	const [smtpKey, setSmtpKey] = (0, import_react.useState)("");
+	const [smtpHint, setSmtpHint] = (0, import_react.useState)("");
+	const [hasSmtpKey, setHasSmtpKey] = (0, import_react.useState)(false);
+	const [smtpPending, setSmtpPending] = (0, import_react.useState)(false);
 	const [mailPending, setMailPending] = (0, import_react.useState)(false);
 	const [error, setError] = (0, import_react.useState)("");
 	const [notice, setNotice] = (0, import_react.useState)("");
@@ -1045,6 +1259,14 @@ function SettingsPanel({ section }) {
 		setFooterText(brand.footerText);
 		setBackupEmail(brand.backupEmail);
 		setPublicDomain(brand.publicDomain);
+		setColorAction(brand.colorAction);
+		setColorHeading(brand.colorHeading);
+		setColorText(brand.colorText);
+		setColorLabel(brand.colorLabel);
+		setColorBorder(brand.colorBorder);
+		setColorBackground(brand.colorBackground);
+		setPageBackground(brand.pageBackground);
+		setWantImage(Boolean(brand.pageBackground?.startsWith("data:image/")));
 		setLastBackupAt(brand.lastBackupAt);
 	}, [
 		brand.logo,
@@ -1058,13 +1280,22 @@ function SettingsPanel({ section }) {
 		brand.footerText,
 		brand.backupEmail,
 		brand.publicDomain,
-		brand.lastBackupAt
+		brand.lastBackupAt,
+		brand.colorAction,
+		brand.colorHeading,
+		brand.colorText,
+		brand.colorLabel,
+		brand.colorBorder,
+		brand.colorBackground,
+		brand.pageBackground
 	]);
 	(0, import_react.useEffect)(() => {
 		getMailSetup().then((setup) => {
 			setMailFrom(setup.mailFrom);
 			setKeyHint(setup.keyHint);
 			setHasKey(setup.hasKey);
+			setSmtpHint(setup.smtpKeyHint);
+			setHasSmtpKey(setup.hasSmtpKey);
 		}).catch(() => void 0);
 	}, []);
 	async function onFile(file, kind) {
@@ -1074,9 +1305,9 @@ function SettingsPanel({ section }) {
 			setError("Choose an image file.");
 			return;
 		}
-		const share = kind === "cover" || kind === "socialBanner";
+		const share = kind === "cover" || kind === "socialBanner" || kind === "pageBackground";
 		if (share && file.type !== "image/png" && file.type !== "image/jpeg") {
-			setError("Use a JPEG or PNG for the cover and social banner.");
+			setError("Use a JPEG or PNG for the cover, social banner, and background.");
 			return;
 		}
 		if (file.size > (share ? 1e6 : 4e5)) {
@@ -1094,6 +1325,7 @@ function SettingsPanel({ section }) {
 		else if (kind === "cover") setCover(dataUrl);
 		else if (kind === "emailLogo") setEmailLogo(dataUrl);
 		else if (kind === "footerLogo") setFooterLogo(dataUrl);
+		else if (kind === "pageBackground") setPageBackground(dataUrl);
 		else setSocialBanner(dataUrl);
 	}
 	async function save() {
@@ -1113,7 +1345,14 @@ function SettingsPanel({ section }) {
 				footerText,
 				backupEmail,
 				lastBackupAt,
-				publicDomain
+				publicDomain,
+				colorAction,
+				colorHeading,
+				colorText,
+				colorLabel,
+				colorBorder,
+				colorBackground,
+				pageBackground
 			} });
 			await brand.refresh();
 			setNotice("Settings updated.");
@@ -1126,7 +1365,7 @@ function SettingsPanel({ section }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
 		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
 			className: "text-3xl font-semibold",
-			children: section === "logos" ? "Logos" : section === "misc" ? "Misc" : "General"
+			children: section === "logos" ? "Logos" : section === "appearance" ? "Appearance" : section === "misc" ? "Misc" : "General"
 		}),
 		section === "general" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
@@ -1173,7 +1412,7 @@ function SettingsPanel({ section }) {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "mt-1 text-sm text-fg",
-						children: "Deletes applications, clients, investments, invoices, active CDs, and notifications. Settings, rates, advisors, and the desk login stay."
+						children: "Deletes applications, clients, leads, investments, invoices, active CDs, and notifications. Settings, rates, advisors, and the desk login stay."
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 						type: "button",
@@ -1247,7 +1486,7 @@ function SettingsPanel({ section }) {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "mt-1 text-sm text-fg",
-						children: "Used for investor emails and the daily backup zip. The key is stored on the server and is not shown again."
+						children: "Used for desk notices and the daily backup. Advisor letters use SMTP2GO below. The key is stored on the server and is not shown again."
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
 						className: "mt-4 block",
@@ -1326,6 +1565,75 @@ function SettingsPanel({ section }) {
 					})
 				]
 			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "mt-6 max-w-xl rounded-lg border border-border bg-surface p-4",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+						className: "text-lg font-semibold text-primary",
+						children: "SMTP2GO"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mt-1 text-sm text-fg",
+						children: "API key for advisor letters. Each advisor’s verified mailbox is set on the Advisors tab. Turn on open tracking for this key in SMTP2GO."
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+						className: "mt-4 block",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "mb-1.5 block text-sm font-medium",
+							children: "API key"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+							type: "password",
+							autoComplete: "off",
+							className: controlClass,
+							value: smtpKey,
+							placeholder: hasSmtpKey ? `Saved ${smtpHint}` : "api-...",
+							onChange: (event) => setSmtpKey(event.target.value)
+						})]
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "mt-3 flex flex-wrap gap-2",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+							type: "button",
+							disabled: smtpPending,
+							className: "min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60",
+							onClick: () => {
+								setError("");
+								setNotice("");
+								setSmtpPending(true);
+								saveSmtpSetup({ data: {
+									apiKey: smtpKey,
+									clearKey: false
+								} }).then((setup) => {
+									setSmtpKey("");
+									setSmtpHint(setup.smtpKeyHint);
+									setHasSmtpKey(setup.hasSmtpKey);
+									setNotice(setup.hasSmtpKey ? "SMTP2GO API key saved." : "No API key was saved.");
+								}).catch(() => setError("Could not save the SMTP2GO API key.")).finally(() => setSmtpPending(false));
+							},
+							children: smtpPending ? "Saving…" : "Save SMTP2GO"
+						}), hasSmtpKey ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+							type: "button",
+							disabled: smtpPending,
+							className: "min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60",
+							onClick: () => {
+								setError("");
+								setNotice("");
+								setSmtpPending(true);
+								saveSmtpSetup({ data: {
+									apiKey: "",
+									clearKey: true
+								} }).then((setup) => {
+									setSmtpKey("");
+									setSmtpHint(setup.smtpKeyHint);
+									setHasSmtpKey(setup.hasSmtpKey);
+									setNotice("SMTP2GO API key removed.");
+								}).catch(() => setError("Could not remove the SMTP2GO key.")).finally(() => setSmtpPending(false));
+							},
+							children: "Remove key"
+						}) : null]
+					})
+				]
+			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
 				className: "mt-6 block max-w-xl",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
@@ -1337,6 +1645,119 @@ function SettingsPanel({ section }) {
 					placeholder: "Paste the Cloudflare Web Analytics snippet or token",
 					onChange: (event) => setCloudflareCode(event.target.value)
 				})]
+			})
+		] }) : null,
+		section === "appearance" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "mt-2 max-w-2xl text-fg",
+				children: "These colors are used for buttons, headings, text, labels, borders, and the page behind the background picture."
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "mt-6 grid max-w-3xl gap-4 sm:grid-cols-2",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ColorSetting, {
+						label: "Button",
+						value: colorAction,
+						onChange: setColorAction
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ColorSetting, {
+						label: "Headings",
+						value: colorHeading,
+						onChange: setColorHeading
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ColorSetting, {
+						label: "Text",
+						value: colorText,
+						onChange: setColorText
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ColorSetting, {
+						label: "Labels",
+						value: colorLabel,
+						onChange: setColorLabel
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ColorSetting, {
+						label: "Borders",
+						value: colorBorder,
+						onChange: setColorBorder
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ColorSetting, {
+						label: "Page background",
+						value: colorBackground,
+						onChange: setColorBackground
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "mt-6 max-w-xl rounded-lg border border-border bg-surface p-4",
+				children: [
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "text-sm font-semibold text-primary",
+						children: "Background picture"
+					}),
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "mt-3 flex flex-wrap gap-2",
+						children: [
+							["pattern", "Built-in pattern"],
+							["none", "No background"],
+							["image", "Custom picture"]
+						].map(([id, label]) => {
+							const mode = pageBackground === "none" ? "none" : pageBackground?.startsWith("data:image/") || wantImage ? "image" : "pattern";
+							return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (mode === id ? "border-action bg-action text-on-primary" : "border-border text-primary"),
+								onClick: () => {
+									if (id === "none") {
+										setWantImage(false);
+										setPageBackground("none");
+									} else if (id === "pattern") {
+										setWantImage(false);
+										setPageBackground(null);
+									} else {
+										setWantImage(true);
+										if (pageBackground === "none") setPageBackground(null);
+									}
+								},
+								children: label
+							}, id);
+						})
+					}),
+					pageBackground === "none" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mt-3 text-sm text-fg",
+						children: "Pages use only the page background color. No picture and no light overlay."
+					}) : pageBackground?.startsWith("data:image/") || wantImage ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "mt-4",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ImageSetting, {
+							label: "Custom picture",
+							hint: "Repeats behind every page, with a light overlay so text stays readable.",
+							value: pageBackground?.startsWith("data:image/") ? pageBackground : null,
+							wide: true,
+							accept: "image/png,image/jpeg",
+							onFile: (file) => void onFile(file, "pageBackground"),
+							onClear: () => {
+								setWantImage(false);
+								setPageBackground(null);
+							}
+						})
+					}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mt-3 text-sm text-fg",
+						children: "The built-in grey pattern repeats behind every page."
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "mt-4 text-sm font-semibold text-primary",
+				onClick: () => {
+					setColorAction(DEFAULT_THEME.colorAction);
+					setColorHeading(DEFAULT_THEME.colorHeading);
+					setColorText(DEFAULT_THEME.colorText);
+					setColorLabel(DEFAULT_THEME.colorLabel);
+					setColorBorder(DEFAULT_THEME.colorBorder);
+					setColorBackground(DEFAULT_THEME.colorBackground);
+					setPageBackground(null);
+					setWantImage(false);
+				},
+				children: "Reset appearance"
 			})
 		] }) : null,
 		section === "logos" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
@@ -1355,7 +1776,7 @@ function SettingsPanel({ section }) {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ImageSetting, {
 						label: "Email header logo",
-						hint: "Replaces the company name in the email header.",
+						hint: "Shown in the email header from your public domain. Use a PNG or JPEG, and set the public domain in General.",
 						value: emailLogo,
 						onFile: (file) => void onFile(file, "emailLogo"),
 						onClear: () => setEmailLogo(null)
@@ -1429,6 +1850,27 @@ function SettingsPanel({ section }) {
 			children: pending ? "Saving…" : "Save"
 		})
 	] });
+}
+function ColorSetting({ label, value, onChange }) {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+		className: "flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+			className: "text-sm font-semibold text-primary",
+			children: label
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+			className: "flex items-center gap-2",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+				type: "color",
+				className: "size-9 cursor-pointer rounded border border-border bg-white",
+				value: /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#006fcf",
+				onChange: (event) => onChange(event.target.value)
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+				className: controlClass + " w-28 font-mono",
+				value,
+				onChange: (event) => onChange(event.target.value)
+			})]
+		})]
+	});
 }
 function ImageSetting({ label, hint, value, onFile, onClear, wide = false, accept = "image/png,image/jpeg,image/svg+xml,image/webp,image/x-icon" }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
@@ -1852,7 +2294,7 @@ function ActiveCdDeskRow({ row, offer }) {
 			children: facts.map(([label, value]) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "border-b border-border px-4 py-3",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("dt", {
-					className: "text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+					className: "text-[11px] font-semibold tracking-wide text-heading uppercase",
 					children: label
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("dd", {
 					className: "mt-1 text-sm text-fg",
@@ -1924,7 +2366,7 @@ function FundingDesk() {
 		}),
 		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-2 text-fg",
-			children: "New certificates start as pending. Assign the advisor for the call, then mark the investment approved by phone."
+			children: "A certificate appears here after the client accepts the terms. Pending call/email means the advisor still needs to reach them."
 		}),
 		error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-3 text-sm text-danger",
@@ -1937,12 +2379,12 @@ function FundingDesk() {
 		!rows ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-4 text-sm text-fg",
 			children: "Loading…"
-		}) : rows.filter((row) => row.status !== "payment_approved").length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+		}) : rows.filter((row) => row.signed && row.status !== "payment_approved").length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-4 text-sm text-fg",
-			children: "No investments in progress. Active certificates are on the Active CDs tab."
+			children: "No investments in progress. A certificate appears here after the client accepts the terms."
 		}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", {
 			className: "mt-4 grid gap-3",
-			children: rows.filter((row) => row.status !== "payment_approved").map((row) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(FundingRow, {
+			children: rows.filter((row) => row.signed && row.status !== "payment_approved").map((row) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(FundingRow, {
 				row,
 				advisors,
 				onSave: save,
@@ -1988,13 +2430,17 @@ function FundingRow({ row, advisors, onSave, onReload, onRemove }) {
 					row.amount,
 					" · ",
 					row.createdAt,
-					row.signed ? " · Terms signed" : row.status === "pending" ? " · Awaiting signature" : ""
+					row.status === "pending" ? " · Pending call/email" : " · Terms signed",
+					row.contactBy === "email" ? " · Do not call. Use email." : ""
 				]
 			}),
-			row.signed ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			row.contactBy === "email" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "mt-1 text-sm font-semibold text-primary",
+				children: "Do not call. Use email."
+			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 				className: "mt-1 text-sm text-fg",
-				children: row.contactBy === "email" ? "Do not call. Use email." : `Call ${row.contactPhone || "the number on the application"}`
-			}) : null,
+				children: ["Call ", row.contactPhone || "the number on the application"]
+			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "mt-3 grid gap-3 sm:grid-cols-2",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
@@ -2030,7 +2476,7 @@ function FundingRow({ row, advisors, onSave, onReload, onRemove }) {
 							}) : null,
 							row.status === "pending" || row.status === "approved_phone" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
 								value: "pending",
-								children: "Pending"
+								children: "Pending call/email"
 							}) : null,
 							row.status === "pending" || row.status === "approved_phone" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
 								value: "approved_phone",
@@ -2198,13 +2644,520 @@ function PaymentReview({ id, name, canReview, onChanged }) {
 		]
 	});
 }
+function LeadsPanel() {
+	const brand = useBrand();
+	const [advisors, setAdvisors] = (0, import_react.useState)([]);
+	const [terms, setTerms] = (0, import_react.useState)([]);
+	const [offer, setOffer] = (0, import_react.useState)(null);
+	const [advisorId, setAdvisorId] = (0, import_react.useState)("");
+	const [name, setName] = (0, import_react.useState)("");
+	const [email, setEmail] = (0, import_react.useState)("");
+	const [error, setError] = (0, import_react.useState)("");
+	const [notice, setNotice] = (0, import_react.useState)("");
+	const [pending, setPending] = (0, import_react.useState)(false);
+	const [editing, setEditing] = (0, import_react.useState)(false);
+	const [copy, setCopy] = (0, import_react.useState)(null);
+	const [kind, setKind] = (0, import_react.useState)("rates");
+	const [termMonths, setTermMonths] = (0, import_react.useState)("");
+	const [appCopy, setAppCopy] = (0, import_react.useState)(null);
+	const [promoCode] = (0, import_react.useState)(() => {
+		const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+		const bytes = crypto.getRandomValues(/* @__PURE__ */ new Uint8Array(6));
+		return `CD${Array.from(bytes, (byte) => alphabet[byte % 32]).join("")}`;
+	});
+	const [origin, setOrigin] = (0, import_react.useState)("");
+	(0, import_react.useEffect)(() => {
+		setOrigin(window.location.origin);
+		Promise.all([
+			listAdvisors(),
+			getCdTerms(),
+			getPromo()
+		]).then(([people, nextTerms, promo]) => {
+			setAdvisors(people);
+			setTerms(nextTerms);
+			setOffer(promo);
+		}).catch(() => setError("Lead email could not be prepared."));
+	}, []);
+	const advisor = advisors.find((item) => item.id === advisorId);
+	const protection = offer?.protection.trim() || "";
+	const standard = defaultLeadCopy({
+		leadName: name.trim() || "Client",
+		company: brand.companyName,
+		advisorName: advisor?.name,
+		offerIntro: offer?.intro,
+		protection
+	});
+	const letterCopy = copy ?? standard;
+	const promoSet = new Set(promoMonths(offer ?? {
+		intro: "",
+		protection: "",
+		finePrint: "",
+		startsOn: "",
+		endsOn: "",
+		tiers: []
+	}));
+	const termChoices = terms.filter((term) => kind === "promo" ? promoSet.has(term.months) : kind === "custom" ? !promoSet.has(term.months) : false);
+	const selectedTerm = termChoices.find((term) => String(term.months) === termMonths) ?? termChoices[0];
+	const variant = kind === "promo" ? "promo" : "custom";
+	const appStandard = {
+		...defaultApplicationCopy({
+			leadName: name.trim() || "Client",
+			company: brand.companyName,
+			months: selectedTerm?.months ?? 0,
+			advisorName: advisor?.name,
+			variant
+		}),
+		promoCode: kind === "promo" ? promoCode : ""
+	};
+	const applicationCopy = appCopy ?? appStandard;
+	const previewOrigin = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
+	const previewLink = previewOrigin ? `${previewOrigin}/application?invite=preview` : "";
+	const ratesLetter = offer ? leadLetter({
+		leadName: name.trim() || "there",
+		company: brand.companyName,
+		terms,
+		offer,
+		advisor,
+		logo: brand.emailLogo,
+		portalUrl: brand.publicDomain,
+		copy: letterCopy
+	}) : null;
+	const formLetter = offer && selectedTerm ? applicationLetter({
+		leadName: name.trim() || "there",
+		company: brand.companyName,
+		months: selectedTerm.months,
+		apy: selectedTerm.apy,
+		offer,
+		advisor,
+		logo: brand.emailLogo,
+		portalUrl: brand.publicDomain,
+		link: previewLink,
+		variant,
+		copy: applicationCopy
+	}) : null;
+	const letter = kind === "rates" ? ratesLetter : formLetter;
+	const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : "lead_intro", "client", {
+		name: name.trim() || "there",
+		email: email.trim() || "lead@example.com",
+		detail: letter.text,
+		companyName: brand.companyName,
+		emailLogo: brand.emailLogo,
+		portalUrl: brand.publicDomain,
+		extraHtml: letter.html
+	}) : null;
+	const subject = kind === "rates" ? letterCopy.subject : applicationCopy.subject;
+	async function send(event) {
+		event.preventDefault();
+		setError("");
+		setNotice("");
+		setPending(true);
+		try {
+			if (kind !== "rates") {
+				if (!selectedTerm) throw new Error(kind === "promo" ? "Choose a promotional term." : "Choose a term that is not on promotion.");
+				await sendLeadApplication({ data: {
+					advisorId,
+					name,
+					email,
+					months: selectedTerm.months,
+					kind,
+					copy: applicationCopy
+				} });
+				setNotice(`${kind === "promo" ? "Promotional" : "Custom term"} email sent to ${email.trim()}. The link expires in 24 hours.`);
+				setAppCopy(null);
+			} else {
+				await sendLeadIntro({ data: {
+					advisorId,
+					name,
+					email,
+					copy: letterCopy
+				} });
+				setNotice(`Intro sent to ${email.trim()}.`);
+				setCopy(null);
+			}
+			setName("");
+			setEmail("");
+			setEditing(false);
+		} catch (caught) {
+			setError(caught instanceof Error && caught.message ? caught.message : "The email could not be sent.");
+		} finally {
+			setPending(false);
+		}
+	}
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
+		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
+			className: "text-3xl font-semibold",
+			children: "Lead emails"
+		}),
+		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-2 max-w-2xl text-fg",
+			children: "Send the rates introduction, a custom-term application, or a promotional application. Application links expire after 24 hours. A reminder goes out about two hours before then."
+		}),
+		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			className: "mt-4 flex flex-wrap gap-2",
+			children: [
+				["rates", "Rates introduction"],
+				["custom", "Custom term"],
+				["promo", "Promo term"]
+			].map(([id, label]) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary"),
+				onClick: () => {
+					setKind(id);
+					setEditing(false);
+					setAppCopy(null);
+					setTermMonths("");
+				},
+				children: label
+			}, id))
+		}),
+		error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-3 text-sm text-danger",
+			children: error
+		}) : null,
+		notice ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-3 text-sm text-fg",
+			children: notice
+		}) : null,
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
+			className: "mt-6 grid max-w-3xl gap-3",
+			onSubmit: (event) => void send(event),
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					className: "block text-sm",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold text-primary",
+						children: "Advisor"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+						className: `${controlClass} mt-1`,
+						value: advisorId,
+						onChange: (event) => {
+							setAdvisorId(event.target.value);
+							setCopy(null);
+						},
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+							value: "",
+							children: "Select an advisor"
+						}), advisors.map((item) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("option", {
+							value: item.id,
+							children: [item.name, item.email ? ` · ${item.email}` : ""]
+						}, item.id))]
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					className: "block text-sm",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold text-primary",
+						children: "Lead name"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+						className: `${controlClass} mt-1`,
+						value: name,
+						onChange: (event) => setName(event.target.value)
+					})]
+				}),
+				kind !== "rates" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					className: "block text-sm",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold text-primary",
+						children: kind === "promo" ? "Promotional term" : "Custom term"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+						className: `${controlClass} mt-1`,
+						value: selectedTerm ? String(selectedTerm.months) : "",
+						onChange: (event) => {
+							setTermMonths(event.target.value);
+							setAppCopy(null);
+						},
+						children: [termChoices.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+							value: "",
+							children: "No terms in this group"
+						}) : null, termChoices.map((term) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("option", {
+							value: term.months,
+							children: [
+								term.months,
+								"-month · ",
+								term.apy
+							]
+						}, term.id))]
+					})]
+				}) : null,
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					className: "block text-sm",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "font-semibold text-primary",
+						children: "Lead email"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+						type: "email",
+						className: `${controlClass} mt-1`,
+						value: email,
+						onChange: (event) => setEmail(event.target.value)
+					})]
+				}),
+				preview ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "border-b border-border bg-white px-5 py-4 text-sm",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "flex items-center justify-between gap-3",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase",
+										children: "Letter preview"
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: "min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary",
+										onClick: () => {
+											if (kind !== "rates") setAppCopy((current) => current ?? appStandard);
+											else setCopy((current) => current ?? standard);
+											setEditing((open) => !open);
+										},
+										children: editing ? "Hide editor" : "Edit text"
+									})]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "mt-3",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+											className: "inline-block w-14 text-[#8c8c8c]",
+											children: "From"
+										}),
+										advisor?.name || brand.companyName,
+										advisor?.email ? ` <${advisor.email}>` : ""
+									]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "mt-1",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+											className: "inline-block w-14 text-[#8c8c8c]",
+											children: "To"
+										}),
+										name.trim() || "Lead",
+										email.trim() ? ` <${email.trim()}>` : ""
+									]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "mt-1 font-semibold text-primary",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "inline-block w-14 font-normal text-[#8c8c8c]",
+										children: "Subject"
+									}), subject]
+								})
+							]
+						}),
+						editing && kind === "rates" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "grid gap-3 border-b border-border bg-white px-5 py-4",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Subject",
+									value: letterCopy.subject,
+									onChange: (next) => setCopy({
+										...letterCopy,
+										subject: next
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Headline",
+									value: letterCopy.headline,
+									onChange: (headline) => setCopy({
+										...letterCopy,
+										headline
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Welcome",
+									value: letterCopy.welcome,
+									onChange: (welcome) => setCopy({
+										...letterCopy,
+										welcome
+									}),
+									rows: 4
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Certificate",
+									value: letterCopy.certificate,
+									onChange: (certificate) => setCopy({
+										...letterCopy,
+										certificate
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Promotional offer",
+									value: letterCopy.offer,
+									onChange: (next) => setCopy({
+										...letterCopy,
+										offer: next
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "FDIC coverage",
+									value: letterCopy.protection,
+									onChange: (next) => setCopy({
+										...letterCopy,
+										protection: next
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Ready to get started",
+									value: letterCopy.ready,
+									onChange: (ready) => setCopy({
+										...letterCopy,
+										ready
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Thank you",
+									value: letterCopy.thanks,
+									onChange: (thanks) => setCopy({
+										...letterCopy,
+										thanks
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "w-fit text-sm font-semibold text-action",
+									onClick: () => setCopy(null),
+									children: "Restore the standard text"
+								})
+							]
+						}) : null,
+						editing && kind !== "rates" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "grid gap-3 border-b border-border bg-white px-5 py-4",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Subject",
+									value: applicationCopy.subject,
+									onChange: (next) => setAppCopy({
+										...applicationCopy,
+										subject: next
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Headline",
+									value: applicationCopy.headline,
+									onChange: (headline) => setAppCopy({
+										...applicationCopy,
+										headline
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Opening",
+									value: applicationCopy.hope,
+									onChange: (hope) => setAppCopy({
+										...applicationCopy,
+										hope
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Application is ready",
+									value: applicationCopy.ready,
+									onChange: (ready) => setAppCopy({
+										...applicationCopy,
+										ready
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Button instruction",
+									value: applicationCopy.instruction,
+									onChange: (instruction) => setAppCopy({
+										...applicationCopy,
+										instruction
+									}),
+									rows: 2
+								}),
+								kind === "promo" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Promotional code",
+									value: applicationCopy.promoCode,
+									onChange: (next) => setAppCopy({
+										...applicationCopy,
+										promoCode: next
+									})
+								}) : null,
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Code note",
+									value: applicationCopy.codeNote,
+									onChange: (codeNote) => setAppCopy({
+										...applicationCopy,
+										codeNote
+									}),
+									rows: 2
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Follow up",
+									value: applicationCopy.followUp,
+									onChange: (followUp) => setAppCopy({
+										...applicationCopy,
+										followUp
+									}),
+									rows: 3
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LetterField, {
+									label: "Thank you",
+									value: applicationCopy.thanks,
+									onChange: (thanks) => setAppCopy({
+										...applicationCopy,
+										thanks
+									}),
+									rows: 2
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "w-fit text-sm font-semibold text-action",
+									onClick: () => setAppCopy(null),
+									children: "Restore the standard text"
+								})
+							]
+						}) : null,
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("iframe", {
+							title: "Letter preview",
+							sandbox: "",
+							className: "h-[1100px] w-full bg-[#f2f5f8]",
+							srcDoc: preview.html
+						})
+					]
+				}) : null,
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+					type: "submit",
+					className: "min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60",
+					disabled: pending,
+					children: pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : "Send intro"
+				})
+			]
+		})
+	] });
+}
+function LetterField({ label, value, onChange, rows = 1 }) {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+		className: "block text-sm",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+			className: "font-semibold text-primary",
+			children: label
+		}), rows > 1 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("textarea", {
+			className: `${controlClass} mt-1 min-h-20`,
+			rows,
+			value,
+			onChange: (event) => onChange(event.target.value)
+		}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+			className: `${controlClass} mt-1`,
+			value,
+			onChange: (event) => onChange(event.target.value)
+		})]
+	});
+}
 function AdvisorsPanel() {
 	const [rows, setRows] = (0, import_react.useState)(null);
 	const [draft, setDraft] = (0, import_react.useState)({
 		id: "",
 		name: "",
 		phone: "",
-		email: ""
+		email: "",
+		mailbox: "",
+		role: ""
 	});
 	const [error, setError] = (0, import_react.useState)("");
 	const [notice, setNotice] = (0, import_react.useState)("");
@@ -2224,12 +3177,14 @@ function AdvisorsPanel() {
 				id: "",
 				name: "",
 				phone: "",
-				email: ""
+				email: "",
+				mailbox: "",
+				role: ""
 			});
 			await load();
 			setNotice("Advisor saved.");
-		} catch {
-			setError("Could not save this advisor.");
+		} catch (caught) {
+			setError(caught instanceof Error && caught.message ? caught.message : "Could not save this advisor.");
 		}
 	}
 	async function remove(id) {
@@ -2248,7 +3203,7 @@ function AdvisorsPanel() {
 		}),
 		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-2 text-fg",
-			children: "Assign one of these advisors when a client investment needs a call."
+			children: "Assign one of these advisors when a client investment needs a call. The role, such as Senior Advisor, is the last line of that advisor’s email signature. The verified mailbox is the SMTP2GO address the letters are sent from."
 		}),
 		error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 			className: "mt-3 text-sm text-danger",
@@ -2267,7 +3222,13 @@ function AdvisorsPanel() {
 					children: advisor.name
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 					className: "text-sm text-fg",
-					children: [advisor.phone || "No phone", advisor.email ? ` · ${advisor.email}` : ""]
+					children: [
+						advisor.role || "No role",
+						" · ",
+						advisor.phone || "No phone",
+						advisor.email ? ` · ${advisor.email}` : "",
+						advisor.mailbox ? ` · ${advisor.mailbox}` : " · No verified mailbox"
+					]
 				})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 					className: "flex gap-2",
 					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -2301,6 +3262,14 @@ function AdvisorsPanel() {
 					})
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Role",
+					value: draft.role,
+					onChange: (role) => setDraft({
+						...draft,
+						role
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
 					label: "Phone",
 					value: draft.phone,
 					onChange: (phone) => setDraft({
@@ -2316,6 +3285,28 @@ function AdvisorsPanel() {
 						email
 					})
 				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					className: "block sm:col-span-2",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "mb-1.5 block text-sm font-medium",
+							children: "Verified mailbox"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+							className: controlClass,
+							value: draft.mailbox,
+							placeholder: "advisor@yourdomain.com",
+							onChange: (event) => setDraft({
+								...draft,
+								mailbox: event.target.value
+							})
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "mt-1 block text-sm text-fg",
+							children: "SMTP2GO address this advisor’s letters are sent from. It must already be verified there."
+						})
+					]
+				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 					className: "flex items-end",
 					children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -2323,6 +3314,276 @@ function AdvisorsPanel() {
 						className: "min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary",
 						children: "Save advisor"
 					})
+				})
+			]
+		})
+	] });
+}
+function emptyLead() {
+	const now = /* @__PURE__ */ new Date();
+	now.setSeconds(0, 0);
+	return {
+		id: "",
+		name: "",
+		email: "",
+		phone: "",
+		amount: "",
+		term: "",
+		objective: "",
+		liquidity: "",
+		source: "",
+		receivedAt: now.toISOString()
+	};
+}
+function leadTimeInput(value) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "";
+	const pad = (part) => String(part).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function PipelineLeadsPanel() {
+	const [rows, setRows] = (0, import_react.useState)(null);
+	const [draft, setDraft] = (0, import_react.useState)(emptyLead);
+	const [error, setError] = (0, import_react.useState)("");
+	const [notice, setNotice] = (0, import_react.useState)("");
+	function load() {
+		return listCrmLeads().then(setRows);
+	}
+	(0, import_react.useEffect)(() => {
+		load().catch(() => setError("Leads could not be loaded."));
+	}, []);
+	async function save(event) {
+		event.preventDefault();
+		setError("");
+		setNotice("");
+		try {
+			await saveCrmLead({ data: draft });
+			setDraft(emptyLead());
+			await load();
+			setNotice("Lead saved.");
+		} catch (caught) {
+			setError(caught instanceof Error && caught.message ? caught.message : "Could not save this lead.");
+		}
+	}
+	async function remove(id) {
+		setError("");
+		try {
+			await deleteCrmLead({ data: { id } });
+			if (draft.id === id) setDraft(emptyLead());
+			await load();
+		} catch {
+			setError("Could not remove this lead.");
+		}
+	}
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { children: [
+		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
+			className: "text-3xl font-semibold",
+			children: "Leads"
+		}),
+		/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-2 max-w-2xl text-fg",
+			children: "Record a lead as it comes in. These records stay in the pipeline so a CRM can be added later."
+		}),
+		error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-3 text-sm text-danger",
+			children: error
+		}) : null,
+		notice ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "mt-3 text-sm text-fg",
+			children: notice
+		}) : null,
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "mt-4 overflow-x-auto rounded-lg border border-border bg-surface",
+			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
+				className: "w-full min-w-[860px] text-left text-sm",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("thead", {
+					className: "border-b border-border text-xs tracking-wide text-primary uppercase",
+					children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", { children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Lead"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Amount"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Term"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Objective"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Source"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+							className: "px-4 py-3 font-semibold",
+							children: "Received"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", { className: "px-4 py-3 font-semibold" })
+					] })
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", { children: (rows ?? []).map((lead) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+					className: "border-b border-border last:border-0",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+							className: "px-4 py-3",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "block font-semibold text-primary",
+								children: lead.name
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-fg",
+								children: [lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"
+							})]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+							className: "px-4 py-3",
+							children: lead.amount || "—"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+							className: "px-4 py-3",
+							children: lead.term || "—"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+							className: "px-4 py-3",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "block",
+								children: lead.objective || "—"
+							}), lead.liquidity ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "text-fg",
+								children: lead.liquidity
+							}) : null]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+							className: "px-4 py-3",
+							children: lead.source || "—"
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+							className: "px-4 py-3 whitespace-nowrap",
+							children: new Date(lead.receivedAt).toLocaleString()
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+							className: "px-4 py-3 text-right",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "min-h-11 px-3 text-sm font-semibold text-primary",
+								onClick: () => setDraft(lead),
+								children: "Edit"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "min-h-11 px-3 text-sm font-semibold text-primary",
+								onClick: () => void remove(lead.id),
+								children: "Remove"
+							})]
+						})
+					]
+				}, lead.id)) })]
+			}), rows && rows.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "px-4 py-6 text-sm text-fg",
+				children: "No leads yet."
+			}) : null]
+		}),
+		/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
+			className: "mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2",
+			onSubmit: (event) => void save(event),
+			children: [
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+					className: "text-lg font-semibold text-primary sm:col-span-2",
+					children: draft.id ? "Edit lead" : "Add lead"
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Name",
+					value: draft.name,
+					onChange: (name) => setDraft({
+						...draft,
+						name
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Email",
+					value: draft.email,
+					onChange: (email) => setDraft({
+						...draft,
+						email
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Phone",
+					value: draft.phone,
+					onChange: (phone) => setDraft({
+						...draft,
+						phone
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Preferred deposit amount",
+					value: draft.amount,
+					onChange: (amount) => setDraft({
+						...draft,
+						amount
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Term",
+					value: draft.term,
+					onChange: (term) => setDraft({
+						...draft,
+						term
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Objective",
+					value: draft.objective,
+					onChange: (objective) => setDraft({
+						...draft,
+						objective
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Liquidity",
+					value: draft.liquidity,
+					onChange: (liquidity) => setDraft({
+						...draft,
+						liquidity
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AdminField, {
+					label: "Lead source",
+					value: draft.source,
+					onChange: (source) => setDraft({
+						...draft,
+						source
+					})
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					className: "block",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "mb-1.5 block text-sm font-medium",
+						children: "Lead receive time"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+						type: "datetime-local",
+						className: controlClass,
+						value: leadTimeInput(draft.receivedAt),
+						onChange: (event) => setDraft({
+							...draft,
+							receivedAt: event.target.value ? new Date(event.target.value).toISOString() : ""
+						})
+					})]
+				}),
+				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					className: "flex items-end gap-2",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "submit",
+						className: "min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary",
+						children: "Save lead"
+					}), draft.id ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary",
+						onClick: () => setDraft(emptyLead()),
+						children: "Cancel"
+					}) : null]
 				})
 			]
 		})
@@ -2434,13 +3695,20 @@ function ClientsPanel({ rows, onStatus, onRemove }) {
 var DESK_MENU = [
 	{
 		label: "Pipeline",
-		items: [{
-			id: "dashboard",
-			label: "Dashboard"
-		}, {
-			id: "applications",
-			label: "Applications"
-		}]
+		items: [
+			{
+				id: "dashboard",
+				label: "Dashboard"
+			},
+			{
+				id: "applications",
+				label: "Applications"
+			},
+			{
+				id: "pipeline-leads",
+				label: "Leads"
+			}
+		]
 	},
 	{
 		label: "Certificates",
@@ -2461,13 +3729,24 @@ var DESK_MENU = [
 	},
 	{
 		label: "Desk",
-		items: [{
-			id: "clients",
-			label: "Clients"
-		}, {
-			id: "advisors",
-			label: "Advisors"
-		}]
+		items: [
+			{
+				id: "clients",
+				label: "Clients"
+			},
+			{
+				id: "advisors",
+				label: "Advisors"
+			},
+			{
+				id: "leads",
+				label: "Lead emails"
+			},
+			{
+				id: "mail-status",
+				label: "Email status"
+			}
+		]
 	},
 	{
 		label: "Settings",
@@ -2479,6 +3758,10 @@ var DESK_MENU = [
 			{
 				id: "settings-logos",
 				label: "Logos"
+			},
+			{
+				id: "settings-appearance",
+				label: "Appearance"
 			},
 			{
 				id: "settings-misc",
@@ -2673,6 +3956,7 @@ function ApplicationDetail({ row, onStatus, onRemove }) {
 		["Net worth", form.netWorth],
 		["Preferred amount", form.preferredAmount],
 		["Preferred term", form.preferredTerm ? `${form.preferredTerm}-month` : ""],
+		["Promotional code", form.promoCode],
 		["Identity document", `${form.idType}${form.idFileName ? ` · ${form.idFileName}` : ""}`],
 		["Address document", `${form.addressDocType}${form.addressFileName ? ` · ${form.addressFileName}` : ""}`],
 		["Bank", form.bankName],

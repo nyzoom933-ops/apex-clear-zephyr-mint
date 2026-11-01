@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ApplicationRouteImport } from './routes/application'
+import { Route as EmailLogoRouteImport } from './routes/email-logo'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
@@ -31,6 +32,11 @@ const AdminRoute = AdminRouteImport.update({
 const ApplicationRoute = ApplicationRouteImport.update({
   id: '/application',
   path: '/application',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmailLogoRoute = EmailLogoRouteImport.update({
+  id: '/email-logo',
+  path: '/email-logo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/application': typeof ApplicationRoute
+  '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/application': typeof ApplicationRoute
+  '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/application': typeof ApplicationRoute
+  '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/application'
+    | '/email-logo'
     | '/login'
     | '/portal'
     | '/reset-password'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/application'
+    | '/email-logo'
     | '/login'
     | '/portal'
     | '/reset-password'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/application'
+    | '/email-logo'
     | '/login'
     | '/portal'
     | '/reset-password'
@@ -127,6 +139,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   ApplicationRoute: typeof ApplicationRoute
+  EmailLogoRoute: typeof EmailLogoRoute
   LoginRoute: typeof LoginRoute
   PortalRoute: typeof PortalRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -155,6 +168,13 @@ declare module '@tanstack/react-router' {
       path: '/application'
       fullPath: '/application'
       preLoaderRoute: typeof ApplicationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/email-logo': {
+      id: '/email-logo'
+      path: '/email-logo'
+      fullPath: '/email-logo'
+      preLoaderRoute: typeof EmailLogoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -199,6 +219,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   ApplicationRoute: ApplicationRoute,
+  EmailLogoRoute: EmailLogoRoute,
   LoginRoute: LoginRoute,
   PortalRoute: PortalRoute,
   ResetPasswordRoute: ResetPasswordRoute,

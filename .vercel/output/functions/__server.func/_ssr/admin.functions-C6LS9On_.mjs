@@ -2,7 +2,7 @@ import { a as matchTier, r as formatBonus } from "./promo-a-oE9-Iz.mjs";
 import { a as cleanPublicDomain, c as isWorkspacePreview, i as cleanCompanyName, n as cleanBackupEmail, r as cleanCloudflareCode, t as DEFAULT_COMPANY_NAME } from "./env.server-CXxi_iUv.mjs";
 import { n as createServerFn, r as TSS_SERVER_FUNCTION } from "./ssr.mjs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-//#region node_modules/.nitro/vite/services/ssr/assets/admin.functions-BKIN3O9A.js
+//#region node_modules/.nitro/vite/services/ssr/assets/admin.functions-C6LS9On_.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -101,14 +101,14 @@ async function readDesk(sql) {
 async function startDeskSession(sql) {
 	const token = randomBytes(32).toString("hex");
 	await saveSetting(sql, "desk_session", tokenHash(token));
-	const { setCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { setCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	setCookie(COOKIE, token, cookieOptions(43200));
 }
 async function readSignedIn() {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const token = getCookie(COOKIE);
 	if (!token) return false;
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const desk = await readDesk(await getSql());
 	return Boolean(desk.session) && sameToken(tokenHash(token), desk.session);
 }
@@ -125,7 +125,7 @@ var getAdminSession_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getAdminSession.__executeServer(opts));
 var getAdminSession = createServerFn({ method: "GET" }).handler(getAdminSession_createServerFn_handler, async () => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const desk = await readDesk(await getSql());
 	return {
 		signedIn: await readSignedIn(),
@@ -138,7 +138,7 @@ var adminLogin_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => adminLogin.__executeServer(opts));
 var adminLogin = createServerFn({ method: "POST" }).validator((input) => input).handler(adminLogin_createServerFn_handler, async ({ data }) => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { verifyPassword } = await import("./passwords.server-CdYSBfy_.mjs");
 	const sql = await getSql();
 	const desk = await readDesk(sql);
@@ -156,7 +156,7 @@ var createDeskLogin = createServerFn({ method: "POST" }).validator((input) => in
 	const email = data.email.trim().toLowerCase();
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a desk email.");
 	if (data.password.length < 8) throw new Error("Use a password of at least 8 characters.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { hashPassword } = await import("./passwords.server-CdYSBfy_.mjs");
 	const sql = await getSql();
 	if ((await readDesk(sql)).passwordHash) throw new Error("The desk login already exists.");
@@ -175,7 +175,7 @@ var saveDeskLogin = createServerFn({ method: "POST" }).validator((input) => inpu
 	const email = data.email.trim().toLowerCase();
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a desk email.");
 	if (data.newPassword && data.newPassword.length < 8) throw new Error("Use a password of at least 8 characters.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { hashPassword, verifyPassword } = await import("./passwords.server-CdYSBfy_.mjs");
 	const sql = await getSql();
 	const desk = await readDesk(sql);
@@ -190,8 +190,8 @@ var adminLogout_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => adminLogout.__executeServer(opts));
 var adminLogout = createServerFn({ method: "POST" }).handler(adminLogout_createServerFn_handler, async () => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
-	const { setCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { setCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	await (await getSql())`delete from site_settings where key = 'desk_session'`;
 	setCookie(COOKIE, "", cookieOptions(0));
 	return { ok: true };
@@ -205,25 +205,42 @@ var submitApplication = createServerFn({ method: "POST" }).validator((input) => 
 	if (!input.password || input.password.length < 8) throw new Error("A password is required.");
 	return input;
 }).handler(submitApplication_createServerFn_handler, async ({ data }) => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { hashPassword } = await import("./passwords.server-CdYSBfy_.mjs");
 	const sql = await getSql();
 	const id = crypto.randomUUID();
+	const email = data.email.trim().toLowerCase();
+	const inviteToken = data.inviteToken?.trim() || "";
+	let invited = null;
+	if (inviteToken) {
+		const { readLeadInvite } = await import("./lead-invites.server-DBOhEbbT.mjs");
+		const invite = await readLeadInvite(sql, inviteToken);
+		if (invite.status !== "open") throw new Error("This application link has expired.");
+		invited = {
+			months: invite.months,
+			promoCode: invite.promoCode
+		};
+	}
 	const payload = {
 		...stripSecrets(data),
 		currency: "USD"
 	};
-	const email = data.email.trim().toLowerCase();
+	const { inviteToken: _inviteToken, ...stored } = payload;
+	if (invited) {
+		stored.preferredTerm = String(invited.months);
+		stored.promoCode = invited.promoCode;
+	}
 	const name = [
-		payload.firstName,
-		payload.middleName,
-		payload.surname
+		stored.firstName,
+		stored.middleName,
+		stored.surname
 	].filter(Boolean).join(" ");
 	const passwordHash = await hashPassword(data.password);
 	await sql`
       insert into applications (id, applicant_name, email, account_type, currency, payload, password_hash)
-      values (${id}, ${name}, ${email}, ${payload.accountType}, ${payload.currency}, ${JSON.stringify(payload)}::jsonb, ${passwordHash})
+      values (${id}, ${name}, ${email}, ${stored.accountType}, ${stored.currency}, ${JSON.stringify(stored)}::jsonb, ${passwordHash})
     `;
+	if (inviteToken) await sql`update lead_invites set used_at = now() where token = ${inviteToken} and used_at is null`;
 	await sendStep(sql, {
 		step: "application_submitted",
 		clientEmail: email,
@@ -235,6 +252,17 @@ var submitApplication = createServerFn({ method: "POST" }).validator((input) => 
 	});
 	return { id };
 });
+var getLeadInvite_createServerFn_handler = createServerRpc({
+	id: "ea4f60a01a023ec8cd6db20b195514b2ab1f80974d6ac0d3302fc7b691665a83",
+	name: "getLeadInvite",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => getLeadInvite.__executeServer(opts));
+var getLeadInvite = createServerFn({ method: "GET" }).validator((input) => ({ token: (input.token || "").trim().slice(0, 80) })).handler(getLeadInvite_createServerFn_handler, async ({ data }) => {
+	if (!data.token) return { status: "missing" };
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { readLeadInvite } = await import("./lead-invites.server-DBOhEbbT.mjs");
+	return readLeadInvite(await getSql(), data.token);
+});
 var listApplications_createServerFn_handler = createServerRpc({
 	id: "1b59404f5dd7ebf22a4802040e66ad34f86c454a3111963b9acb931d6cb5f54e",
 	name: "listApplications",
@@ -242,7 +270,7 @@ var listApplications_createServerFn_handler = createServerRpc({
 }, (opts) => listApplications.__executeServer(opts));
 var listApplications = createServerFn({ method: "GET" }).handler(listApplications_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { ensureDemoApplications } = await import("./seed-applications.server-B84F_Z_Y.mjs");
 	const sql = await getSql();
 	await ensureDemoApplications(sql);
@@ -276,7 +304,7 @@ var setApplicationStatus = createServerFn({ method: "POST" }).validator((input) 
 	return input;
 }).handler(setApplicationStatus_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	const rows = await sql`
       select email, applicant_name, account_type, password_hash, status from applications where id = ${data.id}
@@ -321,7 +349,7 @@ var deleteApplication_createServerFn_handler = createServerRpc({
 }, (opts) => deleteApplication.__executeServer(opts));
 var deleteApplication = createServerFn({ method: "POST" }).validator((input) => input).handler(deleteApplication_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	const rows = await sql`select email from applications where id = ${data.id}`;
 	if (!rows[0]) throw new Error("Application not found.");
@@ -350,12 +378,14 @@ var clearDatabase_createServerFn_handler = createServerRpc({
 }, (opts) => clearDatabase.__executeServer(opts));
 var clearDatabase = createServerFn({ method: "POST" }).handler(clearDatabase_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
+	await ensureCrmLeads(sql);
 	await sql`delete from notifications`;
 	await sql`delete from fundings`;
 	await sql`delete from investor_users`;
 	await sql`delete from applications`;
+	await sql`delete from crm_leads`;
 	return { ok: true };
 });
 var deleteFunding_createServerFn_handler = createServerRpc({
@@ -365,7 +395,7 @@ var deleteFunding_createServerFn_handler = createServerRpc({
 }, (opts) => deleteFunding.__executeServer(opts));
 var deleteFunding = createServerFn({ method: "POST" }).validator((input) => input).handler(deleteFunding_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	const rows = await sql`select id, status from fundings where id = ${data.id}`;
 	if (!rows[0]) throw new Error("Investment not found.");
@@ -381,13 +411,13 @@ var signInAsClient_createServerFn_handler = createServerRpc({
 }, (opts) => signInAsClient.__executeServer(opts));
 var signInAsClient = createServerFn({ method: "POST" }).validator((input) => input).handler(signInAsClient_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const rows = await (await getSql())`
       select email, status from applications where id = ${data.id}
     `;
 	if (!rows[0] || rows[0].status !== "approved") throw new Error("Only an approved client can be opened.");
 	const email = String(rows[0].email).trim().toLowerCase();
-	const { setCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { setCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	setCookie("ah_investor", email, cookieOptions(43200));
 	return { ok: true };
 });
@@ -397,7 +427,7 @@ var investorLogin_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => investorLogin.__executeServer(opts));
 var investorLogin = createServerFn({ method: "POST" }).validator((input) => input).handler(investorLogin_createServerFn_handler, async ({ data }) => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { verifyPassword } = await import("./passwords.server-CdYSBfy_.mjs");
 	const { ensureDemoApplications } = await import("./seed-applications.server-B84F_Z_Y.mjs");
 	const sql = await getSql();
@@ -411,10 +441,32 @@ var investorLogin = createServerFn({ method: "POST" }).validator((input) => inpu
     `;
 	const hash = rows[0]?.password_hash;
 	if (!hash || !await verifyPassword(data.password, hash)) throw new Error("Those credentials are not recognized.");
-	const { setCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { setCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	setCookie("ah_investor", email, cookieOptions(43200));
 	return { destination: rows[0].status === "approved" ? "portal" : "application" };
 });
+var DEFAULT_THEME = {
+	colorAction: "#006fcf",
+	colorHeading: "#12315c",
+	colorText: "#3d3d3d",
+	colorLabel: "#262626",
+	colorBorder: "#e0e0e0",
+	colorBackground: "#fbfbfb"
+};
+function readHex(value, fallback) {
+	const next = value.trim();
+	return /^#[0-9a-fA-F]{6}$/.test(next) ? next.toLowerCase() : fallback;
+}
+function cleanHex(value, fallback) {
+	const next = (value || "").trim();
+	if (!next) return fallback;
+	if (!/^#[0-9a-fA-F]{6}$/.test(next)) throw new Error("Use a color like #006fcf.");
+	return next.toLowerCase();
+}
+function assertPageBackground(value) {
+	if (!value || value === "none") return value === "none" ? "none" : null;
+	return assertShareImage(value);
+}
 function assertShareImage(value) {
 	if (!value) return null;
 	if (!/^data:image\/(png|jpeg);base64,/.test(value) || value.length > 14e5) throw new Error("Use a JPEG or PNG under 1 MB.");
@@ -456,9 +508,9 @@ var getSiteBrand_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getSiteBrand.__executeServer(opts));
 var getSiteBrand = createServerFn({ method: "GET" }).handler(getSiteBrand_createServerFn_handler, async () => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const rows = await (await getSql())`
-    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain')
+    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain', 'color_action', 'color_heading', 'color_text', 'color_label', 'color_border', 'color_background', 'page_background')
   `;
 	const brand = {
 		logo: null,
@@ -472,7 +524,9 @@ var getSiteBrand = createServerFn({ method: "GET" }).handler(getSiteBrand_create
 		footerText: "",
 		backupEmail: "",
 		lastBackupAt: "",
-		publicDomain: ""
+		publicDomain: "",
+		...DEFAULT_THEME,
+		pageBackground: null
 	};
 	for (const row of rows) {
 		if (row.key === "logo" || row.key === "favicon" || row.key === "cover") brand[row.key] = row.value;
@@ -485,6 +539,13 @@ var getSiteBrand = createServerFn({ method: "GET" }).handler(getSiteBrand_create
 		if (row.key === "company_name" && row.value.trim()) brand.companyName = row.value.trim();
 		if (row.key === "cloudflare_code") brand.cloudflareCode = row.value;
 		if (row.key === "public_domain") brand.publicDomain = row.value;
+		if (row.key === "color_action") brand.colorAction = readHex(row.value, DEFAULT_THEME.colorAction);
+		if (row.key === "color_heading") brand.colorHeading = readHex(row.value, DEFAULT_THEME.colorHeading);
+		if (row.key === "color_text") brand.colorText = readHex(row.value, DEFAULT_THEME.colorText);
+		if (row.key === "color_label") brand.colorLabel = readHex(row.value, DEFAULT_THEME.colorLabel);
+		if (row.key === "color_border") brand.colorBorder = readHex(row.value, DEFAULT_THEME.colorBorder);
+		if (row.key === "color_background") brand.colorBackground = readHex(row.value, DEFAULT_THEME.colorBackground);
+		if (row.key === "page_background") brand.pageBackground = row.value === "none" || row.value.startsWith("data:image/") ? row.value : null;
 	}
 	return brand;
 });
@@ -505,10 +566,17 @@ var setSiteBrand = createServerFn({ method: "POST" }).validator((input) => ({
 	footerText: (input.footerText || "").slice(0, 800),
 	backupEmail: cleanBackupEmail(input.backupEmail || ""),
 	lastBackupAt: input.lastBackupAt || "",
-	publicDomain: cleanPublicDomain(input.publicDomain || "")
+	publicDomain: cleanPublicDomain(input.publicDomain || ""),
+	colorAction: cleanHex(input.colorAction, DEFAULT_THEME.colorAction),
+	colorHeading: cleanHex(input.colorHeading, DEFAULT_THEME.colorHeading),
+	colorText: cleanHex(input.colorText, DEFAULT_THEME.colorText),
+	colorLabel: cleanHex(input.colorLabel, DEFAULT_THEME.colorLabel),
+	colorBorder: cleanHex(input.colorBorder, DEFAULT_THEME.colorBorder),
+	colorBackground: cleanHex(input.colorBackground, DEFAULT_THEME.colorBackground),
+	pageBackground: assertPageBackground(input.pageBackground)
 })).handler(setSiteBrand_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	for (const key of [
 		"logo",
@@ -552,6 +620,23 @@ var setSiteBrand = createServerFn({ method: "POST" }).validator((input) => ({
         insert into site_settings (key, value) values ('public_domain', ${data.publicDomain})
         on conflict (key) do update set value = excluded.value
       `;
+	const colors = [
+		["color_action", data.colorAction],
+		["color_heading", data.colorHeading],
+		["color_text", data.colorText],
+		["color_label", data.colorLabel],
+		["color_border", data.colorBorder],
+		["color_background", data.colorBackground]
+	];
+	for (const [key, value] of colors) await sql`
+        insert into site_settings (key, value) values (${key}, ${value})
+        on conflict (key) do update set value = excluded.value
+      `;
+	if (!data.pageBackground) await sql`delete from site_settings where key = 'page_background'`;
+	else await sql`
+        insert into site_settings (key, value) values ('page_background', ${data.pageBackground})
+        on conflict (key) do update set value = excluded.value
+      `;
 	return data;
 });
 var runDatabaseBackup_createServerFn_handler = createServerRpc({
@@ -561,7 +646,7 @@ var runDatabaseBackup_createServerFn_handler = createServerRpc({
 }, (opts) => runDatabaseBackup.__executeServer(opts));
 var runDatabaseBackup = createServerFn({ method: "POST" }).handler(runDatabaseBackup_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { runBackup } = await import("./backup.server-TfubgEnY.mjs");
+	const { runBackup } = await import("./backup.server-skMXqjk0.mjs");
 	const result = await runBackup();
 	if (!result.ok) throw new Error(result.error);
 	return result;
@@ -573,8 +658,8 @@ var getMailSetup_createServerFn_handler = createServerRpc({
 }, (opts) => getMailSetup.__executeServer(opts));
 var getMailSetup = createServerFn({ method: "GET" }).handler(getMailSetup_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
-	const { mailSetupView } = await import("./mail.server-C6f7ynqb.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { mailSetupView } = await import("./mail.server-DvP07-0d.mjs");
 	return mailSetupView(await getSql());
 });
 var saveMailSetup_createServerFn_handler = createServerRpc({
@@ -588,10 +673,10 @@ var saveMailSetup = createServerFn({ method: "POST" }).validator((input) => ({
 	clearKey: Boolean(input.clearKey)
 })).handler(saveMailSetup_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { cleanMailFrom, cleanResendKey } = await import("./mail.server-C6f7ynqb.mjs");
+	const { cleanMailFrom, cleanResendKey } = await import("./mail.server-DvP07-0d.mjs");
 	const apiKey = cleanResendKey(data.apiKey);
 	const mailFrom = cleanMailFrom(data.mailFrom);
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	if (data.clearKey) await sql`delete from site_settings where key = 'resend_api_key'`;
 	else if (apiKey) await sql`
@@ -603,7 +688,29 @@ var saveMailSetup = createServerFn({ method: "POST" }).validator((input) => ({
         insert into site_settings (key, value) values ('mail_from', ${mailFrom})
         on conflict (key) do update set value = excluded.value
       `;
-	const { mailSetupView } = await import("./mail.server-C6f7ynqb.mjs");
+	const { mailSetupView } = await import("./mail.server-DvP07-0d.mjs");
+	return mailSetupView(sql);
+});
+var saveSmtpSetup_createServerFn_handler = createServerRpc({
+	id: "53eddeec68c65dab79a58ff3da78a86c23a311a0fd114a80d1bce986b77ddd5d",
+	name: "saveSmtpSetup",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => saveSmtpSetup.__executeServer(opts));
+var saveSmtpSetup = createServerFn({ method: "POST" }).validator((input) => ({
+	apiKey: input.apiKey || "",
+	clearKey: Boolean(input.clearKey)
+})).handler(saveSmtpSetup_createServerFn_handler, async ({ data }) => {
+	await requireAdmin();
+	const { cleanSmtpKey } = await import("./mail.server-DvP07-0d.mjs");
+	const apiKey = cleanSmtpKey(data.apiKey);
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const sql = await getSql();
+	if (data.clearKey) await sql`delete from site_settings where key = 'smtp2go_api_key'`;
+	else if (apiKey) await sql`
+        insert into site_settings (key, value) values ('smtp2go_api_key', ${apiKey})
+        on conflict (key) do update set value = excluded.value
+      `;
+	const { mailSetupView } = await import("./mail.server-DvP07-0d.mjs");
 	return mailSetupView(sql);
 });
 var getInvestorSession_createServerFn_handler = createServerRpc({
@@ -612,8 +719,8 @@ var getInvestorSession_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getInvestorSession.__executeServer(opts));
 var getInvestorSession = createServerFn({ method: "GET" }).handler(getInvestorSession_createServerFn_handler, async () => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { ensureDemoApplications } = await import("./seed-applications.server-B84F_Z_Y.mjs");
 	const email = getCookie("ah_investor");
 	if (!email) return null;
@@ -642,8 +749,8 @@ var getInvestorPortal_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getInvestorPortal.__executeServer(opts));
 var getInvestorPortal = createServerFn({ method: "GET" }).handler(getInvestorPortal_createServerFn_handler, async () => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const { ensureDemoApplications } = await import("./seed-applications.server-B84F_Z_Y.mjs");
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
@@ -674,7 +781,7 @@ var investorLogout_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => investorLogout.__executeServer(opts));
 var investorLogout = createServerFn({ method: "POST" }).handler(investorLogout_createServerFn_handler, async () => {
-	const { setCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { setCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	setCookie("ah_investor", "", cookieOptions(0));
 	return { ok: true };
 });
@@ -701,7 +808,7 @@ var getCdTerms_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getCdTerms.__executeServer(opts));
 var getCdTerms = createServerFn({ method: "GET" }).handler(getCdTerms_createServerFn_handler, async () => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	return (await (await getSql())`
     select id, apy, months, featured from cd_terms order by featured desc, sort_order asc, months asc
   `).map((row) => ({
@@ -718,7 +825,7 @@ var saveCdTerms_createServerFn_handler = createServerRpc({
 }, (opts) => saveCdTerms.__executeServer(opts));
 var saveCdTerms = createServerFn({ method: "POST" }).validator((input) => input).handler(saveCdTerms_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await sql`delete from cd_terms`;
 	const ordered = [...data].sort((a, b) => Number(b.featured) - Number(a.featured));
@@ -772,7 +879,7 @@ var getPromo_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getPromo.__executeServer(opts));
 var getPromo = createServerFn({ method: "GET" }).handler(getPromo_createServerFn_handler, async () => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	return loadPromo(await getSql());
 });
 var savePromo_createServerFn_handler = createServerRpc({
@@ -783,7 +890,7 @@ var savePromo_createServerFn_handler = createServerRpc({
 var savePromo = createServerFn({ method: "POST" }).validator((input) => input).handler(savePromo_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
 	if (!data.startsOn || !data.endsOn) throw new Error("Set the offer dates.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await sql`
       insert into promo_settings (id, intro, protection, fine_print, starts_on, ends_on)
@@ -817,7 +924,7 @@ var getInvestmentTypes_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getInvestmentTypes.__executeServer(opts));
 var getInvestmentTypes = createServerFn({ method: "GET" }).handler(getInvestmentTypes_createServerFn_handler, async () => {
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	return (await (await getSql())`select * from investment_types where id = 'cd'`).map(mapInvestment);
 });
 var saveInvestmentType_createServerFn_handler = createServerRpc({
@@ -828,7 +935,7 @@ var saveInvestmentType_createServerFn_handler = createServerRpc({
 var saveInvestmentType = createServerFn({ method: "POST" }).validator((input) => input).handler(saveInvestmentType_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
 	if (data.id !== "cd" && data.id !== "bond") throw new Error("Unknown investment type.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	const frequencies = data.paymentFrequencies.map((item) => item.trim()).filter(Boolean).join("|");
 	await sql`
@@ -855,10 +962,10 @@ var getMyFundings_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getMyFundings.__executeServer(opts));
 var getMyFundings = createServerFn({ method: "GET" }).handler(getMyFundings_createServerFn_handler, async () => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureFundingExtras(sql);
 	const { ensureDemoApplications } = await import("./seed-applications.server-B84F_Z_Y.mjs");
@@ -918,11 +1025,11 @@ var submitFunding_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => submitFunding.__executeServer(opts));
 var submitFunding = createServerFn({ method: "POST" }).validator((input) => input).handler(submitFunding_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
 	if (data.typeId !== "cd") throw new Error("Choose a certificate term.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureFundingExtras(sql);
 	const type = (await sql`select * from investment_types where id = 'cd'`)[0];
@@ -959,7 +1066,8 @@ var submitFunding = createServerFn({ method: "POST" }).validator((input) => inpu
 			`Deposit code ${codes.depositCode}`,
 			`Account ${codes.accountNumber}`
 		].join("\n"),
-		relatedId: id
+		relatedId: id,
+		skipAdmin: true
 	});
 	return { id };
 });
@@ -969,10 +1077,10 @@ var cancelFunding_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => cancelFunding.__executeServer(opts));
 var cancelFunding = createServerFn({ method: "POST" }).validator((input) => input).handler(cancelFunding_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	if ((await sql`
       update fundings set status = 'cancelled'
@@ -990,6 +1098,298 @@ var cancelFunding = createServerFn({ method: "POST" }).validator((input) => inpu
 	}
 	return { ok: true };
 });
+var sendLeadIntro_createServerFn_handler = createServerRpc({
+	id: "46006108a43b5955e153161c38d4a991ad7fb79bc7fb49b43872dc805a179a48",
+	name: "sendLeadIntro",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => sendLeadIntro.__executeServer(opts));
+var sendLeadIntro = createServerFn({ method: "POST" }).validator((input) => {
+	const name = input.name.trim().replace(/\s+/g, " ");
+	const email = input.email.trim().toLowerCase();
+	if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+	if (!input.advisorId) throw new Error("Select an advisor.");
+	const clip = (value, max) => (value || "").trim().slice(0, max);
+	const copy = input.copy ? {
+		subject: clip(input.copy.subject, 140),
+		headline: clip(input.copy.headline, 180),
+		welcome: clip(input.copy.welcome, 800),
+		certificate: clip(input.copy.certificate, 500),
+		offer: clip(input.copy.offer, 800),
+		protection: clip(input.copy.protection, 500),
+		ready: clip(input.copy.ready, 500),
+		thanks: clip(input.copy.thanks, 400)
+	} : null;
+	return {
+		advisorId: input.advisorId,
+		name,
+		email,
+		copy
+	};
+}).handler(sendLeadIntro_createServerFn_handler, async ({ data }) => {
+	await requireAdmin();
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { leadLetter } = await import("./email-templates-C0jVmMQF.mjs").then((n) => n.i).then((n) => n.i);
+	const sql = await getSql();
+	await sql`alter table advisors add column if not exists role text not null default ''`;
+	const advisor = (await sql`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role from advisors where id = ${data.advisorId}`)[0];
+	if (!advisor) throw new Error("Select an advisor.");
+	if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+	const terms = await sql`select apy, months from cd_terms order by months asc`;
+	const types = await sql`select minimum_investment, capital_protection from investment_types where id = 'cd'`;
+	const offer = await loadPromo(sql);
+	const settings = await sql`select key, value from site_settings where key in ('email_logo', 'public_domain')`;
+	const logo = settings.find((row) => row.key === "email_logo")?.value || null;
+	const portalUrl = settings.find((row) => row.key === "public_domain")?.value || "";
+	const letter = leadLetter({
+		leadName: data.name,
+		company: await readCompanyName(sql),
+		terms: terms.map((term) => ({
+			months: Number(term.months),
+			apy: term.apy
+		})),
+		offer,
+		advisor,
+		minimum: types[0]?.minimum_investment,
+		protection: types[0]?.capital_protection,
+		logo,
+		portalUrl,
+		copy: data.copy
+	});
+	await sendStep(sql, {
+		step: "lead_intro",
+		clientEmail: data.email,
+		clientName: data.name,
+		detail: letter.text,
+		extraHtml: letter.html,
+		subject: data.copy?.subject,
+		replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+		replyName: advisor.name,
+		fromAddress: advisor.mailbox,
+		relatedId: data.advisorId
+	});
+	return { ok: true };
+});
+var sendLeadApplication_createServerFn_handler = createServerRpc({
+	id: "d4250d8ea37b0b6b6cc32aa247924d01849410ab372bc6eae17665d3df82d42e",
+	name: "sendLeadApplication",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => sendLeadApplication.__executeServer(opts));
+var sendLeadApplication = createServerFn({ method: "POST" }).validator((input) => {
+	const name = input.name.trim().replace(/\s+/g, " ");
+	const email = input.email.trim().toLowerCase();
+	const months = Number(input.months);
+	const kind = input.kind === "promo" ? "promo" : "custom";
+	if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+	if (!input.advisorId) throw new Error("Select an advisor.");
+	if (!Number.isFinite(months) || months <= 0) throw new Error("Choose a certificate term.");
+	const clip = (value, max) => (value || "").trim().slice(0, max);
+	const copy = input.copy ? {
+		subject: clip(input.copy.subject, 140),
+		headline: clip(input.copy.headline, 180),
+		hope: clip(input.copy.hope, 240),
+		ready: clip(input.copy.ready, 800),
+		instruction: clip(input.copy.instruction, 400),
+		codeNote: clip(input.copy.codeNote, 400),
+		followUp: clip(input.copy.followUp, 800),
+		thanks: clip(input.copy.thanks, 400),
+		promoCode: clip(input.copy.promoCode, 40)
+	} : null;
+	return {
+		advisorId: input.advisorId,
+		name,
+		email,
+		months,
+		kind,
+		copy
+	};
+}).handler(sendLeadApplication_createServerFn_handler, async ({ data }) => {
+	await requireAdmin();
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { applicationLetter } = await import("./email-templates-C0jVmMQF.mjs").then((n) => n.i).then((n) => n.i);
+	const sql = await getSql();
+	await sql`alter table advisors add column if not exists role text not null default ''`;
+	const advisor = (await sql`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role from advisors where id = ${data.advisorId}`)[0];
+	if (!advisor) throw new Error("Select an advisor.");
+	if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+	const terms = await sql`select apy, months from cd_terms where months = ${data.months} limit 1`;
+	if (!terms[0]) throw new Error("Choose a certificate term.");
+	const types = await sql`select minimum_investment from investment_types where id = 'cd'`;
+	const offer = await loadPromo(sql);
+	const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
+	if (data.kind === "promo" && !promoMonths.has(data.months)) throw new Error("Choose a promotional term.");
+	if (data.kind === "custom" && promoMonths.has(data.months)) throw new Error("Choose a term that is not on promotion.");
+	const settings = await sql`select key, value from site_settings where key in ('email_logo', 'public_domain')`;
+	const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+	if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+	const { createLeadInvite, inviteApplicationUrl } = await import("./lead-invites.server-DBOhEbbT.mjs");
+	const kind = data.kind === "promo" ? "promo" : "custom";
+	const promoCode = kind === "promo" ? data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}` : data.copy?.promoCode || "";
+	const token = await createLeadInvite(sql, {
+		email: data.email,
+		name: data.name,
+		months: data.months,
+		promoCode,
+		kind,
+		advisor
+	});
+	const letter = applicationLetter({
+		leadName: data.name,
+		company: await readCompanyName(sql),
+		months: data.months,
+		apy: terms[0].apy,
+		offer,
+		advisor,
+		minimum: types[0]?.minimum_investment,
+		logo: settings.find((row) => row.key === "email_logo")?.value || null,
+		portalUrl: origin,
+		link: inviteApplicationUrl(origin, token),
+		variant: kind,
+		copy: data.copy ? {
+			...data.copy,
+			promoCode
+		} : {
+			subject: "",
+			headline: "",
+			hope: "",
+			ready: "",
+			instruction: "",
+			codeNote: "",
+			followUp: "",
+			thanks: "",
+			promoCode
+		}
+	});
+	await sendStep(sql, {
+		step: kind === "promo" ? "lead_promo" : "lead_application",
+		clientEmail: data.email,
+		clientName: data.name,
+		detail: letter.text,
+		extraHtml: letter.html,
+		subject: letter.subject,
+		replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+		replyName: advisor.name,
+		fromAddress: advisor.mailbox,
+		relatedId: token
+	});
+	return { ok: true };
+});
+async function ensureCrmLeads(sql) {
+	await sql`
+    create table if not exists crm_leads (
+      id text primary key,
+      name text not null,
+      email text not null default '',
+      phone text not null default '',
+      amount text not null default '',
+      term text not null default '',
+      objective text not null default '',
+      liquidity text not null default '',
+      source text not null default '',
+      received_at timestamptz not null default now(),
+      created_at timestamptz not null default now()
+    )
+  `;
+}
+var listCrmLeads_createServerFn_handler = createServerRpc({
+	id: "a1d7ac3394c7cf21e5123b186412df53214aea42f0c665a9437b989c15ea8a03",
+	name: "listCrmLeads",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => listCrmLeads.__executeServer(opts));
+var listCrmLeads = createServerFn({ method: "GET" }).handler(listCrmLeads_createServerFn_handler, async () => {
+	await requireAdmin();
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const sql = await getSql();
+	await ensureCrmLeads(sql);
+	return (await sql`
+    select id, name, email, phone, amount, term, objective, liquidity, source, received_at
+    from crm_leads
+    order by received_at desc, created_at desc
+  `).map((row) => ({
+		id: row.id,
+		name: row.name,
+		email: row.email,
+		phone: row.phone,
+		amount: row.amount,
+		term: row.term,
+		objective: row.objective,
+		liquidity: row.liquidity,
+		source: row.source,
+		receivedAt: new Date(row.received_at).toISOString()
+	}));
+});
+var saveCrmLead_createServerFn_handler = createServerRpc({
+	id: "320d5ad8293a8028b17b2a0c8ba59e0d25494a6dafccb7a8797177a2d0495ec8",
+	name: "saveCrmLead",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => saveCrmLead.__executeServer(opts));
+var saveCrmLead = createServerFn({ method: "POST" }).validator((input) => {
+	const name = input.name.trim().replace(/\s+/g, " ");
+	const email = input.email.trim().toLowerCase();
+	if (name.length < 2) throw new Error("Enter the lead's name.");
+	if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email or leave it blank.");
+	const received = new Date(input.receivedAt || Date.now());
+	if (Number.isNaN(received.getTime())) throw new Error("Enter when the lead was received.");
+	const clip = (value) => (value || "").trim().slice(0, 240);
+	return {
+		id: input.id || "",
+		name: name.slice(0, 120),
+		email,
+		phone: clip(input.phone),
+		amount: clip(input.amount),
+		term: clip(input.term),
+		objective: clip(input.objective),
+		liquidity: clip(input.liquidity),
+		source: clip(input.source),
+		receivedAt: received.toISOString()
+	};
+}).handler(saveCrmLead_createServerFn_handler, async ({ data }) => {
+	await requireAdmin();
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const sql = await getSql();
+	await ensureCrmLeads(sql);
+	const id = data.id || crypto.randomUUID();
+	await sql`
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, received_at)
+      values (
+        ${id},
+        ${data.name},
+        ${data.email},
+        ${data.phone},
+        ${data.amount},
+        ${data.term},
+        ${data.objective},
+        ${data.liquidity},
+        ${data.source},
+        ${data.receivedAt}
+      )
+      on conflict (id) do update set
+        name = excluded.name,
+        email = excluded.email,
+        phone = excluded.phone,
+        amount = excluded.amount,
+        term = excluded.term,
+        objective = excluded.objective,
+        liquidity = excluded.liquidity,
+        source = excluded.source,
+        received_at = excluded.received_at
+    `;
+	return { id };
+});
+var deleteCrmLead_createServerFn_handler = createServerRpc({
+	id: "1d3491e9a27c290f295bfb69f2dd0ee4ad31f715b28d28a35caa1a9795dd1685",
+	name: "deleteCrmLead",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => deleteCrmLead.__executeServer(opts));
+var deleteCrmLead = createServerFn({ method: "POST" }).validator((input) => input).handler(deleteCrmLead_createServerFn_handler, async ({ data }) => {
+	await requireAdmin();
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const sql = await getSql();
+	await ensureCrmLeads(sql);
+	await sql`delete from crm_leads where id = ${data.id}`;
+	return { ok: true };
+});
 var listAdvisors_createServerFn_handler = createServerRpc({
 	id: "0a4e4b3c4401fa3b3502245b8864092fe1dfbf357dc425ac9e606cc03de423a5",
 	name: "listAdvisors",
@@ -997,8 +1397,10 @@ var listAdvisors_createServerFn_handler = createServerRpc({
 }, (opts) => listAdvisors.__executeServer(opts));
 var listAdvisors = createServerFn({ method: "GET" }).handler(listAdvisors_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
-	return (await getSql())`select id, name, phone, email from advisors order by name`;
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const sql = await getSql();
+	await sql`alter table advisors add column if not exists role text not null default ''`;
+	return sql`select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role from advisors order by name`;
 });
 var saveAdvisor_createServerFn_handler = createServerRpc({
 	id: "c22e4f32fb4962874ec7588e1e0ddec4eddb22eaa12f9f6151d706503efd2f50",
@@ -1008,13 +1410,17 @@ var saveAdvisor_createServerFn_handler = createServerRpc({
 var saveAdvisor = createServerFn({ method: "POST" }).validator((input) => input).handler(saveAdvisor_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
 	if (!data.name.trim()) throw new Error("Name is required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { cleanMailFrom } = await import("./mail.server-DvP07-0d.mjs");
+	const mailbox = data.mailbox?.trim() ? cleanMailFrom(data.mailbox) : "";
+	const role = (data.role || "").trim().slice(0, 80);
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
+	await sql`alter table advisors add column if not exists role text not null default ''`;
 	const id = data.id || crypto.randomUUID();
 	await sql`
-      insert into advisors (id, name, phone, email)
-      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()})
-      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email
+      insert into advisors (id, name, phone, email, mailbox, role)
+      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()}, ${mailbox}, ${role})
+      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email, mailbox = excluded.mailbox, role = excluded.role
     `;
 	return { id };
 });
@@ -1025,7 +1431,7 @@ var deleteAdvisor_createServerFn_handler = createServerRpc({
 }, (opts) => deleteAdvisor.__executeServer(opts));
 var deleteAdvisor = createServerFn({ method: "POST" }).validator((input) => input).handler(deleteAdvisor_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await sql`update fundings set advisor_id = null where advisor_id = ${data.id}`;
 	await sql`delete from advisors where id = ${data.id}`;
@@ -1064,7 +1470,7 @@ var listFundings_createServerFn_handler = createServerRpc({
 }, (opts) => listFundings.__executeServer(opts));
 var listFundings = createServerFn({ method: "GET" }).handler(listFundings_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureInvoiceBillingColumn(sql);
 	await ensureContactColumns(sql);
@@ -1161,7 +1567,7 @@ var updateFunding = createServerFn({ method: "POST" }).validator((input) => {
 	};
 }).handler(updateFunding_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureFundingExtras(sql);
 	if ((await sql`
@@ -1219,11 +1625,11 @@ var uploadPaymentConfirmation_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => uploadPaymentConfirmation.__executeServer(opts));
 var uploadPaymentConfirmation = createServerFn({ method: "POST" }).validator((input) => input).handler(uploadPaymentConfirmation_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
 	if (!data.fileName.trim() || !PAYMENT_FILE.test(data.file) || data.file.length > 7e6) throw new Error("Attach a PDF or image under 5 MB.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	if (!(await sql`
       update fundings
@@ -1247,8 +1653,8 @@ var getPaymentFile_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => getPaymentFile.__executeServer(opts));
 var getPaymentFile = createServerFn({ method: "POST" }).validator((input) => input).handler(getPaymentFile_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	const investor = getCookie("ah_investor");
 	const own = (investor ? await sql`
@@ -1275,7 +1681,7 @@ var approvePayment_createServerFn_handler = createServerRpc({
 }, (opts) => approvePayment.__executeServer(opts));
 var approvePayment = createServerFn({ method: "POST" }).validator((input) => input).handler(approvePayment_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	if (!(await sql`
       update fundings set status = 'payment_approved', payment_approved_at = now()
@@ -1299,7 +1705,7 @@ var rejectPayment_createServerFn_handler = createServerRpc({
 }, (opts) => rejectPayment.__executeServer(opts));
 var rejectPayment = createServerFn({ method: "POST" }).validator((input) => input).handler(rejectPayment_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	if (!(await sql`
       update fundings
@@ -1328,10 +1734,10 @@ var signFunding = createServerFn({ method: "POST" }).validator((input) => ({
 	contactPhone: (input.contactPhone || "").trim().slice(0, 80),
 	contactBy: input.contactBy === "email" ? "email" : "call"
 })).handler(signFunding_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureContactColumns(sql);
 	const apps = await sql`
@@ -1377,10 +1783,10 @@ var downloadInvestmentPdf_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => downloadInvestmentPdf.__executeServer(opts));
 var downloadInvestmentPdf = createServerFn({ method: "POST" }).validator((input) => input).handler(downloadInvestmentPdf_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureFundingExtras(sql);
 	const row = (await sql`
@@ -1489,11 +1895,11 @@ var downloadInvoicePdf_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => downloadInvoicePdf.__executeServer(opts));
 var downloadInvoicePdf = createServerFn({ method: "POST" }).validator((input) => input).handler(downloadInvoicePdf_createServerFn_handler, async ({ data }) => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	const admin = await readSignedIn();
 	if (!email && !admin) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureInvoiceBillingColumn(sql);
 	const row = (await sql`
@@ -1550,7 +1956,7 @@ var saveInvoiceBilling = createServerFn({ method: "POST" }).validator((input) =>
 	};
 }).handler(saveInvoiceBilling_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureInvoiceBillingColumn(sql);
 	await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
@@ -1573,7 +1979,7 @@ var approveInvoice = createServerFn({ method: "POST" }).validator((input) => {
 	};
 }).handler(approveInvoice_createServerFn_handler, async ({ data }) => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
 	const sql = await getSql();
 	await ensureInvoiceBillingColumn(sql);
 	const current = await fundingDetail(sql, data.id);
@@ -1668,7 +2074,7 @@ async function detailText(sql, row) {
 	].filter(Boolean).join("\n");
 }
 var STATUS_LABEL = {
-	pending: "Pending",
+	pending: "Pending call/email",
 	approved_phone: "Approved by phone",
 	instructions_sent: "Invoice generated",
 	payment_approved: "Active",
@@ -1716,6 +2122,7 @@ function applicationDeskDetail(payload) {
 		line("Net worth", payload.netWorth),
 		line("Preferred amount", payload.preferredAmount || "—"),
 		line("Preferred term", payload.preferredTerm ? `${payload.preferredTerm}-month` : "—"),
+		line("Promotional code", payload.promoCode || "—"),
 		line("Identity document", `${payload.idType}${payload.idFileName ? ` · ${payload.idFileName}` : " · not attached"}`),
 		line("Address document", `${payload.addressDocType}${payload.addressFileName ? ` · ${payload.addressFileName}` : " · not attached"}`),
 		line("Bank", payload.bankName),
@@ -1755,7 +2162,7 @@ function dataFile(name, value) {
 }
 async function sendStep(sql, input) {
 	try {
-		const { notifyStep } = await import("./mail.server-C6f7ynqb.mjs");
+		const { notifyStep } = await import("./mail.server-DvP07-0d.mjs");
 		await notifyStep(sql, input);
 	} catch {}
 }
@@ -1766,27 +2173,55 @@ var listNotifications_createServerFn_handler = createServerRpc({
 }, (opts) => listNotifications.__executeServer(opts));
 var listNotifications = createServerFn({ method: "GET" }).handler(listNotifications_createServerFn_handler, async () => {
 	await requireAdmin();
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
-	const { ensureMailColumn } = await import("./mail.server-C6f7ynqb.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { ensureMailColumn } = await import("./mail.server-DvP07-0d.mjs");
 	const sql = await getSql();
 	await ensureMailColumn(sql);
-	return (await sql`
+	const rows = await sql`
     select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at,
-           audience, recipient, step, subject, body, html, delivery
+           audience, recipient, step, subject, body, html, delivery, resend_id, mail_status, related_id
     from notifications
     order by created_at desc
     limit 200
-  `).map((row) => ({
-		id: row.id,
-		createdAt: row.created_at,
-		audience: row.audience,
-		recipient: row.recipient,
-		step: row.step,
-		subject: row.subject,
-		body: row.body,
-		html: row.html ?? "",
-		delivery: row.delivery
-	}));
+  `;
+	const origin = ((await sql`select value from site_settings where key = 'public_domain'`)[0]?.value || "").trim().replace(/\/$/, "");
+	const invites = await sql`
+    select token, expires_at, used_at from lead_invites
+  `;
+	const byToken = new Map(invites.map((invite) => [invite.token, invite]));
+	return rows.map((row) => {
+		const fromHtml = row.html?.match(/invite=([a-f0-9]{16,})/i)?.[1] || "";
+		const invite = byToken.get(row.related_id) || byToken.get(fromHtml);
+		const token = invite?.token || "";
+		const link = token && /^https?:\/\//i.test(origin) ? `${origin}/application?invite=${token}` : "";
+		return {
+			id: row.id,
+			createdAt: row.created_at,
+			audience: row.audience,
+			recipient: row.recipient,
+			step: row.step,
+			subject: row.subject,
+			body: row.body,
+			html: row.html ?? "",
+			delivery: row.delivery,
+			resendId: row.resend_id || "",
+			mailStatus: row.mail_status || "",
+			link,
+			expiresAt: invite?.expires_at ? new Date(invite.expires_at).toISOString() : "",
+			usedAt: invite?.used_at ? new Date(invite.used_at).toISOString() : ""
+		};
+	});
+});
+var syncMailStatuses_createServerFn_handler = createServerRpc({
+	id: "be53b2628abbad2d5bf831bbb6156af68ccb69338b6750eaa7b194b534d22dd9",
+	name: "syncMailStatuses",
+	filename: "src/lib/admin.functions.ts"
+}, (opts) => syncMailStatuses.__executeServer(opts));
+var syncMailStatuses = createServerFn({ method: "POST" }).handler(syncMailStatuses_createServerFn_handler, async () => {
+	await requireAdmin();
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { syncResendStatuses } = await import("./mail.server-DvP07-0d.mjs");
+	return syncResendStatuses(await getSql());
 });
 var listMyNotifications_createServerFn_handler = createServerRpc({
 	id: "8b04ddee08d00402f35af241b8797321407d2743498150ff1167939f742f711c",
@@ -1794,11 +2229,11 @@ var listMyNotifications_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => listMyNotifications.__executeServer(opts));
 var listMyNotifications = createServerFn({ method: "GET" }).handler(listMyNotifications_createServerFn_handler, async () => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
-	const { ensureMailColumn } = await import("./mail.server-C6f7ynqb.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { ensureMailColumn } = await import("./mail.server-DvP07-0d.mjs");
 	const sql = await getSql();
 	await ensureMailColumn(sql);
 	return (await sql`
@@ -1820,11 +2255,11 @@ var markMyNotificationsRead_createServerFn_handler = createServerRpc({
 	filename: "src/lib/admin.functions.ts"
 }, (opts) => markMyNotificationsRead.__executeServer(opts));
 var markMyNotificationsRead = createServerFn({ method: "POST" }).handler(markMyNotificationsRead_createServerFn_handler, async () => {
-	const { getCookie } = await import("./ssr.mjs").then((n) => n.o).then((n) => n.t);
+	const { getCookie } = await import("./ssr.mjs").then((n) => n.a).then((n) => n.t);
 	const email = getCookie("ah_investor");
 	if (!email) throw new Error("Sign in required.");
-	const { getSql } = await import("./db-CSLm5XxB.mjs");
-	const { ensureMailColumn } = await import("./mail.server-C6f7ynqb.mjs");
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const { ensureMailColumn } = await import("./mail.server-DvP07-0d.mjs");
 	const sql = await getSql();
 	await ensureMailColumn(sql);
 	await sql`
@@ -1835,4 +2270,4 @@ var markMyNotificationsRead = createServerFn({ method: "POST" }).handler(markMyN
 	return { ok: true };
 });
 //#endregion
-export { adminLogin_createServerFn_handler, adminLogout_createServerFn_handler, approveInvoice_createServerFn_handler, approvePayment_createServerFn_handler, cancelFunding_createServerFn_handler, clearDatabase_createServerFn_handler, createDeskLogin_createServerFn_handler, deleteAdvisor_createServerFn_handler, deleteApplication_createServerFn_handler, deleteFunding_createServerFn_handler, downloadInvestmentPdf_createServerFn_handler, downloadInvoicePdf_createServerFn_handler, getAdminSession_createServerFn_handler, getCdTerms_createServerFn_handler, getInvestmentTypes_createServerFn_handler, getInvestorPortal_createServerFn_handler, getInvestorSession_createServerFn_handler, getMailSetup_createServerFn_handler, getMyFundings_createServerFn_handler, getPaymentFile_createServerFn_handler, getPromo_createServerFn_handler, getSiteBrand_createServerFn_handler, investorLogin_createServerFn_handler, investorLogout_createServerFn_handler, listAdvisors_createServerFn_handler, listApplications_createServerFn_handler, listFundings_createServerFn_handler, listMyNotifications_createServerFn_handler, listNotifications_createServerFn_handler, markMyNotificationsRead_createServerFn_handler, rejectPayment_createServerFn_handler, runDatabaseBackup_createServerFn_handler, saveAdvisor_createServerFn_handler, saveCdTerms_createServerFn_handler, saveDeskLogin_createServerFn_handler, saveInvestmentType_createServerFn_handler, saveInvoiceBilling_createServerFn_handler, saveMailSetup_createServerFn_handler, savePromo_createServerFn_handler, setApplicationStatus_createServerFn_handler, setSiteBrand_createServerFn_handler, signFunding_createServerFn_handler, signInAsClient_createServerFn_handler, submitApplication_createServerFn_handler, submitFunding_createServerFn_handler, updateFunding_createServerFn_handler, uploadPaymentConfirmation_createServerFn_handler };
+export { adminLogin_createServerFn_handler, adminLogout_createServerFn_handler, approveInvoice_createServerFn_handler, approvePayment_createServerFn_handler, cancelFunding_createServerFn_handler, clearDatabase_createServerFn_handler, createDeskLogin_createServerFn_handler, deleteAdvisor_createServerFn_handler, deleteApplication_createServerFn_handler, deleteCrmLead_createServerFn_handler, deleteFunding_createServerFn_handler, downloadInvestmentPdf_createServerFn_handler, downloadInvoicePdf_createServerFn_handler, getAdminSession_createServerFn_handler, getCdTerms_createServerFn_handler, getInvestmentTypes_createServerFn_handler, getInvestorPortal_createServerFn_handler, getInvestorSession_createServerFn_handler, getLeadInvite_createServerFn_handler, getMailSetup_createServerFn_handler, getMyFundings_createServerFn_handler, getPaymentFile_createServerFn_handler, getPromo_createServerFn_handler, getSiteBrand_createServerFn_handler, investorLogin_createServerFn_handler, investorLogout_createServerFn_handler, listAdvisors_createServerFn_handler, listApplications_createServerFn_handler, listCrmLeads_createServerFn_handler, listFundings_createServerFn_handler, listMyNotifications_createServerFn_handler, listNotifications_createServerFn_handler, markMyNotificationsRead_createServerFn_handler, rejectPayment_createServerFn_handler, runDatabaseBackup_createServerFn_handler, saveAdvisor_createServerFn_handler, saveCdTerms_createServerFn_handler, saveCrmLead_createServerFn_handler, saveDeskLogin_createServerFn_handler, saveInvestmentType_createServerFn_handler, saveInvoiceBilling_createServerFn_handler, saveMailSetup_createServerFn_handler, savePromo_createServerFn_handler, saveSmtpSetup_createServerFn_handler, sendLeadApplication_createServerFn_handler, sendLeadIntro_createServerFn_handler, setApplicationStatus_createServerFn_handler, setSiteBrand_createServerFn_handler, signFunding_createServerFn_handler, signInAsClient_createServerFn_handler, submitApplication_createServerFn_handler, submitFunding_createServerFn_handler, syncMailStatuses_createServerFn_handler, updateFunding_createServerFn_handler, uploadPaymentConfirmation_createServerFn_handler };

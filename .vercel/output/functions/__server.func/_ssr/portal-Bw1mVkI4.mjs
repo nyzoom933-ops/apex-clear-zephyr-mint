@@ -3,9 +3,9 @@ import { a as matchTier, i as formatOfferDate, n as amountRange, o as parseApy, 
 import { S as require_jsx_runtime, X as require_react, b as useNavigate } from "../_libs/@tanstack/react-router+[...].mjs";
 import { C as Bell, S as CalendarClock, T as BadgePercent, a as Shield, b as Check, c as Plus, f as Lock, g as FileUp, i as SlidersHorizontal, l as Percent, m as Landmark, n as Wallet, p as LayoutDashboard, r as TriangleAlert, s as Receipt, t as X, u as Menu, w as Banknote, x as CalendarRange } from "../_libs/lucide-react.mjs";
 import { n as getDocument } from "../_libs/pdfjs-dist.mjs";
-import { E as getPromo, K as signFunding, M as listMyNotifications, O as investorLogout, P as markMyNotificationsRead, S as getInvestorSession, T as getPaymentFile, Y as submitFunding, Z as uploadPaymentConfirmation, _ as downloadInvoicePdf, a as useBrand, b as getInvestmentTypes, g as downloadInvestmentPdf, i as headerActionClass, r as SiteHeader, u as cancelFunding, v as getAdminSession, w as getMyFundings, x as getInvestorPortal, y as getCdTerms } from "./router-B75_K_o9.mjs";
+import { C as getInvestorPortal, D as getMyFundings, I as listMyNotifications, O as getPaymentFile, R as markMyNotificationsRead, S as getInvestmentTypes, a as useBrand, b as getAdminSession, d as cancelFunding, et as signFunding, i as headerActionClass, j as investorLogout, k as getPromo, ot as uploadPaymentConfirmation, r as SiteHeader, rt as submitFunding, v as downloadInvestmentPdf, w as getInvestorSession, x as getCdTerms, y as downloadInvoicePdf } from "./router-BgWJKDCs.mjs";
 import { t as SignaturePad } from "./signature-pad-C-nQ00Yq.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/portal-BU7FXkhJ.js
+//#region node_modules/.nitro/vite/services/ssr/assets/portal-Bw1mVkI4.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function PortalPage() {
@@ -284,7 +284,7 @@ function PortalFooter({ tab, onChange }) {
 			] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("nav", {
 				"aria-label": "Portal",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "text-xs font-semibold tracking-widest text-[#12315c] uppercase",
+					className: "text-xs font-semibold tracking-widest text-heading uppercase",
 					children: "Portal"
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", {
 					className: "mt-3 grid grid-cols-2 gap-x-4 gap-y-2",
@@ -410,7 +410,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 				className: "rounded-xl bg-[#f3f4f6] px-4 py-6 sm:px-6",
 				children: [
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
-						className: "text-center text-2xl font-semibold text-[#3d3d3d]",
+						className: "text-center text-2xl font-semibold text-fg",
 						children: "Browse all available CD terms"
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
@@ -425,7 +425,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 									"data-term": true,
 									role: "button",
 									tabIndex: 0,
-									className: "relative mt-3 flex min-h-48 min-w-[220px] shrink-0 cursor-pointer flex-col rounded-xl border bg-white px-5 pt-16 pb-5 text-left shadow-sm " + (active ? "border-[#006fcf]" : "border-[#e7e7e7]"),
+									className: "relative mt-3 flex min-h-48 min-w-[220px] shrink-0 cursor-pointer flex-col rounded-xl border bg-white px-5 pt-16 pb-5 text-left shadow-sm " + (active ? "border-action" : "border-[#e7e7e7]"),
 									onClick: () => {
 										setSelectedId(term.id);
 										setRatesOpen(promo);
@@ -442,7 +442,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 										term.featured || promo ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
 											className: "absolute -top-3 left-4 flex flex-col items-start gap-1",
 											children: [term.featured ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-												className: "inline-flex items-center gap-1 rounded-md bg-[#006fcf] px-2.5 py-1 text-xs font-semibold text-white",
+												className: "inline-flex items-center gap-1 rounded-md bg-action px-2.5 py-1 text-xs font-semibold text-white",
 												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", {
 													viewBox: "0 0 16 16",
 													className: "size-3.5",
@@ -480,7 +480,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 											}) : null]
 										}) : null,
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "block text-2xl font-semibold text-[#262626]",
+											className: "block text-2xl font-semibold text-primary",
 											children: term.apy.includes("APY") ? term.apy : `${term.apy} APY`
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
@@ -489,7 +489,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 										}),
 										promo ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 											type: "button",
-											className: "mt-auto self-start pt-4 text-left text-sm font-semibold text-[#006fcf]",
+											className: "mt-auto self-start pt-4 text-left text-sm font-semibold text-action",
 											onClick: (event) => {
 												event.stopPropagation();
 												setSelectedId(term.id);
@@ -508,7 +508,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 						children: [
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
-								className: "flex size-8 items-center justify-center text-[#006fcf]",
+								className: "flex size-8 items-center justify-center text-action",
 								"aria-label": "Previous terms",
 								onClick: () => move(-1),
 								children: "‹"
@@ -518,7 +518,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 								children: orderedTerms.map((term, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 									type: "button",
 									"aria-label": `Show term ${index + 1}`,
-									className: index === page ? "h-1.5 w-5 rounded-full bg-[#006fcf]" : "size-1.5 rounded-full bg-[#c5c8ce]",
+									className: index === page ? "h-1.5 w-5 rounded-full bg-action" : "size-1.5 rounded-full bg-[#c5c8ce]",
 									onClick: () => {
 										setPage(index);
 										scroller.current?.querySelectorAll("[data-term]")[index]?.scrollIntoView({
@@ -531,7 +531,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
-								className: "flex size-8 items-center justify-center text-[#006fcf]",
+								className: "flex size-8 items-center justify-center text-action",
 								"aria-label": "Next terms",
 								onClick: () => move(1),
 								children: "›"
@@ -564,7 +564,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" })
 					className: "text-sm text-fg",
 					children: cd.issuer
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-					className: "text-lg font-semibold text-[#12315c]",
+					className: "text-lg font-semibold text-heading",
 					children: [
 						selected.months,
 						"-month · ",
@@ -687,7 +687,7 @@ function InvestmentSummary({ type, term, amount, pending, error, onClose, onConf
 						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "col-span-2",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("dt", {
-								className: "text-xs font-semibold tracking-wide text-[#12315c] uppercase",
+								className: "text-xs font-semibold tracking-wide text-heading uppercase",
 								children: "Capital protection"
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("dd", {
 								className: "mt-1 text-fg",
@@ -701,7 +701,7 @@ function InvestmentSummary({ type, term, amount, pending, error, onClose, onConf
 					children: SUMMARY_STEPS.map((step, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
 						className: "flex items-start gap-3",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-							className: "flex size-6 shrink-0 items-center justify-center rounded-full bg-[#006fcf] text-xs font-semibold text-white",
+							className: "flex size-6 shrink-0 items-center justify-center rounded-full bg-action text-xs font-semibold text-white",
 							children: index + 1
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 							className: "text-sm text-fg",
@@ -734,7 +734,7 @@ function InvestmentSummary({ type, term, amount, pending, error, onClose, onConf
 }
 function SummaryFact({ label, value }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("dt", {
-		className: "text-xs font-semibold tracking-wide text-[#12315c] uppercase",
+		className: "text-xs font-semibold tracking-wide text-heading uppercase",
 		children: label
 	}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("dd", {
 		className: "mt-1 text-fg",
@@ -751,7 +751,7 @@ function moneyLabel(amount) {
 function PromoRates({ offer, term }) {
 	const tiers = offer.tiers.filter((tier) => tier.months.includes(term.months));
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-		className: "mx-auto mt-6 max-w-3xl text-sm leading-6 text-[#262626]",
+		className: "mx-auto mt-6 max-w-3xl text-sm leading-6 text-primary",
 		children: [
 			offer.intro ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: offer.intro }) : null,
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
@@ -780,7 +780,7 @@ function PromoRates({ offer, term }) {
 				children: offerNotes(offer).map((note) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
 					className: "flex items-start gap-2",
 					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(note.icon, {
-						className: "mt-0.5 size-4 shrink-0 text-[#006fcf]",
+						className: "mt-0.5 size-4 shrink-0 text-action",
 						"aria-hidden": "true"
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 						className: note.strong ? "font-semibold text-primary" : void 0,
@@ -829,7 +829,7 @@ function PromoCalculator({ offer, selected, onApply }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("section", {
 		className: "mt-6",
 		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-			className: "rounded-xl bg-[#006fcf] px-4 py-8 text-white sm:px-8",
+			className: "rounded-xl bg-action px-4 py-8 text-white sm:px-8",
 			children: [
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", {
 					className: "calc-title text-center text-3xl font-semibold tracking-tight text-white",
@@ -840,7 +840,7 @@ function PromoCalculator({ offer, selected, onApply }) {
 					children: selected ? `${selected.months}-month term · ${selected.apy.includes("APY") ? selected.apy : `${selected.apy} APY`} base rate.` : "Select a CD term above."
 				}),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "mx-auto mt-6 max-w-3xl rounded-2xl bg-white px-5 py-6 text-[#262626] sm:px-8",
+					className: "mx-auto mt-6 max-w-3xl rounded-2xl bg-white px-5 py-6 text-primary sm:px-8",
 					children: [
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
 							className: "text-center text-xl font-semibold",
@@ -855,7 +855,7 @@ function PromoCalculator({ offer, selected, onApply }) {
 									children: "Enter Initial Deposit Amount"
 								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
 									inputMode: "decimal",
-									className: "mt-3 w-full rounded-md border border-[#cfcfcf] px-3 py-3 text-base outline-none focus:border-[#006fcf]",
+									className: "mt-3 w-full rounded-md border border-[#cfcfcf] px-3 py-3 text-base outline-none focus:border-action",
 									value: deposit,
 									onChange: (event) => apply(event.target.value)
 								})]
@@ -865,7 +865,7 @@ function PromoCalculator({ offer, selected, onApply }) {
 									const picked = amount === tier.minAmount;
 									return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 										type: "button",
-										className: "min-h-9 rounded-full border px-3 py-1 text-sm font-semibold " + (picked ? "border-[#006fcf] bg-[#006fcf] text-white" : "border-[#cfcfcf] text-[#262626]"),
+										className: "min-h-9 rounded-full border px-3 py-1 text-sm font-semibold " + (picked ? "border-action bg-action text-white" : "border-[#cfcfcf] text-primary"),
 										onClick: () => apply(String(tier.minAmount)),
 										children: ["$", tier.minAmount.toLocaleString("en-US")]
 									}, tier.id);
@@ -878,7 +878,7 @@ function PromoCalculator({ offer, selected, onApply }) {
 								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", {
 									className: "mt-3 divide-y divide-[#e6e6e6] text-sm",
 									children: tiers.map((tier) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
-										className: "flex items-center justify-between gap-3 py-2 " + (bonus?.id === tier.id ? "font-semibold text-[#006fcf]" : ""),
+										className: "flex items-center justify-between gap-3 py-2 " + (bonus?.id === tier.id ? "font-semibold text-action" : ""),
 										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: amountRange(tier) }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: formatBonus(tier.bonusPercent) })]
 									}, tier.id))
 								})]
@@ -1023,7 +1023,7 @@ function statusLabel(status) {
 	if (status === "approved_phone") return "Approved by phone";
 	if (status === "instructions_sent") return "Invoice created";
 	if (status === "payment_approved") return "Active";
-	return "Pending";
+	return "Pending call/email";
 }
 function certificateTitle(position, months = 0, apy = "") {
 	const label = position.termLabel || "";
@@ -1078,7 +1078,7 @@ function TermChart({ items }) {
 				className: "absolute inset-y-0 left-0 bg-[#6cc4ee]",
 				style: { width: `${elapsed(item.start, item.end)}%` }
 			}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-				className: "relative flex h-full items-center px-3 text-xs font-semibold text-[#12315c]",
+				className: "relative flex h-full items-center px-3 text-xs font-semibold text-heading",
 				children: [
 					item.months,
 					"-month · ",
@@ -1088,12 +1088,12 @@ function TermChart({ items }) {
 		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 			className: "mt-1 flex justify-between text-xs text-fg",
 			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-				className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+				className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 				children: "Funding date"
 			}), formatDate(/* @__PURE__ */ new Date(`${item.start}T00:00:00Z`))] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
 				className: "text-right",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-					className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+					className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 					children: "Mature date"
 				}), item.end ? formatDate(item.end) : "—"]
 			})]
@@ -1182,7 +1182,7 @@ function Celebration({ position, onOpen }) {
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 				type: "button",
-				className: "mt-5 min-h-11 rounded-md bg-white px-5 py-2 text-sm font-semibold text-[#006fcf]",
+				className: "mt-5 min-h-11 rounded-md bg-white px-5 py-2 text-sm font-semibold text-action",
 				onClick: onOpen,
 				children: "Active CDs"
 			})
@@ -1393,15 +1393,15 @@ function Dashboard({ account, holdings, pipeline, onAdd, onActive, onView }) {
 									children: ["Opened ", line.position.createdAt]
 								})] }),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+									className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 									children: "Matures"
 								}), formatDate(line.date)] }),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+									className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 									children: "Principal"
 								}), money(line.principal)] }),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+									className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 									children: "Expected payout"
 								}), money(line.payout)] })
 							]
@@ -1763,7 +1763,7 @@ function Highlight({ icon: Icon, label, value }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "rounded-md border border-border bg-bg px-3 py-3",
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-			className: "flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+			className: "flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-heading uppercase",
 			children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Icon, {
 				className: "size-3.5",
 				"aria-hidden": "true"
@@ -1783,7 +1783,7 @@ function Fact({ label, value }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "border-r border-b border-border px-3 py-3",
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("dt", {
-			className: "text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+			className: "text-[11px] font-semibold tracking-wide text-heading uppercase",
 			children: label
 		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("dd", {
 			className: "mt-1 text-sm text-fg",
@@ -1840,7 +1840,7 @@ function InvoiceDownload({ position }) {
 		className: "mt-4 rounded-md border border-border bg-white px-4 py-3",
 		children: [
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-				className: "text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+				className: "text-[11px] font-semibold tracking-wide text-heading uppercase",
 				children: "Payment invoice"
 			}),
 			ready ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
@@ -1950,13 +1950,13 @@ function InvestmentCard({ position, signature, phone, email, onSigned }) {
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "mt-3 grid grid-cols-2 gap-3",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-					className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+					className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 					children: "Promo APY"
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 					className: "text-sm font-semibold text-fg",
 					children: rates.promo
 				})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-					className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+					className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 					children: "Final APY"
 				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 					className: "text-sm font-semibold text-fg",
@@ -2063,11 +2063,19 @@ function PaymentUpload({ id, replacing = false, onUploaded }) {
 				id,
 				fileName: file.name,
 				file: String(reader.result)
-			} }).then(() => onUploaded()).catch(() => {
+			} }).then(() => {
+				setPending(false);
+				onUploaded();
+			}).catch(() => {
 				setError("The confirmation could not be uploaded.");
 				setPending(false);
 				setName("");
 			});
+		};
+		reader.onerror = () => {
+			setError("The confirmation could not be read.");
+			setPending(false);
+			setName("");
 		};
 		reader.readAsDataURL(file);
 	}
@@ -2310,7 +2318,7 @@ function SignTerms({ position, signature, phone, email, rates, onSigned }) {
 										onChange: (event) => setCallNumber(event.target.value)
 									})]
 								}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-									className: "mt-1 text-lg font-semibold text-[#12315c]",
+									className: "mt-1 text-lg font-semibold text-heading",
 									children: callNumber || "No number on the application"
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -2363,7 +2371,7 @@ function TermLine({ icon: Icon, label, value }) {
 			className: "menu-icon mt-0.5 size-4 shrink-0 text-action",
 			"aria-hidden": "true"
 		}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-			className: "block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase",
+			className: "block text-[11px] font-semibold tracking-wide text-heading uppercase",
 			children: label
 		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 			className: "text-fg",

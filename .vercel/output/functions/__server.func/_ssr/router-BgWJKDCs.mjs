@@ -1,11 +1,12 @@
 import { o as __toESM } from "../_runtime.mjs";
+import { t as __exportAll } from "./rolldown-runtime-D7D4PA-g.mjs";
 import { a as cleanPublicDomain, i as cleanCompanyName, n as cleanBackupEmail, o as cloudflareToken, s as env, t as DEFAULT_COMPANY_NAME } from "./env.server-CXxi_iUv.mjs";
 import { S as require_jsx_runtime, X as require_react, _ as createFileRoute, d as Scripts, f as HeadContent, g as lazyRouteComponent, h as Outlet, m as createRouter, q as redirect, v as createRootRoute, x as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
-import { a as __exportAll, i as getServerFnById, n as createServerFn, r as TSS_SERVER_FUNCTION } from "./ssr.mjs";
+import { i as getServerFnById, n as createServerFn, r as TSS_SERVER_FUNCTION } from "./ssr.mjs";
 import { r as TriangleAlert } from "../_libs/lucide-react.mjs";
 import { a as union, i as string, n as number, r as object, t as literal } from "../_libs/zod.mjs";
 import { t as GlobalWorkerOptions } from "../_libs/pdfjs-dist.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-B75_K_o9.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-BgWJKDCs.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var FALLBACK_MESSAGE = "An unexpected error occurred. Try reloading the page.";
@@ -14,7 +15,18 @@ function errorMessage(error) {
 	if (typeof error === "string" && error) return error;
 	return FALLBACK_MESSAGE;
 }
+function staleModule(error) {
+	const message = errorMessage(error);
+	return message.includes("dynamically imported module") || message.includes("Importing a module script failed");
+}
 function AppErrorComponent({ error }) {
+	(0, import_react.useEffect)(() => {
+		if (!staleModule(error)) return;
+		const key = "ah-chunk-reload";
+		if (sessionStorage.getItem(key) === "1") return;
+		sessionStorage.setItem(key, "1");
+		window.location.reload();
+	}, [error]);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
 		className: "flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50",
 		children: [
@@ -32,7 +44,13 @@ function AppErrorComponent({ error }) {
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 				className: "max-w-md text-sm break-words text-zinc-500 dark:text-zinc-400",
-				children: errorMessage(error)
+				children: staleModule(error) ? "The page was updated. Reload to open the latest version." : errorMessage(error)
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "mt-2 min-h-11 rounded-md bg-[#006fcf] px-4 py-2 text-sm font-semibold text-white",
+				onClick: () => window.location.reload(),
+				children: "Reload"
 			})
 		]
 	});
@@ -354,6 +372,7 @@ var submitApplication = createServerFn({ method: "POST" }).validator((input) => 
 	if (!input.password || input.password.length < 8) throw new Error("A password is required.");
 	return input;
 }).handler(createSsrRpc("8f2bb3bdd3e9a32bf9d20870c5b92b09afddb820fe7293f95701022b9848bc75"));
+var getLeadInvite = createServerFn({ method: "GET" }).validator((input) => ({ token: (input.token || "").trim().slice(0, 80) })).handler(createSsrRpc("ea4f60a01a023ec8cd6db20b195514b2ab1f80974d6ac0d3302fc7b691665a83"));
 var listApplications = createServerFn({ method: "GET" }).handler(createSsrRpc("1b59404f5dd7ebf22a4802040e66ad34f86c454a3111963b9acb931d6cb5f54e"));
 var setApplicationStatus = createServerFn({ method: "POST" }).validator((input) => {
 	if (![
@@ -368,6 +387,24 @@ var clearDatabase = createServerFn({ method: "POST" }).handler(createSsrRpc("343
 var deleteFunding = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("4e0ee8356c5ccf6f9221df4d98ab36de6079de15b47569f344278a4287a5594b"));
 var signInAsClient = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("c50efd40f7ae5cda51cd811e78d0e181402c25d11e95d42ed97f5803896f8074"));
 var investorLogin = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("15bb4887dde39d3cd45f0ac0f1099831bb1e30bc708e9002486e6ac16d71333a"));
+var DEFAULT_THEME = {
+	colorAction: "#006fcf",
+	colorHeading: "#12315c",
+	colorText: "#3d3d3d",
+	colorLabel: "#262626",
+	colorBorder: "#e0e0e0",
+	colorBackground: "#fbfbfb"
+};
+function cleanHex(value, fallback) {
+	const next = (value || "").trim();
+	if (!next) return fallback;
+	if (!/^#[0-9a-fA-F]{6}$/.test(next)) throw new Error("Use a color like #006fcf.");
+	return next.toLowerCase();
+}
+function assertPageBackground(value) {
+	if (!value || value === "none") return value === "none" ? "none" : null;
+	return assertShareImage(value);
+}
 function assertShareImage(value) {
 	if (!value) return null;
 	if (!/^data:image\/(png|jpeg);base64,/.test(value) || value.length > 14e5) throw new Error("Use a JPEG or PNG under 1 MB.");
@@ -391,7 +428,14 @@ var setSiteBrand = createServerFn({ method: "POST" }).validator((input) => ({
 	footerText: (input.footerText || "").slice(0, 800),
 	backupEmail: cleanBackupEmail(input.backupEmail || ""),
 	lastBackupAt: input.lastBackupAt || "",
-	publicDomain: cleanPublicDomain(input.publicDomain || "")
+	publicDomain: cleanPublicDomain(input.publicDomain || ""),
+	colorAction: cleanHex(input.colorAction, DEFAULT_THEME.colorAction),
+	colorHeading: cleanHex(input.colorHeading, DEFAULT_THEME.colorHeading),
+	colorText: cleanHex(input.colorText, DEFAULT_THEME.colorText),
+	colorLabel: cleanHex(input.colorLabel, DEFAULT_THEME.colorLabel),
+	colorBorder: cleanHex(input.colorBorder, DEFAULT_THEME.colorBorder),
+	colorBackground: cleanHex(input.colorBackground, DEFAULT_THEME.colorBackground),
+	pageBackground: assertPageBackground(input.pageBackground)
 })).handler(createSsrRpc("46b1c2c15b64cae3a5f34e1f1853ec2283ddfdfe186c71434db5870369340362"));
 var runDatabaseBackup = createServerFn({ method: "POST" }).handler(createSsrRpc("6d04e2b2142ca7fdd455d85b986e7dc11f966e7df5a2ab55be070d017bdfb090"));
 var getMailSetup = createServerFn({ method: "GET" }).handler(createSsrRpc("19f1231488dc5a012a40246146c49a527b94c53d3a06a4387cc28d0d8f08e030"));
@@ -400,6 +444,10 @@ var saveMailSetup = createServerFn({ method: "POST" }).validator((input) => ({
 	mailFrom: input.mailFrom || "",
 	clearKey: Boolean(input.clearKey)
 })).handler(createSsrRpc("1b0a37303ffbd8eb9e7d9ffb7033bf9c04a2d7776b7ca0438dc0376b0f8319cb"));
+var saveSmtpSetup = createServerFn({ method: "POST" }).validator((input) => ({
+	apiKey: input.apiKey || "",
+	clearKey: Boolean(input.clearKey)
+})).handler(createSsrRpc("53eddeec68c65dab79a58ff3da78a86c23a311a0fd114a80d1bce986b77ddd5d"));
 var getInvestorSession = createServerFn({ method: "GET" }).handler(createSsrRpc("d1ae43cae6d0be2d1f69d39a6ad79c690664eebd84c9b6bfd72617c644ea6513"));
 var getInvestorPortal = createServerFn({ method: "GET" }).handler(createSsrRpc("8822e6aa5afc9ef8a0275f464bef174b9273dd274d0ef1ea1c5de2610cd2b22d"));
 var investorLogout = createServerFn({ method: "POST" }).handler(createSsrRpc("238daabfda5c31e82d6a467078e892b727c983c5c9d29aa504fae0102a20f263"));
@@ -412,6 +460,83 @@ var saveInvestmentType = createServerFn({ method: "POST" }).validator((input) =>
 var getMyFundings = createServerFn({ method: "GET" }).handler(createSsrRpc("371eaa94c7375a34014cafb3e1a903c29a0227fb832652248e5dfd387c9b158c"));
 var submitFunding = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("e7d636636dc82c29558eb161011e78a0c993c313f396b7945fbd947e74255a10"));
 var cancelFunding = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("7a25bb9444ff54d726f867aa071c78571c98f0852fce3af75bf6e281aaee9022"));
+var sendLeadIntro = createServerFn({ method: "POST" }).validator((input) => {
+	const name = input.name.trim().replace(/\s+/g, " ");
+	const email = input.email.trim().toLowerCase();
+	if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+	if (!input.advisorId) throw new Error("Select an advisor.");
+	const clip = (value, max) => (value || "").trim().slice(0, max);
+	const copy = input.copy ? {
+		subject: clip(input.copy.subject, 140),
+		headline: clip(input.copy.headline, 180),
+		welcome: clip(input.copy.welcome, 800),
+		certificate: clip(input.copy.certificate, 500),
+		offer: clip(input.copy.offer, 800),
+		protection: clip(input.copy.protection, 500),
+		ready: clip(input.copy.ready, 500),
+		thanks: clip(input.copy.thanks, 400)
+	} : null;
+	return {
+		advisorId: input.advisorId,
+		name,
+		email,
+		copy
+	};
+}).handler(createSsrRpc("46006108a43b5955e153161c38d4a991ad7fb79bc7fb49b43872dc805a179a48"));
+var sendLeadApplication = createServerFn({ method: "POST" }).validator((input) => {
+	const name = input.name.trim().replace(/\s+/g, " ");
+	const email = input.email.trim().toLowerCase();
+	const months = Number(input.months);
+	const kind = input.kind === "promo" ? "promo" : "custom";
+	if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+	if (!input.advisorId) throw new Error("Select an advisor.");
+	if (!Number.isFinite(months) || months <= 0) throw new Error("Choose a certificate term.");
+	const clip = (value, max) => (value || "").trim().slice(0, max);
+	const copy = input.copy ? {
+		subject: clip(input.copy.subject, 140),
+		headline: clip(input.copy.headline, 180),
+		hope: clip(input.copy.hope, 240),
+		ready: clip(input.copy.ready, 800),
+		instruction: clip(input.copy.instruction, 400),
+		codeNote: clip(input.copy.codeNote, 400),
+		followUp: clip(input.copy.followUp, 800),
+		thanks: clip(input.copy.thanks, 400),
+		promoCode: clip(input.copy.promoCode, 40)
+	} : null;
+	return {
+		advisorId: input.advisorId,
+		name,
+		email,
+		months,
+		kind,
+		copy
+	};
+}).handler(createSsrRpc("d4250d8ea37b0b6b6cc32aa247924d01849410ab372bc6eae17665d3df82d42e"));
+var listCrmLeads = createServerFn({ method: "GET" }).handler(createSsrRpc("a1d7ac3394c7cf21e5123b186412df53214aea42f0c665a9437b989c15ea8a03"));
+var saveCrmLead = createServerFn({ method: "POST" }).validator((input) => {
+	const name = input.name.trim().replace(/\s+/g, " ");
+	const email = input.email.trim().toLowerCase();
+	if (name.length < 2) throw new Error("Enter the lead's name.");
+	if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email or leave it blank.");
+	const received = new Date(input.receivedAt || Date.now());
+	if (Number.isNaN(received.getTime())) throw new Error("Enter when the lead was received.");
+	const clip = (value) => (value || "").trim().slice(0, 240);
+	return {
+		id: input.id || "",
+		name: name.slice(0, 120),
+		email,
+		phone: clip(input.phone),
+		amount: clip(input.amount),
+		term: clip(input.term),
+		objective: clip(input.objective),
+		liquidity: clip(input.liquidity),
+		source: clip(input.source),
+		receivedAt: received.toISOString()
+	};
+}).handler(createSsrRpc("320d5ad8293a8028b17b2a0c8ba59e0d25494a6dafccb7a8797177a2d0495ec8"));
+var deleteCrmLead = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("1d3491e9a27c290f295bfb69f2dd0ee4ad31f715b28d28a35caa1a9795dd1685"));
 var listAdvisors = createServerFn({ method: "GET" }).handler(createSsrRpc("0a4e4b3c4401fa3b3502245b8864092fe1dfbf357dc425ac9e606cc03de423a5"));
 var saveAdvisor = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("c22e4f32fb4962874ec7588e1e0ddec4eddb22eaa12f9f6151d706503efd2f50"));
 var deleteAdvisor = createServerFn({ method: "POST" }).validator((input) => input).handler(createSsrRpc("adcbca43e56dbbae11c96adf856861fa5bc00e25f0f7449583c4ec9b411e38d6"));
@@ -482,6 +607,7 @@ var approveInvoice = createServerFn({ method: "POST" }).validator((input) => {
 	};
 }).handler(createSsrRpc("bd6078a16a27d37284969ff6fdbb85e565608b225b79da5f7e5edee1af8cc404"));
 var listNotifications = createServerFn({ method: "GET" }).handler(createSsrRpc("7b50bd6e596679fe8759352efff6da788bf65b5c6f4458e7d4e70bcd96c23585"));
+var syncMailStatuses = createServerFn({ method: "POST" }).handler(createSsrRpc("be53b2628abbad2d5bf831bbb6156af68ccb69338b6750eaa7b194b534d22dd9"));
 var listMyNotifications = createServerFn({ method: "GET" }).handler(createSsrRpc("8b04ddee08d00402f35af241b8797321407d2743498150ff1167939f742f711c"));
 var markMyNotificationsRead = createServerFn({ method: "POST" }).handler(createSsrRpc("15dca57f795e6ae56b7ab042755d2eeb7fb1aee841f555b937707d59a5fcbb88"));
 var BrandContext = (0, import_react.createContext)({
@@ -497,6 +623,8 @@ var BrandContext = (0, import_react.createContext)({
 	backupEmail: "",
 	lastBackupAt: "",
 	publicDomain: "",
+	...DEFAULT_THEME,
+	pageBackground: null,
 	ready: false,
 	refresh: async () => {}
 });
@@ -516,7 +644,9 @@ function BrandProvider({ children }) {
 		footerText: "",
 		backupEmail: "",
 		lastBackupAt: "",
-		publicDomain: ""
+		publicDomain: "",
+		...DEFAULT_THEME,
+		pageBackground: null
 	});
 	const [ready, setReady] = (0, import_react.useState)(false);
 	async function refresh() {
@@ -527,6 +657,27 @@ function BrandProvider({ children }) {
 	(0, import_react.useEffect)(() => {
 		refresh().catch(() => setReady(true));
 	}, []);
+	(0, import_react.useEffect)(() => {
+		const root = document.documentElement;
+		root.style.setProperty("--color-action", brand.colorAction);
+		root.style.setProperty("--color-heading", brand.colorHeading);
+		root.style.setProperty("--color-fg", brand.colorText);
+		root.style.setProperty("--color-primary", brand.colorLabel);
+		root.style.setProperty("--color-border", brand.colorBorder);
+		root.style.setProperty("--color-bg", brand.colorBackground);
+		const picture = brand.pageBackground;
+		if (picture === "none") root.style.setProperty("--page-bg-layers", "none");
+		else if (picture?.startsWith("data:image/")) root.style.setProperty("--page-bg-layers", `linear-gradient(rgb(255 255 255 / 30%), rgb(255 255 255 / 30%)), url("${picture}")`);
+		else root.style.removeProperty("--page-bg-layers");
+	}, [
+		brand.colorAction,
+		brand.colorHeading,
+		brand.colorText,
+		brand.colorLabel,
+		brand.colorBorder,
+		brand.colorBackground,
+		brand.pageBackground
+	]);
 	(0, import_react.useEffect)(() => {
 		if (!brand.favicon) return;
 		let link = document.querySelector("link[rel='icon']");
@@ -624,9 +775,9 @@ function SiteHeader({ eyebrow, action }) {
 		})
 	});
 }
-var styles_default = "/assets/styles-DtshzEZ8.css";
+var styles_default = "/assets/styles-BQ_7Vk7K.css";
 var APP_NAME = "Account Holding";
-var Route$7 = createRootRoute({
+var Route$9 = createRootRoute({
 	head: () => ({
 		meta: [
 			{ charSet: "utf-8" },
@@ -672,91 +823,122 @@ var Route$7 = createRootRoute({
 		lang: "en",
 		suppressHydrationWarning: true,
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("head", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HeadContent, {}) }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("body", { children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("script", { dangerouslySetInnerHTML: { __html: `(function(){var key="ah-chunk-reload";window.addEventListener("vite:preloadError",function(event){event.preventDefault();if(sessionStorage.getItem(key)==="1")return;sessionStorage.setItem(key,"1");window.location.reload();});window.addEventListener("load",function(){sessionStorage.removeItem(key);});})();` } }),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(PreviewHostBridge, {}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AuthProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(BrandProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Outlet, {}) }) }),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Scripts, {})
 		] })]
 	})
 });
-var Route$6 = createFileRoute("/")({ beforeLoad: () => {
+var Route$8 = createFileRoute("/")({ beforeLoad: () => {
 	throw redirect({ to: "/login" });
 } });
-var $$splitComponentImporter$4 = () => import("./admin-DRdKYU0l.mjs");
-var Route$5 = createFileRoute("/admin")({
+var $$splitComponentImporter$4 = () => import("./admin-CchV_OX-.mjs");
+var Route$7 = createFileRoute("/admin")({
 	head: () => ({ meta: [{ title: "Operations · Account Holding" }] }),
 	component: lazyRouteComponent($$splitComponentImporter$4, "component")
 });
-var $$splitComponentImporter$3 = () => import("./application-D0Hmi1JG.mjs");
-var Route$4 = createFileRoute("/application")({
+var $$splitComponentImporter$3 = () => import("./application-CW8MmZBu.mjs");
+var Route$6 = createFileRoute("/application")({
 	head: () => ({ meta: [{ title: "Application · Account Holding" }] }),
 	component: lazyRouteComponent($$splitComponentImporter$3, "component")
 });
-var $$splitComponentImporter$2 = () => import("./login-UyPhEMC1.mjs");
-var Route$3 = createFileRoute("/login")({
+var Route$5 = createFileRoute("/email-logo")({ server: { handlers: { GET: async () => {
+	const { getSql } = await import("./db-8lvi3Ffs.mjs");
+	const match = ((await (await getSql())`select value from site_settings where key = 'email_logo'`)[0]?.value?.trim() || "").match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=\s]+)$/);
+	if (!match?.[2]) return new Response("Not found", { status: 404 });
+	const bytes = Uint8Array.from(Buffer.from(match[2].replace(/\s/g, ""), "base64"));
+	return new Response(bytes, { headers: {
+		"Content-Type": match[1] || "image/png",
+		"Cache-Control": "public, max-age=3600"
+	} });
+} } } });
+var $$splitComponentImporter$2 = () => import("./login-CGb1faeW.mjs");
+var Route$4 = createFileRoute("/login")({
 	head: () => ({ meta: [{ title: "Sign in · Account Holding" }] }),
 	component: lazyRouteComponent($$splitComponentImporter$2, "component")
 });
 var pdf_worker_min_default = "/assets/pdf.worker.min-CjEcRF4W.mjs";
-var $$splitComponentImporter$1 = () => import("./portal-BU7FXkhJ.mjs");
-var Route$2 = createFileRoute("/portal")({
+var $$splitComponentImporter$1 = () => import("./portal-Bw1mVkI4.mjs");
+var Route$3 = createFileRoute("/portal")({
 	head: () => ({ meta: [{ title: "Portal · Account Holding" }] }),
 	component: lazyRouteComponent($$splitComponentImporter$1, "component")
 });
 GlobalWorkerOptions.workerSrc = pdf_worker_min_default;
-var $$splitComponentImporter = () => import("./reset-password-DJuMlbF6.mjs");
-var Route$1 = createFileRoute("/reset-password")({
+var $$splitComponentImporter = () => import("./reset-password-79FfzNJt.mjs");
+var Route$2 = createFileRoute("/reset-password")({
 	head: () => ({ meta: [{ title: "Reset password · Account Holding" }] }),
 	component: lazyRouteComponent($$splitComponentImporter, "component")
 });
-var Route = createFileRoute("/api/cron/backup")({ server: { handlers: { GET: async ({ request }) => {
+var Route$1 = createFileRoute("/api/cron/backup")({ server: { handlers: { GET: async ({ request }) => {
 	const secret = env("CRON_SECRET");
 	const authorization = request.headers.get("authorization");
 	const fromCron = request.headers.get("user-agent") === "vercel-cron/1.0";
 	if (secret) {
 		if (authorization !== `Bearer ${secret}`) return new Response("Unauthorized", { status: 401 });
 	} else if (!fromCron) return new Response("Unauthorized", { status: 401 });
-	const { runBackup } = await import("./backup.server-TfubgEnY.mjs");
+	const { runBackup } = await import("./backup.server-skMXqjk0.mjs");
 	const result = await runBackup();
 	return Response.json(result);
 } } } });
+var Route = createFileRoute("/api/cron/lead-reminders")({ server: { handlers: { GET: async ({ request }) => {
+	const secret = env("CRON_SECRET");
+	const authorization = request.headers.get("authorization");
+	const fromCron = request.headers.get("user-agent") === "vercel-cron/1.0";
+	if (secret) {
+		if (authorization !== `Bearer ${secret}`) return new Response("Unauthorized", { status: 401 });
+	} else if (!fromCron) return new Response("Unauthorized", { status: 401 });
+	const { remindDueInvites } = await import("./lead-invites.server-DBOhEbbT.mjs");
+	return Response.json(await remindDueInvites());
+} } } });
 var rootRouteChildren = {
-	IndexRoute: Route$6.update({
+	IndexRoute: Route$8.update({
 		id: "/",
 		path: "/",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
 	}),
-	AdminRoute: Route$5.update({
+	AdminRoute: Route$7.update({
 		id: "/admin",
 		path: "/admin",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
 	}),
-	ApplicationRoute: Route$4.update({
+	ApplicationRoute: Route$6.update({
 		id: "/application",
 		path: "/application",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
 	}),
-	LoginRoute: Route$3.update({
+	EmailLogoRoute: Route$5.update({
+		id: "/email-logo",
+		path: "/email-logo",
+		getParentRoute: () => Route$9
+	}),
+	LoginRoute: Route$4.update({
 		id: "/login",
 		path: "/login",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
 	}),
-	PortalRoute: Route$2.update({
+	PortalRoute: Route$3.update({
 		id: "/portal",
 		path: "/portal",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
 	}),
-	ResetPasswordRoute: Route$1.update({
+	ResetPasswordRoute: Route$2.update({
 		id: "/reset-password",
 		path: "/reset-password",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
 	}),
-	ApiCronBackupRoute: Route.update({
+	ApiCronBackupRoute: Route$1.update({
 		id: "/api/cron/backup",
 		path: "/api/cron/backup",
-		getParentRoute: () => Route$7
+		getParentRoute: () => Route$9
+	}),
+	ApiCronLeadRemindersRoute: Route.update({
+		id: "/api/cron/lead-reminders",
+		path: "/api/cron/lead-reminders",
+		getParentRoute: () => Route$9
 	})
 };
-var routeTree = Route$7._addFileChildren(rootRouteChildren)._addFileTypes();
+var routeTree = Route$9._addFileChildren(rootRouteChildren)._addFileTypes();
 var router_exports = /* @__PURE__ */ __exportAll({ getRouter: () => getRouter });
 function getRouter() {
 	return createRouter({
@@ -766,4 +948,4 @@ function getRouter() {
 	});
 }
 //#endregion
-export { listApplications as A, saveInvestmentType as B, getMailSetup as C, investorLogin as D, getPromo as E, rejectPayment as F, setSiteBrand as G, saveMailSetup as H, runDatabaseBackup as I, submitApplication as J, signFunding as K, saveAdvisor as L, listMyNotifications as M, listNotifications as N, investorLogout as O, markMyNotificationsRead as P, saveCdTerms as R, getInvestorSession as S, getPaymentFile as T, savePromo as U, saveInvoiceBilling as V, setApplicationStatus as W, updateFunding as X, submitFunding as Y, uploadPaymentConfirmation as Z, downloadInvoicePdf as _, useBrand as a, getInvestmentTypes as b, approveInvoice as c, clearDatabase as d, createDeskLogin as f, downloadInvestmentPdf as g, deleteFunding as h, headerActionClass as i, listFundings as j, listAdvisors as k, approvePayment as l, deleteApplication as m, AppCover as n, adminLogin as o, deleteAdvisor as p, signInAsClient as q, SiteHeader as r, adminLogout as s, router_exports as t, cancelFunding as u, getAdminSession as v, getMyFundings as w, getInvestorPortal as x, getCdTerms as y, saveDeskLogin as z };
+export { setSiteBrand as $, investorLogin as A, runDatabaseBackup as B, getInvestorPortal as C, getMyFundings as D, getMailSetup as E, listFundings as F, saveInvestmentType as G, saveCdTerms as H, listMyNotifications as I, savePromo as J, saveInvoiceBilling as K, listNotifications as L, listAdvisors as M, listApplications as N, getPaymentFile as O, listCrmLeads as P, setApplicationStatus as Q, markMyNotificationsRead as R, getInvestmentTypes as S, getLeadInvite as T, saveCrmLead as U, saveAdvisor as V, saveDeskLogin as W, sendLeadApplication as X, saveSmtpSetup as Y, sendLeadIntro as Z, deleteFunding as _, useBrand as a, updateFunding as at, getAdminSession as b, adminLogout as c, cancelFunding as d, signFunding as et, clearDatabase as f, deleteCrmLead as g, deleteApplication as h, headerActionClass as i, syncMailStatuses as it, investorLogout as j, getPromo as k, approveInvoice as l, deleteAdvisor as m, AppCover as n, submitApplication as nt, DEFAULT_THEME as o, uploadPaymentConfirmation as ot, createDeskLogin as p, saveMailSetup as q, SiteHeader as r, submitFunding as rt, adminLogin as s, router_exports as t, signInAsClient as tt, approvePayment as u, downloadInvestmentPdf as v, getInvestorSession as w, getCdTerms as x, downloadInvoicePdf as y, rejectPayment as z };

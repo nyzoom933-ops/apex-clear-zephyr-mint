@@ -316,10 +316,12 @@ export const clearDatabase = createServerFn({ method: "POST" }).handler(async ()
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
+  await ensureCrmLeads(sql);
   await sql`delete from notifications`;
   await sql`delete from fundings`;
   await sql`delete from investor_users`;
   await sql`delete from applications`;
+  await sql`delete from crm_leads`;
   return { ok: true as const };
 });
 
@@ -377,10 +379,32 @@ export const investorLogin = createServerFn({ method: "POST" })
     return { destination: rows[0].status === "approved" ? ("portal" as const) : ("application" as const) };
   });
 
+export const DEFAULT_THEME = {
+  colorAction: "#006fcf",
+  colorHeading: "#12315c",
+  colorText: "#3d3d3d",
+  colorLabel: "#262626",
+  colorBorder: "#e0e0e0",
+  colorBackground: "#fbfbfb",
+};
+
+function readHex(value: string, fallback: string) {
+  const next = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(next) ? next.toLowerCase() : fallback;
+}
+
+function cleanHex(value: string | undefined, fallback: string) {
+  const next = (value || "").trim();
+  if (!next) return fallback;
+  if (!/^#[0-9a-fA-F]{6}$/.test(next)) throw new Error("Use a color like #006fcf.");
+  return next.toLowerCase();
+}
+
 export type SiteBrand = {
   logo: string | null;
   favicon: string | null;
   companyName: string;
+  companyPhone: string;
   cloudflareCode: string;
   cover: string | null;
   socialBanner: string | null;
@@ -390,7 +414,19 @@ export type SiteBrand = {
   backupEmail: string;
   lastBackupAt: string;
   publicDomain: string;
+  colorAction: string;
+  colorHeading: string;
+  colorText: string;
+  colorLabel: string;
+  colorBorder: string;
+  colorBackground: string;
+  pageBackground: string | null;
 };
+
+function assertPageBackground(value: string | null) {
+  if (!value || value === "none") return value === "none" ? "none" : null;
+  return assertShareImage(value);
+}
 
 function assertShareImage(value: string | null) {
   if (!value) return null;
@@ -438,12 +474,13 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const rows = await sql<{ key: string; value: string }>`
-    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain')
+    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'company_phone', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain', 'color_action', 'color_heading', 'color_text', 'color_label', 'color_border', 'color_background', 'page_background')
   `;
   const brand: SiteBrand = {
     logo: null,
     favicon: null,
     companyName: DEFAULT_COMPANY_NAME,
+    companyPhone: "",
     cloudflareCode: "",
     cover: null,
     socialBanner: null,
@@ -453,6 +490,8 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     backupEmail: "",
     lastBackupAt: "",
     publicDomain: "",
+    ...DEFAULT_THEME,
+    pageBackground: null,
   };
   for (const row of rows) {
     if (row.key === "logo" || row.key === "favicon" || row.key === "cover") brand[row.key] = row.value;
@@ -463,8 +502,16 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     if (row.key === "backup_email") brand.backupEmail = row.value;
     if (row.key === "backup_at") brand.lastBackupAt = row.value;
     if (row.key === "company_name" && row.value.trim()) brand.companyName = row.value.trim();
+    if (row.key === "company_phone") brand.companyPhone = row.value.trim();
     if (row.key === "cloudflare_code") brand.cloudflareCode = row.value;
     if (row.key === "public_domain") brand.publicDomain = row.value;
+    if (row.key === "color_action") brand.colorAction = readHex(row.value, DEFAULT_THEME.colorAction);
+    if (row.key === "color_heading") brand.colorHeading = readHex(row.value, DEFAULT_THEME.colorHeading);
+    if (row.key === "color_text") brand.colorText = readHex(row.value, DEFAULT_THEME.colorText);
+    if (row.key === "color_label") brand.colorLabel = readHex(row.value, DEFAULT_THEME.colorLabel);
+    if (row.key === "color_border") brand.colorBorder = readHex(row.value, DEFAULT_THEME.colorBorder);
+    if (row.key === "color_background") brand.colorBackground = readHex(row.value, DEFAULT_THEME.colorBackground);
+    if (row.key === "page_background") brand.pageBackground = row.value === "none" || row.value.startsWith("data:image/") ? row.value : null;
   }
   return brand;
 });
@@ -474,6 +521,7 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     logo: assertImage(input.logo),
     favicon: assertImage(input.favicon),
     companyName: cleanCompanyName(input.companyName || DEFAULT_COMPANY_NAME),
+    companyPhone: (input.companyPhone || "").trim().slice(0, 40),
     cloudflareCode: input.cloudflareCode || "",
     cover: assertShareImage(input.cover),
     socialBanner: assertShareImage(input.socialBanner),
@@ -483,6 +531,13 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     backupEmail: cleanBackupEmail(input.backupEmail || ""),
     lastBackupAt: input.lastBackupAt || "",
     publicDomain: cleanPublicDomain(input.publicDomain || ""),
+    colorAction: cleanHex(input.colorAction, DEFAULT_THEME.colorAction),
+    colorHeading: cleanHex(input.colorHeading, DEFAULT_THEME.colorHeading),
+    colorText: cleanHex(input.colorText, DEFAULT_THEME.colorText),
+    colorLabel: cleanHex(input.colorLabel, DEFAULT_THEME.colorLabel),
+    colorBorder: cleanHex(input.colorBorder, DEFAULT_THEME.colorBorder),
+    colorBackground: cleanHex(input.colorBackground, DEFAULT_THEME.colorBackground),
+    pageBackground: assertPageBackground(input.pageBackground),
   }))
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -505,6 +560,14 @@ export const setSiteBrand = createServerFn({ method: "POST" })
       insert into site_settings (key, value) values ('company_name', ${data.companyName})
       on conflict (key) do update set value = excluded.value
     `;
+    if (!data.companyPhone) {
+      await sql`delete from site_settings where key = 'company_phone'`;
+    } else {
+      await sql`
+        insert into site_settings (key, value) values ('company_phone', ${data.companyPhone})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
     const cloudflare = cleanCloudflareCode(data.cloudflareCode);
     if (cloudflare === "") {
       await sql`delete from site_settings where key = 'cloudflare_code'`;
@@ -535,6 +598,28 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     } else {
       await sql`
         insert into site_settings (key, value) values ('public_domain', ${data.publicDomain})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    const colors = [
+      ["color_action", data.colorAction],
+      ["color_heading", data.colorHeading],
+      ["color_text", data.colorText],
+      ["color_label", data.colorLabel],
+      ["color_border", data.colorBorder],
+      ["color_background", data.colorBackground],
+    ] as const;
+    for (const [key, value] of colors) {
+      await sql`
+        insert into site_settings (key, value) values (${key}, ${value})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    if (!data.pageBackground) {
+      await sql`delete from site_settings where key = 'page_background'`;
+    } else {
+      await sql`
+        insert into site_settings (key, value) values ('page_background', ${data.pageBackground})
         on conflict (key) do update set value = excluded.value
       `;
     }
@@ -1054,7 +1139,7 @@ export const cancelFunding = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export type Advisor = { id: string; name: string; phone: string; email: string; mailbox: string };
+export type Advisor = { id: string; name: string; phone: string; email: string; mailbox: string; role: string; personalPhone: string };
 
 export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling; contactPhone: string; contactBy: string };
 
@@ -1085,14 +1170,17 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const { leadLetter } = await import("@/lib/email-templates");
     const sql = await getSql();
-    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox from advisors where id = ${data.advisorId}`;
-    const advisor = advisors[0];
-    if (!advisor) throw new Error("Select an advisor.");
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
     if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
     const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
     const types = await sql<{ minimum_investment: string; capital_protection: string }>`select minimum_investment, capital_protection from investment_types where id = 'cd'`;
     const offer = await loadPromo(sql);
-    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain')`;
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const logo = settings.find((row) => row.key === "email_logo")?.value || null;
     const portalUrl = settings.find((row) => row.key === "public_domain")?.value || "";
     const letter = leadLetter({
@@ -1105,6 +1193,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
       protection: types[0]?.capital_protection,
       logo,
       portalUrl,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       copy: data.copy,
     });
     await sendStep(sql, {
@@ -1153,9 +1242,12 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const { applicationLetter } = await import("@/lib/email-templates");
     const sql = await getSql();
-    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox from advisors where id = ${data.advisorId}`;
-    const advisor = advisors[0];
-    if (!advisor) throw new Error("Select an advisor.");
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
     if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
     const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms where months = ${data.months} limit 1`;
     if (!terms[0]) throw new Error("Choose a certificate term.");
@@ -1164,7 +1256,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
     if (data.kind === "promo" && !promoMonths.has(data.months)) throw new Error("Choose a promotional term.");
     if (data.kind === "custom" && promoMonths.has(data.months)) throw new Error("Choose a term that is not on promotion.");
-    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain')`;
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const origin = settings.find((row) => row.key === "public_domain")?.value || "";
     if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
     const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
@@ -1181,6 +1273,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       minimum: types[0]?.minimum_investment,
       logo: settings.find((row) => row.key === "email_logo")?.value || null,
       portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       link: inviteApplicationUrl(origin, token),
       variant: kind,
       copy: data.copy ? { ...data.copy, promoCode } : { subject: "", headline: "", hope: "", ready: "", instruction: "", codeNote: "", followUp: "", thanks: "", promoCode },
@@ -1195,8 +1288,141 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
       replyName: advisor.name,
       fromAddress: advisor.mailbox,
-      relatedId: data.advisorId,
+      relatedId: token,
     });
+    return { ok: true as const };
+  });
+
+async function ensureCrmLeads(sql: Sql) {
+  await sql`
+    create table if not exists crm_leads (
+      id text primary key,
+      name text not null,
+      email text not null default '',
+      phone text not null default '',
+      amount text not null default '',
+      term text not null default '',
+      objective text not null default '',
+      liquidity text not null default '',
+      source text not null default '',
+      received_at timestamptz not null default now(),
+      created_at timestamptz not null default now()
+    )
+  `;
+}
+
+export type CrmLead = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  amount: string;
+  term: string;
+  objective: string;
+  liquidity: string;
+  source: string;
+  receivedAt: string;
+};
+
+export const listCrmLeads = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  await ensureCrmLeads(sql);
+  const rows = await sql<{
+    id: string;
+    name: string;
+    email: string;
+    phone: string;
+    amount: string;
+    term: string;
+    objective: string;
+    liquidity: string;
+    source: string;
+    received_at: string | Date;
+  }>`
+    select id, name, email, phone, amount, term, objective, liquidity, source, received_at
+    from crm_leads
+    order by received_at desc, created_at desc
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    amount: row.amount,
+    term: row.term,
+    objective: row.objective,
+    liquidity: row.liquidity,
+    source: row.source,
+    receivedAt: new Date(row.received_at).toISOString(),
+  }));
+});
+
+export const saveCrmLead = createServerFn({ method: "POST" })
+  .validator((input: CrmLead) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2) throw new Error("Enter the lead's name.");
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email or leave it blank.");
+    const received = new Date(input.receivedAt || Date.now());
+    if (Number.isNaN(received.getTime())) throw new Error("Enter when the lead was received.");
+    const clip = (value: string) => (value || "").trim().slice(0, 240);
+    return {
+      id: input.id || "",
+      name: name.slice(0, 120),
+      email,
+      phone: clip(input.phone),
+      amount: clip(input.amount),
+      term: clip(input.term),
+      objective: clip(input.objective),
+      liquidity: clip(input.liquidity),
+      source: clip(input.source),
+      receivedAt: received.toISOString(),
+    };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    const id = data.id || crypto.randomUUID();
+    await sql`
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, received_at)
+      values (
+        ${id},
+        ${data.name},
+        ${data.email},
+        ${data.phone},
+        ${data.amount},
+        ${data.term},
+        ${data.objective},
+        ${data.liquidity},
+        ${data.source},
+        ${data.receivedAt}
+      )
+      on conflict (id) do update set
+        name = excluded.name,
+        email = excluded.email,
+        phone = excluded.phone,
+        amount = excluded.amount,
+        term = excluded.term,
+        objective = excluded.objective,
+        liquidity = excluded.liquidity,
+        source = excluded.source,
+        received_at = excluded.received_at
+    `;
+    return { id };
+  });
+
+export const deleteCrmLead = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    await sql`delete from crm_leads where id = ${data.id}`;
     return { ok: true as const };
   });
 
@@ -1204,7 +1430,10 @@ export const listAdvisors = createServerFn({ method: "GET" }).handler(async () =
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
-  return sql<Advisor>`select id, name, phone, email, coalesce(mailbox, '') as mailbox from advisors order by name`;
+  await sql`alter table advisors add column if not exists role text not null default ''`;
+  await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+  const rows = await sql<{ id: string; name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors order by name`;
+  return rows.map((row) => ({ ...row, personalPhone: row.personal_phone }));
 });
 
 export const saveAdvisor = createServerFn({ method: "POST" })
@@ -1214,13 +1443,17 @@ export const saveAdvisor = createServerFn({ method: "POST" })
     if (!data.name.trim()) throw new Error("Name is required.");
     const { cleanMailFrom } = await import("@/lib/mail.server");
     const mailbox = data.mailbox?.trim() ? cleanMailFrom(data.mailbox) : "";
+    const role = (data.role || "").trim().slice(0, 80);
+    const personalPhone = (data.personalPhone || "").trim().slice(0, 40);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into advisors (id, name, phone, email, mailbox)
-      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()}, ${mailbox})
-      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email, mailbox = excluded.mailbox
+      insert into advisors (id, name, phone, email, mailbox, role, personal_phone)
+      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()}, ${mailbox}, ${role}, ${personalPhone})
+      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email, mailbox = excluded.mailbox, role = excluded.role, personal_phone = excluded.personal_phone
     `;
     return { id };
   });
@@ -2020,6 +2253,9 @@ export type NotificationRow = {
   delivery: string;
   resendId: string;
   mailStatus: string;
+  link: string;
+  expiresAt: string;
+  usedAt: string;
 };
 
 export const listNotifications = createServerFn({ method: "GET" }).handler(async () => {
@@ -2040,26 +2276,42 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
     delivery: string;
     resend_id: string;
     mail_status: string;
+    related_id: string;
   }>`
     select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at,
-           audience, recipient, step, subject, body, html, delivery, resend_id, mail_status
+           audience, recipient, step, subject, body, html, delivery, resend_id, mail_status, related_id
     from notifications
     order by created_at desc
     limit 200
   `;
-  return rows.map((row) => ({
-    id: row.id,
-    createdAt: row.created_at,
-    audience: row.audience,
-    recipient: row.recipient,
-    step: row.step,
-    subject: row.subject,
-    body: row.body,
-    html: row.html ?? "",
-    delivery: row.delivery,
-    resendId: row.resend_id || "",
-    mailStatus: row.mail_status || "",
-  }));
+  const settings = await sql<{ value: string }>`select value from site_settings where key = 'public_domain'`;
+  const origin = (settings[0]?.value || "").trim().replace(/\/$/, "");
+  const invites = await sql<{ token: string; expires_at: string | Date; used_at: string | Date | null }>`
+    select token, expires_at, used_at from lead_invites
+  `;
+  const byToken = new Map(invites.map((invite) => [invite.token, invite]));
+  return rows.map((row) => {
+    const fromHtml = row.html?.match(/invite=([a-f0-9]{16,})/i)?.[1] || "";
+    const invite = byToken.get(row.related_id) || byToken.get(fromHtml);
+    const token = invite?.token || "";
+    const link = token && /^https?:\/\//i.test(origin) ? `${origin}/application?invite=${token}` : "";
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      audience: row.audience,
+      recipient: row.recipient,
+      step: row.step,
+      subject: row.subject,
+      body: row.body,
+      html: row.html ?? "",
+      delivery: row.delivery,
+      resendId: row.resend_id || "",
+      mailStatus: row.mail_status || "",
+      link,
+      expiresAt: invite?.expires_at ? new Date(invite.expires_at).toISOString() : "",
+      usedAt: invite?.used_at ? new Date(invite.used_at).toISOString() : "",
+    };
+  });
 });
 
 export const syncMailStatuses = createServerFn({ method: "POST" }).handler(async () => {

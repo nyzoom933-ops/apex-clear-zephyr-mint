@@ -595,8 +595,11 @@ function Preference({
   const scroller = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
   const promo = new Set(promoMonths(offer));
-  const ordered = [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
+  const ordered = locked
+    ? terms.filter((term) => String(term.months) === form.preferredTerm)
+    : [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
   const months = Number(form.preferredTerm);
+  const shown = ordered.length > 0 || !locked || !months ? ordered : [{ id: "invite", months, apy: "—", featured: false } as CdTerm];
   const amount = Number(form.preferredAmount.replace(/[^0-9.]/g, ""));
   const tiers = offer.tiers.filter((tier) => tier.months.includes(months));
   const matched = matchTier(offer, months, amount);
@@ -610,8 +613,27 @@ function Preference({
   return (
     <div className="grid min-w-0 max-w-full gap-5">
       <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : "Choose a term and the amount you expect to invest. Promotional terms are shown first."} />
-      {ordered.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="text-sm text-fg">No certificate terms are available right now.</p>
+      ) : locked ? (
+        <div className="max-w-full">
+          {shown.map((term) => {
+            const isPromo = promo.has(term.months);
+            return (
+              <div key={term.id} className="relative mt-3 flex min-h-40 max-w-sm flex-col rounded-xl border border-action bg-white px-5 pt-12 pb-5 text-left">
+                {term.featured || isPromo ? (
+                  <span className="absolute -top-3 left-4 flex flex-col items-start gap-1">
+                    {isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
+                    {term.featured ? <span className="inline-flex rounded-md bg-action px-2 py-1 text-xs font-semibold text-white">Featured APY</span> : null}
+                  </span>
+                ) : null}
+                <span className="block text-2xl font-semibold text-primary">{term.apy.includes("APY") ? term.apy : `${term.apy} APY`}</span>
+                <span className="mt-1 block text-sm text-fg">{term.months}-month term</span>
+              </div>
+            );
+          })}
+          <p className="mt-3 text-sm text-fg">Ask your advisor if you need another term.</p>
+        </div>
       ) : (
         <div className="max-w-full overflow-hidden rounded-xl bg-[#f3f4f6] px-4 py-6">
           <div ref={scroller} className="w-full max-w-full overflow-x-auto scroll-smooth pb-2">
@@ -624,7 +646,7 @@ function Preference({
                     key={term.id}
                     type="button"
                     data-term
-                    className={"relative mt-3 flex min-h-40 min-w-[200px] shrink-0 flex-col rounded-xl border bg-white px-5 pt-12 pb-5 text-left " + (selected ? "border-[#006fcf]" : "border-[#e7e7e7]")}
+                    className={"relative mt-3 flex min-h-40 min-w-[200px] shrink-0 flex-col rounded-xl border bg-white px-5 pt-12 pb-5 text-left " + (selected ? "border-action" : "border-[#e7e7e7]")}
                     onClick={() => {
                       if (!locked) patch("preferredTerm", String(term.months));
                     }}
@@ -632,10 +654,10 @@ function Preference({
                     {term.featured || isPromo ? (
                       <span className="absolute -top-3 left-4 flex flex-col items-start gap-1">
                         {isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
-                        {term.featured ? <span className="inline-flex rounded-md bg-[#006fcf] px-2 py-1 text-xs font-semibold text-white">Featured APY</span> : null}
+                        {term.featured ? <span className="inline-flex rounded-md bg-action px-2 py-1 text-xs font-semibold text-white">Featured APY</span> : null}
                       </span>
                     ) : null}
-                    <span className="block text-2xl font-semibold text-[#262626]">{term.apy.includes("APY") ? term.apy : `${term.apy} APY`}</span>
+                    <span className="block text-2xl font-semibold text-primary">{term.apy.includes("APY") ? term.apy : `${term.apy} APY`}</span>
                     <span className="mt-1 block text-sm text-fg">{term.months}-month term</span>
                   </button>
                 );
@@ -643,7 +665,7 @@ function Preference({
             </div>
           </div>
           <div className="mt-4 flex items-center justify-center gap-3">
-            <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Previous terms" onClick={() => move(-1)}>
+            <button type="button" className="flex size-8 items-center justify-center text-action" aria-label="Previous terms" onClick={() => move(-1)}>
               ‹
             </button>
             <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5">
@@ -652,7 +674,7 @@ function Preference({
                   key={term.id}
                   type="button"
                   aria-label={`Show term ${index + 1}`}
-                  className={index === page ? "h-1.5 w-5 rounded-full bg-[#006fcf]" : "size-1.5 rounded-full bg-[#c5c8ce]"}
+                  className={index === page ? "h-1.5 w-5 rounded-full bg-action" : "size-1.5 rounded-full bg-[#c5c8ce]"}
                   onClick={() => {
                     setPage(index);
                     scroller.current?.querySelectorAll<HTMLElement>("[data-term]")[index]?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
@@ -660,7 +682,7 @@ function Preference({
                 />
               ))}
             </div>
-            <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Next terms" onClick={() => move(1)}>
+            <button type="button" className="flex size-8 items-center justify-center text-action" aria-label="Next terms" onClick={() => move(1)}>
               ›
             </button>
           </div>
@@ -684,7 +706,7 @@ function Preference({
           {offer.startsOn && offer.endsOn ? (
             <p className="border-b border-border px-4 py-3 text-fg">Offer available from {formatOfferDate(offer.startsOn)} – {formatOfferDate(offer.endsOn)}.</p>
           ) : null}
-          <div className="grid grid-cols-2 bg-[#f7f7f7] px-4 py-2 text-xs font-semibold tracking-wide text-[#12315c] uppercase">
+          <div className="grid grid-cols-2 bg-[#f7f7f7] px-4 py-2 text-xs font-semibold tracking-wide text-heading uppercase">
             <span>Deposit</span>
             <span>Promo bonus</span>
           </div>

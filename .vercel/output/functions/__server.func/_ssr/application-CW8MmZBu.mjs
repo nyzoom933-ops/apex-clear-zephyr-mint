@@ -2,9 +2,9 @@ import { o as __toESM } from "../_runtime.mjs";
 import { a as matchTier, i as formatOfferDate, n as amountRange, r as formatBonus, s as promoMonths, t as EMPTY_PROMO } from "./promo-a-oE9-Iz.mjs";
 import { S as require_jsx_runtime, X as require_react, b as useNavigate, y as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { _ as FileText, b as Check, d as MapPin, h as IdCard, o as ShieldCheck, v as ChevronLeft } from "../_libs/lucide-react.mjs";
-import { E as getPromo, J as submitApplication, O as investorLogout, S as getInvestorSession, i as headerActionClass, n as AppCover, r as SiteHeader, y as getCdTerms } from "./router-B75_K_o9.mjs";
+import { T as getLeadInvite, i as headerActionClass, j as investorLogout, k as getPromo, n as AppCover, nt as submitApplication, r as SiteHeader, w as getInvestorSession, x as getCdTerms } from "./router-BgWJKDCs.mjs";
 import { t as SignaturePad } from "./signature-pad-C-nQ00Yq.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/application-D0Hmi1JG.js
+//#region node_modules/.nitro/vite/services/ssr/assets/application-CW8MmZBu.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var STEP_NAMES = [
@@ -232,6 +232,8 @@ var EMPTY_FORM = {
 	netWorth: "",
 	preferredAmount: "",
 	preferredTerm: "",
+	promoCode: "",
+	inviteToken: "",
 	idType: "Passport",
 	addressDocType: "Bank or credit-card statement",
 	idFileName: "",
@@ -391,6 +393,7 @@ function ApplicationForm() {
 	const [session, setSession] = (0, import_react.useState)(void 0);
 	const [terms, setTerms] = (0, import_react.useState)([]);
 	const [offer, setOffer] = (0, import_react.useState)(EMPTY_PROMO);
+	const [inviteGate, setInviteGate] = (0, import_react.useState)("none");
 	const cardRef = (0, import_react.useRef)(null);
 	(0, import_react.useEffect)(() => {
 		getInvestorSession().then((value) => {
@@ -402,8 +405,43 @@ function ApplicationForm() {
 		}).catch(() => setSession(null));
 	}, [navigate]);
 	(0, import_react.useEffect)(() => {
-		setForm(loadDraft());
-		setReady(true);
+		const params = new URLSearchParams(window.location.search);
+		const invite = params.get("invite")?.trim() || "";
+		const draft = loadDraft();
+		if (!invite) {
+			const term = params.get("term")?.replace(/\D/g, "") || "";
+			const code = params.get("code")?.trim().slice(0, 40) || "";
+			setForm({
+				...draft,
+				preferredTerm: term || draft.preferredTerm,
+				promoCode: code || draft.promoCode || "",
+				inviteToken: ""
+			});
+			setInviteGate("none");
+			setReady(true);
+			return;
+		}
+		setInviteGate("checking");
+		getLeadInvite({ data: { token: invite } }).then((result) => {
+			if (result.status !== "open") {
+				setInviteGate("expired");
+				setReady(true);
+				return;
+			}
+			const first = result.name.split(" ")[0] || "";
+			setForm({
+				...draft,
+				preferredTerm: String(result.months),
+				promoCode: result.promoCode,
+				inviteToken: invite,
+				firstName: draft.firstName || first
+			});
+			setInviteGate("open");
+			setReady(true);
+		}).catch(() => {
+			setInviteGate("expired");
+			setReady(true);
+		});
 	}, []);
 	(0, import_react.useEffect)(() => {
 		Promise.all([getCdTerms(), getPromo()]).then(([nextTerms, nextOffer]) => {
@@ -474,7 +512,7 @@ function ApplicationForm() {
 		setSession(null);
 		navigate({ to: "/login" });
 	}
-	if (session === void 0) return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+	if (session === void 0 || inviteGate === "checking") return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "min-h-screen",
 		children: [
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(SiteHeader, { eyebrow: "Investor application" }),
@@ -482,6 +520,26 @@ function ApplicationForm() {
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("main", {
 				className: "mx-auto max-w-3xl px-4 py-10 text-sm text-fg",
 				children: "Checking your application…"
+			})
+		]
+	});
+	if (inviteGate === "expired") return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "min-h-screen",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(SiteHeader, { eyebrow: "Investor application" }),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(AppCover, {}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("main", {
+				className: "mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12",
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+					className: "rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
+						className: "text-3xl font-semibold",
+						children: "This application link has expired"
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+						className: "mx-auto mt-3 max-w-md text-fg",
+						children: "The link in your email lasts 24 hours. Ask your advisor to send a new one."
+					})]
+				})
 			})
 		]
 	});
@@ -690,7 +748,8 @@ function ApplicationForm() {
 												form,
 												patch,
 												terms,
-												offer
+												offer,
+												locked: inviteGate === "open"
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Financial, {
 												form,
@@ -1041,12 +1100,18 @@ function Address({ form, patch }) {
 		]
 	});
 }
-function Preference({ form, patch, terms, offer }) {
+function Preference({ form, patch, terms, offer, locked = false }) {
 	const scroller = (0, import_react.useRef)(null);
 	const [page, setPage] = (0, import_react.useState)(0);
 	const promo = new Set(promoMonths(offer));
-	const ordered = [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
+	const ordered = locked ? terms.filter((term) => String(term.months) === form.preferredTerm) : [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
 	const months = Number(form.preferredTerm);
+	const shown = ordered.length > 0 || !locked || !months ? ordered : [{
+		id: "invite",
+		months,
+		apy: "—",
+		featured: false
+	}];
 	const amount = Number(form.preferredAmount.replace(/[^0-9.]/g, ""));
 	const tiers = offer.tiers.filter((tier) => tier.months.includes(months));
 	const matched = matchTier(offer, months, amount);
@@ -1065,11 +1130,42 @@ function Preference({ form, patch, terms, offer }) {
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(SectionIntro, {
 				eyebrow: "Section",
 				title: "Preferred certificate",
-				body: "Choose a term and the amount you expect to invest. Promotional terms are shown first."
+				body: locked ? "This term and promotional code come from your email link. They stay fixed for this application." : "Choose a term and the amount you expect to invest. Promotional terms are shown first."
 			}),
-			ordered.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			shown.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 				className: "text-sm text-fg",
 				children: "No certificate terms are available right now."
+			}) : locked ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "max-w-full",
+				children: [shown.map((term) => {
+					const isPromo = promo.has(term.months);
+					return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "relative mt-3 flex min-h-40 max-w-sm flex-col rounded-xl border border-action bg-white px-5 pt-12 pb-5 text-left",
+						children: [
+							term.featured || isPromo ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+								className: "absolute -top-3 left-4 flex flex-col items-start gap-1",
+								children: [isPromo ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white",
+									children: "Promotional Offer"
+								}) : null, term.featured ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "inline-flex rounded-md bg-action px-2 py-1 text-xs font-semibold text-white",
+									children: "Featured APY"
+								}) : null]
+							}) : null,
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+								className: "block text-2xl font-semibold text-primary",
+								children: term.apy.includes("APY") ? term.apy : `${term.apy} APY`
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+								className: "mt-1 block text-sm text-fg",
+								children: [term.months, "-month term"]
+							})
+						]
+					}, term.id);
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "mt-3 text-sm text-fg",
+					children: "Ask your advisor if you need another term."
+				})]
 			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 				className: "max-w-full overflow-hidden rounded-xl bg-[#f3f4f6] px-4 py-6",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
@@ -1083,8 +1179,10 @@ function Preference({ form, patch, terms, offer }) {
 							return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 								type: "button",
 								"data-term": true,
-								className: "relative mt-3 flex min-h-40 min-w-[200px] shrink-0 flex-col rounded-xl border bg-white px-5 pt-12 pb-5 text-left " + (selected ? "border-[#006fcf]" : "border-[#e7e7e7]"),
-								onClick: () => patch("preferredTerm", String(term.months)),
+								className: "relative mt-3 flex min-h-40 min-w-[200px] shrink-0 flex-col rounded-xl border bg-white px-5 pt-12 pb-5 text-left " + (selected ? "border-action" : "border-[#e7e7e7]"),
+								onClick: () => {
+									if (!locked) patch("preferredTerm", String(term.months));
+								},
 								children: [
 									term.featured || isPromo ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
 										className: "absolute -top-3 left-4 flex flex-col items-start gap-1",
@@ -1092,12 +1190,12 @@ function Preference({ form, patch, terms, offer }) {
 											className: "inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white",
 											children: "Promotional Offer"
 										}) : null, term.featured ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "inline-flex rounded-md bg-[#006fcf] px-2 py-1 text-xs font-semibold text-white",
+											className: "inline-flex rounded-md bg-action px-2 py-1 text-xs font-semibold text-white",
 											children: "Featured APY"
 										}) : null]
 									}) : null,
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "block text-2xl font-semibold text-[#262626]",
+										className: "block text-2xl font-semibold text-primary",
 										children: term.apy.includes("APY") ? term.apy : `${term.apy} APY`
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
@@ -1113,7 +1211,7 @@ function Preference({ form, patch, terms, offer }) {
 					children: [
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 							type: "button",
-							className: "flex size-8 items-center justify-center text-[#006fcf]",
+							className: "flex size-8 items-center justify-center text-action",
 							"aria-label": "Previous terms",
 							onClick: () => move(-1),
 							children: "‹"
@@ -1123,7 +1221,7 @@ function Preference({ form, patch, terms, offer }) {
 							children: ordered.map((term, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
 								"aria-label": `Show term ${index + 1}`,
-								className: index === page ? "h-1.5 w-5 rounded-full bg-[#006fcf]" : "size-1.5 rounded-full bg-[#c5c8ce]",
+								className: index === page ? "h-1.5 w-5 rounded-full bg-action" : "size-1.5 rounded-full bg-[#c5c8ce]",
 								onClick: () => {
 									setPage(index);
 									scroller.current?.querySelectorAll("[data-term]")[index]?.scrollIntoView({
@@ -1136,13 +1234,23 @@ function Preference({ form, patch, terms, offer }) {
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 							type: "button",
-							className: "flex size-8 items-center justify-center text-[#006fcf]",
+							className: "flex size-8 items-center justify-center text-action",
 							"aria-label": "Next terms",
 							onClick: () => move(1),
 							children: "›"
 						})
 					]
 				})]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+				label: "Promotional code",
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+					className: controlClass,
+					value: form.promoCode,
+					placeholder: "Optional",
+					readOnly: locked,
+					onChange: (event) => patch("promoCode", event.target.value)
+				})
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
 				label: "Preferred investment amount",
@@ -1172,7 +1280,7 @@ function Preference({ form, patch, terms, offer }) {
 						]
 					}) : null,
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "grid grid-cols-2 bg-[#f7f7f7] px-4 py-2 text-xs font-semibold tracking-wide text-[#12315c] uppercase",
+						className: "grid grid-cols-2 bg-[#f7f7f7] px-4 py-2 text-xs font-semibold tracking-wide text-heading uppercase",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Deposit" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Promo bonus" })]
 					}),
 					tiers.map((tier) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { cloudflareToken, DEFAULT_COMPANY_NAME } from "@/lib/company";
-import { getSiteBrand, type SiteBrand } from "@/lib/admin.functions";
+import { getSiteBrand, DEFAULT_THEME, type SiteBrand } from "@/lib/admin.functions";
 
 type BrandState = SiteBrand & { ready: boolean; refresh: () => Promise<void> };
 
@@ -8,6 +8,7 @@ const BrandContext = createContext<BrandState>({
   logo: null,
   favicon: null,
   companyName: DEFAULT_COMPANY_NAME,
+  companyPhone: "",
   cloudflareCode: "",
   cover: null,
   socialBanner: null,
@@ -17,6 +18,8 @@ const BrandContext = createContext<BrandState>({
   backupEmail: "",
   lastBackupAt: "",
   publicDomain: "",
+  ...DEFAULT_THEME,
+  pageBackground: null,
   ready: false,
   refresh: async () => {},
 });
@@ -30,6 +33,7 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     logo: null,
     favicon: null,
     companyName: DEFAULT_COMPANY_NAME,
+    companyPhone: "",
     cloudflareCode: "",
     cover: null,
     socialBanner: null,
@@ -39,6 +43,8 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     backupEmail: "",
     lastBackupAt: "",
     publicDomain: "",
+    ...DEFAULT_THEME,
+    pageBackground: null,
   });
   const [ready, setReady] = useState(false);
 
@@ -51,6 +57,20 @@ export function BrandProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh().catch(() => setReady(true));
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--color-action", brand.colorAction);
+    root.style.setProperty("--color-heading", brand.colorHeading);
+    root.style.setProperty("--color-fg", brand.colorText);
+    root.style.setProperty("--color-primary", brand.colorLabel);
+    root.style.setProperty("--color-border", brand.colorBorder);
+    root.style.setProperty("--color-bg", brand.colorBackground);
+    const picture = brand.pageBackground;
+    if (picture === "none") root.style.setProperty("--page-bg-layers", "none");
+    else if (picture?.startsWith("data:image/")) root.style.setProperty("--page-bg-layers", `linear-gradient(rgb(255 255 255 / 30%), rgb(255 255 255 / 30%)), url("${picture}")`);
+    else root.style.removeProperty("--page-bg-layers");
+  }, [brand.colorAction, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
 
   useEffect(() => {
     if (!brand.favicon) return;

@@ -18,6 +18,7 @@ import {
   getPaymentFile,
   listAdvisors,
   listApplications,
+  listCrmLeads,
   listFundings,
   downloadInvoicePdf,
   saveInvoiceBilling,
@@ -26,10 +27,12 @@ import {
   syncMailStatuses,
   saveAdvisor,
   saveCdTerms,
+  saveCrmLead,
   saveInvestmentType,
   savePromo,
   setApplicationStatus,
   deleteApplication,
+  deleteCrmLead,
   deleteFunding,
   clearDatabase,
   signInAsClient,
@@ -40,10 +43,12 @@ import {
   sendLeadIntro,
   sendLeadApplication,
   updateFunding,
+  DEFAULT_THEME,
   type AdminFunding,
   type Advisor,
   type ApplicationRow,
   type CdTerm,
+  type CrmLead,
   type InvestmentType,
   type NotificationRow,
 } from "@/lib/admin.functions";
@@ -168,7 +173,7 @@ function AdminLogin({ needsSetup, onSuccess }: { needsSetup: boolean; onSuccess:
 }
 
 function Cabinet({ onSignOut }: { onSignOut: () => void }) {
-  const [tab, setTab] = useState<"dashboard" | "applications" | "clients" | "investments" | "funding" | "active" | "invoices" | "advisors" | "leads" | "mail-status" | "emails" | "settings-general" | "settings-logos" | "settings-misc">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "applications" | "pipeline-leads" | "clients" | "investments" | "funding" | "active" | "invoices" | "advisors" | "leads" | "mail-status" | "emails" | "settings-general" | "settings-logos" | "settings-appearance" | "settings-misc">("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
   const [rows, setRows] = useState<ApplicationRow[] | null>(null);
   const [error, setError] = useState("");
@@ -332,6 +337,8 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
             <ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />
             {selected ? <ApplicationDetail row={selected} onStatus={(status) => void updateStatus(selected.id, status)} onRemove={() => void removeApplication(selected.id)} /> : null}
           </section>
+        ) : tab === "pipeline-leads" ? (
+          <PipelineLeadsPanel />
         ) : tab === "clients" ? (
           <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={(id) => void removeApplication(id)} />
         ) : tab === "investments" ? (
@@ -355,6 +362,8 @@ function Cabinet({ onSignOut }: { onSignOut: () => void }) {
           <EmailsPanel />
         ) : tab === "settings-logos" ? (
           <SettingsPanel section="logos" />
+        ) : tab === "settings-appearance" ? (
+          <SettingsPanel section="appearance" />
         ) : tab === "settings-misc" ? (
           <SettingsPanel section="misc" />
         ) : (
@@ -408,6 +417,7 @@ function EmailsPanel() {
           {advisors.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
+              {item.role ? ` · ${item.role}` : ""}
               {item.email ? ` · ${item.email}` : ""}
             </option>
           ))}
@@ -465,6 +475,17 @@ const MAIL_STATUS_LABEL: Record<string, string> = {
   delivery_delayed: "Delayed",
 };
 
+function inviteExpiry(expiresAt: string, usedAt: string) {
+  if (!expiresAt) return "—";
+  if (usedAt) return "Used";
+  const remaining = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(remaining) || remaining <= 0) return "Expired";
+  const hours = Math.floor(remaining / 3_600_000);
+  const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+  if (hours >= 1) return `Expires in ${hours}h ${minutes}m`;
+  return `Expires in ${Math.max(minutes, 1)}m`;
+}
+
 function MailStatusPanel() {
   const [rows, setRows] = useState<NotificationRow[] | null>(null);
   const [error, setError] = useState("");
@@ -508,7 +529,7 @@ function MailStatusPanel() {
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
       {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
       <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
-        <table className="w-full min-w-[760px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
             <tr>
               <th className="px-4 py-3 font-semibold">When</th>
@@ -517,11 +538,14 @@ function MailStatusPanel() {
               <th className="px-4 py-3 font-semibold">Sent</th>
               <th className="px-4 py-3 font-semibold">Status</th>
               <th className="px-4 py-3 font-semibold">Opened</th>
+              <th className="px-4 py-3 font-semibold">Link</th>
+              <th className="px-4 py-3 font-semibold">Expires</th>
             </tr>
           </thead>
           <tbody>
             {(rows ?? []).map((row) => {
               const opened = row.mailStatus === "opened" || row.mailStatus === "clicked";
+              const expiry = inviteExpiry(row.expiresAt, row.usedAt);
               return (
                 <tr key={row.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-3 whitespace-nowrap">{row.createdAt} UTC</td>
@@ -533,6 +557,16 @@ function MailStatusPanel() {
                   <td className="px-4 py-3">{row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"}</td>
                   <td className="px-4 py-3">{MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")}</td>
                   <td className="px-4 py-3">{opened ? <span className="font-semibold text-[#0d6e4f]">Opened</span> : "—"}</td>
+                  <td className="px-4 py-3">
+                    {row.link ? (
+                      <a className="block max-w-[220px] truncate font-semibold text-action" href={row.link} title={row.link} target="_blank" rel="noreferrer">
+                        {row.link.replace(/^https?:\/\/[^/]+/, "")}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className={"px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : "")}>{expiry}</td>
                 </tr>
               );
             })}
@@ -866,11 +900,12 @@ function AdminField({ label, value, onChange }: { label: string; value: string; 
   );
 }
 
-function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
+function SettingsPanel({ section }: { section: "general" | "logos" | "appearance" | "misc" }) {
   const brand = useBrand();
   const [logo, setLogo] = useState<string | null>(brand.logo);
   const [favicon, setFavicon] = useState<string | null>(brand.favicon);
   const [companyName, setCompanyName] = useState(brand.companyName);
+  const [companyPhone, setCompanyPhone] = useState(brand.companyPhone);
   const [cloudflareCode, setCloudflareCode] = useState(brand.cloudflareCode);
   const [cover, setCover] = useState<string | null>(brand.cover);
   const [socialBanner, setSocialBanner] = useState<string | null>(brand.socialBanner);
@@ -879,6 +914,14 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
   const [footerText, setFooterText] = useState(brand.footerText);
   const [backupEmail, setBackupEmail] = useState(brand.backupEmail);
   const [publicDomain, setPublicDomain] = useState(brand.publicDomain);
+  const [colorAction, setColorAction] = useState(brand.colorAction);
+  const [colorHeading, setColorHeading] = useState(brand.colorHeading);
+  const [colorText, setColorText] = useState(brand.colorText);
+  const [colorLabel, setColorLabel] = useState(brand.colorLabel);
+  const [colorBorder, setColorBorder] = useState(brand.colorBorder);
+  const [colorBackground, setColorBackground] = useState(brand.colorBackground);
+  const [pageBackground, setPageBackground] = useState<string | null>(brand.pageBackground);
+  const [wantImage, setWantImage] = useState(Boolean(brand.pageBackground?.startsWith("data:image/")));
   const [lastBackupAt, setLastBackupAt] = useState(brand.lastBackupAt);
   const [backupPending, setBackupPending] = useState(false);
   const [resendKey, setResendKey] = useState("");
@@ -898,6 +941,7 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
     setLogo(brand.logo);
     setFavicon(brand.favicon);
     setCompanyName(brand.companyName);
+    setCompanyPhone(brand.companyPhone);
     setCloudflareCode(brand.cloudflareCode);
     setCover(brand.cover);
     setSocialBanner(brand.socialBanner);
@@ -906,8 +950,16 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
     setFooterText(brand.footerText);
     setBackupEmail(brand.backupEmail);
     setPublicDomain(brand.publicDomain);
+    setColorAction(brand.colorAction);
+    setColorHeading(brand.colorHeading);
+    setColorText(brand.colorText);
+    setColorLabel(brand.colorLabel);
+    setColorBorder(brand.colorBorder);
+    setColorBackground(brand.colorBackground);
+    setPageBackground(brand.pageBackground);
+    setWantImage(Boolean(brand.pageBackground?.startsWith("data:image/")));
     setLastBackupAt(brand.lastBackupAt);
-  }, [brand.logo, brand.favicon, brand.companyName, brand.cloudflareCode, brand.cover, brand.socialBanner, brand.emailLogo, brand.footerLogo, brand.footerText, brand.backupEmail, brand.publicDomain, brand.lastBackupAt]);
+  }, [brand.logo, brand.favicon, brand.companyName, brand.companyPhone, brand.cloudflareCode, brand.cover, brand.socialBanner, brand.emailLogo, brand.footerLogo, brand.footerText, brand.backupEmail, brand.publicDomain, brand.lastBackupAt, brand.colorAction, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
 
   useEffect(() => {
     void getMailSetup()
@@ -921,16 +973,16 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
       .catch(() => undefined);
   }, []);
 
-  async function onFile(file: File | undefined, kind: "logo" | "favicon" | "cover" | "socialBanner" | "emailLogo" | "footerLogo") {
+  async function onFile(file: File | undefined, kind: "logo" | "favicon" | "cover" | "socialBanner" | "emailLogo" | "footerLogo" | "pageBackground") {
     setError("");
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setError("Choose an image file.");
       return;
     }
-    const share = kind === "cover" || kind === "socialBanner";
+    const share = kind === "cover" || kind === "socialBanner" || kind === "pageBackground";
     if (share && file.type !== "image/png" && file.type !== "image/jpeg") {
-      setError("Use a JPEG or PNG for the cover and social banner.");
+      setError("Use a JPEG or PNG for the cover, social banner, and background.");
       return;
     }
     if (file.size > (share ? 1_000_000 : 400_000)) {
@@ -948,6 +1000,7 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
     else if (kind === "cover") setCover(dataUrl);
     else if (kind === "emailLogo") setEmailLogo(dataUrl);
     else if (kind === "footerLogo") setFooterLogo(dataUrl);
+    else if (kind === "pageBackground") setPageBackground(dataUrl);
     else setSocialBanner(dataUrl);
   }
 
@@ -956,7 +1009,7 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
     setNotice("");
     setPending(true);
     try {
-      await setSiteBrand({ data: { logo, favicon, companyName, cloudflareCode, cover, socialBanner, emailLogo, footerLogo, footerText, backupEmail, lastBackupAt, publicDomain } });
+      await setSiteBrand({ data: { logo, favicon, companyName, companyPhone, cloudflareCode, cover, socialBanner, emailLogo, footerLogo, footerText, backupEmail, lastBackupAt, publicDomain, colorAction, colorHeading, colorText, colorLabel, colorBorder, colorBackground, pageBackground } });
       await brand.refresh();
       setNotice("Settings updated.");
     } catch (caught) {
@@ -968,13 +1021,18 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
 
   return (
     <section>
-      <h1 className="text-3xl font-semibold">{section === "logos" ? "Logos" : section === "misc" ? "Misc" : "General"}</h1>
+      <h1 className="text-3xl font-semibold">{section === "logos" ? "Logos" : section === "appearance" ? "Appearance" : section === "misc" ? "Misc" : "General"}</h1>
       {section === "general" ? (
         <>
           <p className="mt-2 text-fg">The company name is used in the header, page titles, emails, and certificates.</p>
           <label className="mt-6 block max-w-md">
             <span className="mb-1.5 block text-sm font-medium">Company name</span>
             <input className={controlClass} value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+          </label>
+          <label className="mt-6 block max-w-md">
+            <span className="mb-1.5 block text-sm font-medium">Company phone</span>
+            <input className={controlClass} value={companyPhone} placeholder="+1 800 000 0000" onChange={(event) => setCompanyPhone(event.target.value)} />
+            <span className="mt-1 block text-sm text-fg">Shown in the portal footer and at the bottom of emails.</span>
           </label>
           <label className="mt-6 block max-w-md">
             <span className="mb-1.5 block text-sm font-medium">Public domain</span>
@@ -984,7 +1042,7 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
           <DeskLoginSettings />
           <div className="mt-6 max-w-xl rounded-lg border border-danger/40 bg-surface p-4">
             <h2 className="text-lg font-semibold text-primary">Clear database</h2>
-            <p className="mt-1 text-sm text-fg">Deletes applications, clients, investments, invoices, active CDs, and notifications. Settings, rates, advisors, and the desk login stay.</p>
+            <p className="mt-1 text-sm text-fg">Deletes applications, clients, leads, investments, invoices, active CDs, and notifications. Settings, rates, advisors, and the desk login stay.</p>
             <button
               type="button"
               className="mt-3 min-h-11 rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger"
@@ -1188,6 +1246,88 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
           </label>
         </>
       ) : null}
+      {section === "appearance" ? (
+        <>
+          <p className="mt-2 max-w-2xl text-fg">These colors are used for buttons, headings, text, labels, borders, and the page behind the background picture.</p>
+          <div className="mt-6 grid max-w-3xl gap-4 sm:grid-cols-2">
+            <ColorSetting label="Button" value={colorAction} onChange={setColorAction} />
+            <ColorSetting label="Headings" value={colorHeading} onChange={setColorHeading} />
+            <ColorSetting label="Text" value={colorText} onChange={setColorText} />
+            <ColorSetting label="Labels" value={colorLabel} onChange={setColorLabel} />
+            <ColorSetting label="Borders" value={colorBorder} onChange={setColorBorder} />
+            <ColorSetting label="Page background" value={colorBackground} onChange={setColorBackground} />
+          </div>
+          <div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4">
+            <p className="text-sm font-semibold text-primary">Background picture</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {([
+                ["pattern", "Built-in pattern"],
+                ["none", "No background"],
+                ["image", "Custom picture"],
+              ] as const).map(([id, label]) => {
+                const mode = pageBackground === "none" ? "none" : pageBackground?.startsWith("data:image/") || wantImage ? "image" : "pattern";
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (mode === id ? "border-action bg-action text-on-primary" : "border-border text-primary")}
+                    onClick={() => {
+                      if (id === "none") {
+                        setWantImage(false);
+                        setPageBackground("none");
+                      } else if (id === "pattern") {
+                        setWantImage(false);
+                        setPageBackground(null);
+                      } else {
+                        setWantImage(true);
+                        if (pageBackground === "none") setPageBackground(null);
+                      }
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {pageBackground === "none" ? (
+              <p className="mt-3 text-sm text-fg">Pages use only the page background color. No picture and no light overlay.</p>
+            ) : pageBackground?.startsWith("data:image/") || wantImage ? (
+              <div className="mt-4">
+                <ImageSetting
+                  label="Custom picture"
+                  hint="Repeats behind every page, with a light overlay so text stays readable."
+                  value={pageBackground?.startsWith("data:image/") ? pageBackground : null}
+                  wide
+                  accept="image/png,image/jpeg"
+                  onFile={(file) => void onFile(file, "pageBackground")}
+                  onClear={() => {
+                    setWantImage(false);
+                    setPageBackground(null);
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-fg">The built-in grey pattern repeats behind every page.</p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="mt-4 text-sm font-semibold text-primary"
+            onClick={() => {
+              setColorAction(DEFAULT_THEME.colorAction);
+              setColorHeading(DEFAULT_THEME.colorHeading);
+              setColorText(DEFAULT_THEME.colorText);
+              setColorLabel(DEFAULT_THEME.colorLabel);
+              setColorBorder(DEFAULT_THEME.colorBorder);
+              setColorBackground(DEFAULT_THEME.colorBackground);
+              setPageBackground(null);
+              setWantImage(false);
+            }}
+          >
+            Reset appearance
+          </button>
+        </>
+      ) : null}
       {section === "logos" ? (
         <>
           <p className="mt-2 text-fg">These images replace the wordmark, browser icon, email header, footer, application cover, and shared-link image.</p>
@@ -1200,7 +1340,7 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
             />
             <ImageSetting
               label="Email header logo"
-              hint="Replaces the company name in the email header."
+              hint="Shown in the email header from your public domain. Use a PNG or JPEG, and set the public domain in General."
               value={emailLogo}
               onFile={(file) => void onFile(file, "emailLogo")}
               onClear={() => setEmailLogo(null)}
@@ -1260,6 +1400,18 @@ function SettingsPanel({ section }: { section: "general" | "logos" | "misc" }) {
         {pending ? "Saving…" : "Save"}
       </button>
     </section>
+  );
+}
+
+function ColorSetting({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+      <span className="text-sm font-semibold text-primary">{label}</span>
+      <span className="flex items-center gap-2">
+        <input type="color" className="size-9 cursor-pointer rounded border border-border bg-white" value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : "#006fcf"} onChange={(event) => onChange(event.target.value)} />
+        <input className={controlClass + " w-28 font-mono"} value={value} onChange={(event) => onChange(event.target.value)} />
+      </span>
+    </label>
   );
 }
 
@@ -1554,7 +1706,7 @@ function ActiveCdDeskRow({ row, offer }: { row: AdminFunding; offer: PromoOffer 
         <dl className="grid border-t border-border sm:grid-cols-2 lg:grid-cols-3">
           {facts.map(([label, value]) => (
             <div key={label} className="border-b border-border px-4 py-3">
-              <dt className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">{label}</dt>
+              <dt className="text-[11px] font-semibold tracking-wide text-heading uppercase">{label}</dt>
               <dd className="mt-1 text-sm text-fg">{value || "—"}</dd>
             </div>
           ))}
@@ -1892,6 +2044,7 @@ function LeadsPanel() {
         advisor,
         logo: brand.emailLogo,
         portalUrl: brand.publicDomain,
+        companyPhone: brand.companyPhone,
         copy: letterCopy,
       })
     : null;
@@ -1906,6 +2059,7 @@ function LeadsPanel() {
         logo: brand.emailLogo,
         portalUrl: brand.publicDomain,
         link: previewLink,
+        companyPhone: brand.companyPhone,
         variant,
         copy: applicationCopy,
       })
@@ -1917,6 +2071,7 @@ function LeadsPanel() {
         email: email.trim() || "lead@example.com",
         detail: letter.text,
         companyName: brand.companyName,
+        companyPhone: brand.companyPhone,
         emailLogo: brand.emailLogo,
         portalUrl: brand.publicDomain,
         extraHtml: letter.html,
@@ -2085,7 +2240,7 @@ function LetterField({ label, value, onChange, rows = 1 }: { label: string; valu
 
 function AdvisorsPanel() {
   const [rows, setRows] = useState<Advisor[] | null>(null);
-  const [draft, setDraft] = useState<Advisor>({ id: "", name: "", phone: "", email: "", mailbox: "" });
+  const [draft, setDraft] = useState<Advisor>({ id: "", name: "", phone: "", email: "", mailbox: "", role: "", personalPhone: "" });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -2103,7 +2258,7 @@ function AdvisorsPanel() {
     setNotice("");
     try {
       await saveAdvisor({ data: draft });
-      setDraft({ id: "", name: "", phone: "", email: "", mailbox: "" });
+      setDraft({ id: "", name: "", phone: "", email: "", mailbox: "", role: "", personalPhone: "" });
       await load();
       setNotice("Advisor saved.");
     } catch (caught) {
@@ -2124,7 +2279,7 @@ function AdvisorsPanel() {
   return (
     <section>
       <h1 className="text-3xl font-semibold">Advisors</h1>
-      <p className="mt-2 text-fg">Assign one of these advisors when a client investment needs a call. The verified mailbox is the SMTP2GO address that advisor’s letters are sent from.</p>
+      <p className="mt-2 text-fg">Assign one of these advisors when a client investment needs a call. The role, such as Senior Advisor, is the last line of that advisor’s email signature. The verified mailbox is the SMTP2GO address the letters are sent from.</p>
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
       {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
       <ul className="mt-4 grid gap-3">
@@ -2133,7 +2288,10 @@ function AdvisorsPanel() {
             <div>
               <p className="font-semibold text-primary">{advisor.name}</p>
               <p className="text-sm text-fg">
+                {advisor.role || "No role"}
+                {" · "}
                 {advisor.phone || "No phone"}
+                {advisor.personalPhone ? ` · Personal ${advisor.personalPhone}` : ""}
                 {advisor.email ? ` · ${advisor.email}` : ""}
                 {advisor.mailbox ? ` · ${advisor.mailbox}` : " · No verified mailbox"}
               </p>
@@ -2152,7 +2310,9 @@ function AdvisorsPanel() {
       <form className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={(event) => void save(event)}>
         <h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit advisor" : "Add advisor"}</h2>
         <AdminField label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
+        <AdminField label="Role" value={draft.role} onChange={(role) => setDraft({ ...draft, role })} />
         <AdminField label="Phone" value={draft.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
+        <AdminField label="Personal number" value={draft.personalPhone} onChange={(personalPhone) => setDraft({ ...draft, personalPhone })} />
         <AdminField label="Email" value={draft.email} onChange={(email) => setDraft({ ...draft, email })} />
         <label className="block sm:col-span-2">
           <span className="mb-1.5 block text-sm font-medium">Verified mailbox</span>
@@ -2163,6 +2323,140 @@ function AdvisorsPanel() {
           <button type="submit" className="min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary">
             Save advisor
           </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function emptyLead(): CrmLead {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  return { id: "", name: "", email: "", phone: "", amount: "", term: "", objective: "", liquidity: "", source: "", receivedAt: now.toISOString() };
+}
+
+function leadTimeInput(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function PipelineLeadsPanel() {
+  const [rows, setRows] = useState<CrmLead[] | null>(null);
+  const [draft, setDraft] = useState<CrmLead>(emptyLead);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  function load() {
+    return listCrmLeads().then(setRows);
+  }
+
+  useEffect(() => {
+    void load().catch(() => setError("Leads could not be loaded."));
+  }, []);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    try {
+      await saveCrmLead({ data: draft });
+      setDraft(emptyLead());
+      await load();
+      setNotice("Lead saved.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Could not save this lead.");
+    }
+  }
+
+  async function remove(id: string) {
+    setError("");
+    try {
+      await deleteCrmLead({ data: { id } });
+      if (draft.id === id) setDraft(emptyLead());
+      await load();
+    } catch {
+      setError("Could not remove this lead.");
+    }
+  }
+
+  return (
+    <section>
+      <h1 className="text-3xl font-semibold">Leads</h1>
+      <p className="mt-2 max-w-2xl text-fg">Record a lead as it comes in. These records stay in the pipeline so a CRM can be added later.</p>
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+      <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
+        <table className="w-full min-w-[860px] text-left text-sm">
+          <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
+            <tr>
+              <th className="px-4 py-3 font-semibold">Lead</th>
+              <th className="px-4 py-3 font-semibold">Amount</th>
+              <th className="px-4 py-3 font-semibold">Term</th>
+              <th className="px-4 py-3 font-semibold">Objective</th>
+              <th className="px-4 py-3 font-semibold">Source</th>
+              <th className="px-4 py-3 font-semibold">Received</th>
+              <th className="px-4 py-3 font-semibold" />
+            </tr>
+          </thead>
+          <tbody>
+            {(rows ?? []).map((lead) => (
+              <tr key={lead.id} className="border-b border-border last:border-0">
+                <td className="px-4 py-3">
+                  <span className="block font-semibold text-primary">{lead.name}</span>
+                  <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
+                </td>
+                <td className="px-4 py-3">{lead.amount || "—"}</td>
+                <td className="px-4 py-3">{lead.term || "—"}</td>
+                <td className="px-4 py-3">
+                  <span className="block">{lead.objective || "—"}</span>
+                  {lead.liquidity ? <span className="text-fg">{lead.liquidity}</span> : null}
+                </td>
+                <td className="px-4 py-3">{lead.source || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap">{new Date(lead.receivedAt).toLocaleString()}</td>
+                <td className="px-4 py-3 text-right">
+                  <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setDraft(lead)}>
+                    Edit
+                  </button>
+                  <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => void remove(lead.id)}>
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows && rows.length === 0 ? <p className="px-4 py-6 text-sm text-fg">No leads yet.</p> : null}
+      </div>
+      <form className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={(event) => void save(event)}>
+        <h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit lead" : "Add lead"}</h2>
+        <AdminField label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
+        <AdminField label="Email" value={draft.email} onChange={(email) => setDraft({ ...draft, email })} />
+        <AdminField label="Phone" value={draft.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
+        <AdminField label="Preferred deposit amount" value={draft.amount} onChange={(amount) => setDraft({ ...draft, amount })} />
+        <AdminField label="Term" value={draft.term} onChange={(term) => setDraft({ ...draft, term })} />
+        <AdminField label="Objective" value={draft.objective} onChange={(objective) => setDraft({ ...draft, objective })} />
+        <AdminField label="Liquidity" value={draft.liquidity} onChange={(liquidity) => setDraft({ ...draft, liquidity })} />
+        <AdminField label="Lead source" value={draft.source} onChange={(source) => setDraft({ ...draft, source })} />
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium">Lead receive time</span>
+          <input
+            type="datetime-local"
+            className={controlClass}
+            value={leadTimeInput(draft.receivedAt)}
+            onChange={(event) => setDraft({ ...draft, receivedAt: event.target.value ? new Date(event.target.value).toISOString() : "" })}
+          />
+        </label>
+        <div className="flex items-end gap-2">
+          <button type="submit" className="min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary">
+            Save lead
+          </button>
+          {draft.id ? (
+            <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setDraft(emptyLead())}>
+              Cancel
+            </button>
+          ) : null}
         </div>
       </form>
     </section>
@@ -2249,6 +2543,7 @@ const DESK_MENU = [
     items: [
       { id: "dashboard", label: "Dashboard" },
       { id: "applications", label: "Applications" },
+      { id: "pipeline-leads", label: "Leads" },
     ],
   },
   {
@@ -2273,6 +2568,7 @@ const DESK_MENU = [
     items: [
       { id: "settings-general", label: "General" },
       { id: "settings-logos", label: "Logos" },
+      { id: "settings-appearance", label: "Appearance" },
       { id: "settings-misc", label: "Misc" },
       { id: "emails", label: "Email templates" },
     ],

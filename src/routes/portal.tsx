@@ -240,7 +240,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
 const DEFAULT_FOOTER_TEXT = "FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply.";
 
 function PortalFooter({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalTab) => void }) {
-  const { companyName, footerLogo, footerText } = useBrand();
+  const { companyName, companyPhone, footerLogo, footerText } = useBrand();
   const name = companyName || DEFAULT_COMPANY_NAME;
   const note = footerText.trim() || DEFAULT_FOOTER_TEXT;
   return (
@@ -253,10 +253,11 @@ function PortalFooter({ tab, onChange }: { tab: PortalTab; onChange: (tab: Porta
             <p className="text-sm font-bold tracking-wide text-primary">{name.toUpperCase()}</p>
           )}
           <p className="mt-1 text-sm text-fg">Investor accounts</p>
+          {companyPhone ? <p className="mt-1 text-sm text-fg">{companyPhone}</p> : null}
           <p className="mt-4 max-w-xl text-xs leading-5 text-fg">{note}</p>
         </div>
         <nav aria-label="Portal">
-          <p className="text-xs font-semibold tracking-widest text-[#12315c] uppercase">Portal</p>
+          <p className="text-xs font-semibold tracking-widest text-heading uppercase">Portal</p>
           <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
             {PORTAL_TABS.map((item) => (
               <li key={item.id}>
@@ -365,7 +366,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
   return (
     <div className="mt-8">
       <div className="rounded-xl bg-[#f3f4f6] px-4 py-6 sm:px-6">
-        <h3 className="text-center text-2xl font-semibold text-[#3d3d3d]">Browse all available CD terms</h3>
+        <h3 className="text-center text-2xl font-semibold text-fg">Browse all available CD terms</h3>
         <div ref={scroller} className="mt-6 overflow-x-auto scroll-smooth pb-2">
           <div className="mx-auto flex w-max min-w-full items-stretch justify-center gap-3 px-1 pt-4">
           {orderedTerms.map((term) => {
@@ -379,7 +380,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
                 tabIndex={0}
                 className={
                   "relative mt-3 flex min-h-48 min-w-[220px] shrink-0 cursor-pointer flex-col rounded-xl border bg-white px-5 pt-16 pb-5 text-left shadow-sm " +
-                  (active ? "border-[#006fcf]" : "border-[#e7e7e7]")
+                  (active ? "border-action" : "border-[#e7e7e7]")
                 }
                 onClick={() => {
                   setSelectedId(term.id);
@@ -397,7 +398,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
                 {term.featured || promo ? (
                   <span className="absolute -top-3 left-4 flex flex-col items-start gap-1">
                     {term.featured ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-[#006fcf] px-2.5 py-1 text-xs font-semibold text-white">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-action px-2.5 py-1 text-xs font-semibold text-white">
                         <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden="true">
                           <path d="M2 12.5 6 8l2.5 2.5L14 4" fill="none" stroke="currentColor" strokeWidth="1.6" />
                           <path d="M10 4h4v4" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -416,12 +417,12 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
                     ) : null}
                   </span>
                 ) : null}
-                <span className="block text-2xl font-semibold text-[#262626]">{term.apy.includes("APY") ? term.apy : `${term.apy} APY`}</span>
+                <span className="block text-2xl font-semibold text-primary">{term.apy.includes("APY") ? term.apy : `${term.apy} APY`}</span>
                 <span className="mt-1 block text-sm text-[#5c6370]">{term.months}-month term</span>
                 {promo ? (
                   <button
                     type="button"
-                    className="mt-auto self-start pt-4 text-left text-sm font-semibold text-[#006fcf]"
+                    className="mt-auto self-start pt-4 text-left text-sm font-semibold text-action"
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedId(term.id);
@@ -438,7 +439,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
           </div>
         </div>
         <div className="mt-4 flex items-center justify-center gap-3">
-          <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Previous terms" onClick={() => move(-1)}>
+          <button type="button" className="flex size-8 items-center justify-center text-action" aria-label="Previous terms" onClick={() => move(-1)}>
             ‹
           </button>
           <div className="flex items-center gap-1.5">
@@ -447,7 +448,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
                 key={term.id}
                 type="button"
                 aria-label={`Show term ${index + 1}`}
-                className={index === page ? "h-1.5 w-5 rounded-full bg-[#006fcf]" : "size-1.5 rounded-full bg-[#c5c8ce]"}
+                className={index === page ? "h-1.5 w-5 rounded-full bg-action" : "size-1.5 rounded-full bg-[#c5c8ce]"}
                 onClick={() => {
                   setPage(index);
                   scroller.current?.querySelectorAll<HTMLElement>("[data-term]")[index]?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
@@ -455,7 +456,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
               />
             ))}
           </div>
-          <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Next terms" onClick={() => move(1)}>
+          <button type="button" className="flex size-8 items-center justify-center text-action" aria-label="Next terms" onClick={() => move(1)}>
             ›
           </button>
         </div>
@@ -478,7 +479,7 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
         <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-white px-5 py-4">
           <div>
             <p className="text-sm text-fg">{cd.issuer}</p>
-            <p className="text-lg font-semibold text-[#12315c]">
+            <p className="text-lg font-semibold text-heading">
               {selected.months}-month · {moneyLabel(amount)}
             </p>
           </div>
@@ -576,14 +577,14 @@ function InvestmentSummary({
           <SummaryFact label="Minimum" value={type.minimumInvestment || "—"} />
           <SummaryFact label="Callable" value="Non-callable" />
           <div className="col-span-2">
-            <dt className="text-xs font-semibold tracking-wide text-[#12315c] uppercase">Capital protection</dt>
+            <dt className="text-xs font-semibold tracking-wide text-heading uppercase">Capital protection</dt>
             <dd className="mt-1 text-fg">FDIC. 100% cover on the first $250,000 per individual or $500,000 per joint account.</dd>
           </div>
         </dl>
         <ol className="mx-6 grid gap-3 border-t border-border pt-5">
           {SUMMARY_STEPS.map((step, index) => (
             <li key={step} className="flex items-start gap-3">
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#006fcf] text-xs font-semibold text-white">{index + 1}</span>
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-action text-xs font-semibold text-white">{index + 1}</span>
               <span className="text-sm text-fg">{step}</span>
             </li>
           ))}
@@ -610,7 +611,7 @@ function InvestmentSummary({
 function SummaryFact({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs font-semibold tracking-wide text-[#12315c] uppercase">{label}</dt>
+      <dt className="text-xs font-semibold tracking-wide text-heading uppercase">{label}</dt>
       <dd className="mt-1 text-fg">{value || "—"}</dd>
     </div>
   );
@@ -624,7 +625,7 @@ function moneyLabel(amount: string) {
 function PromoRates({ offer, term }: { offer: PromoOffer; term: CdTerm }) {
   const tiers = offer.tiers.filter((tier) => tier.months.includes(term.months));
   return (
-    <div className="mx-auto mt-6 max-w-3xl text-sm leading-6 text-[#262626]">
+    <div className="mx-auto mt-6 max-w-3xl text-sm leading-6 text-primary">
       {offer.intro ? <p>{offer.intro}</p> : null}
       <div className="mt-4 overflow-hidden rounded-xl border border-border bg-white">
         <div className="border-b border-[#e6e6e6] px-4 py-3 font-semibold">{term.months}-Month CD</div>
@@ -643,7 +644,7 @@ function PromoRates({ offer, term }: { offer: PromoOffer; term: CdTerm }) {
       <ul className="mt-4 grid gap-2">
         {offerNotes(offer).map((note) => (
           <li key={note.text} className="flex items-start gap-2">
-            <note.icon className="mt-0.5 size-4 shrink-0 text-[#006fcf]" aria-hidden="true" />
+            <note.icon className="mt-0.5 size-4 shrink-0 text-action" aria-hidden="true" />
             <span className={note.strong ? "font-semibold text-primary" : undefined}>{note.text}</span>
           </li>
         ))}
@@ -684,12 +685,12 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
 
   return (
     <section className="mt-6">
-      <div className="rounded-xl bg-[#006fcf] px-4 py-8 text-white sm:px-8">
+      <div className="rounded-xl bg-action px-4 py-8 text-white sm:px-8">
         <h3 className="calc-title text-center text-3xl font-semibold tracking-tight text-white">Calculate your money’s future value</h3>
         <p className="mx-auto mt-2 max-w-xl text-center text-sm">
           {selected ? `${selected.months}-month term · ${selected.apy.includes("APY") ? selected.apy : `${selected.apy} APY`} base rate.` : "Select a CD term above."}
         </p>
-        <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-white px-5 py-6 text-[#262626] sm:px-8">
+        <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-white px-5 py-6 text-primary sm:px-8">
           <h4 className="text-center text-xl font-semibold">Tell us how much you want to deposit</h4>
           <div className={"mt-6 grid gap-6 " + (tiers.length > 0 ? "sm:grid-cols-2" : "")}>
             <div>
@@ -697,7 +698,7 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
                 <span className="block text-sm font-semibold">Enter Initial Deposit Amount</span>
                 <input
                   inputMode="decimal"
-                  className="mt-3 w-full rounded-md border border-[#cfcfcf] px-3 py-3 text-base outline-none focus:border-[#006fcf]"
+                  className="mt-3 w-full rounded-md border border-[#cfcfcf] px-3 py-3 text-base outline-none focus:border-action"
                   value={deposit}
                   onChange={(event) => apply(event.target.value)}
                 />
@@ -712,7 +713,7 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
                         type="button"
                         className={
                           "min-h-9 rounded-full border px-3 py-1 text-sm font-semibold " +
-                          (picked ? "border-[#006fcf] bg-[#006fcf] text-white" : "border-[#cfcfcf] text-[#262626]")
+                          (picked ? "border-action bg-action text-white" : "border-[#cfcfcf] text-primary")
                         }
                         onClick={() => apply(String(tier.minAmount))}
                       >
@@ -728,7 +729,7 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
                 <p className="text-sm font-semibold">Available promo bonus tiers</p>
                 <ul className="mt-3 divide-y divide-[#e6e6e6] text-sm">
                   {tiers.map((tier) => (
-                    <li key={tier.id} className={"flex items-center justify-between gap-3 py-2 " + (bonus?.id === tier.id ? "font-semibold text-[#006fcf]" : "")}>
+                    <li key={tier.id} className={"flex items-center justify-between gap-3 py-2 " + (bonus?.id === tier.id ? "font-semibold text-action" : "")}>
                       <span>{amountRange(tier)}</span>
                       <span>{formatBonus(tier.bonusPercent)}</span>
                     </li>
@@ -877,17 +878,17 @@ function TermChart({ items }: { items: Array<{ id: string; months: number; amoun
         <li key={item.id}>
           <div className="relative h-10 overflow-hidden rounded-md bg-[#e7f6fc]">
             <div className="absolute inset-y-0 left-0 bg-[#6cc4ee]" style={{ width: `${elapsed(item.start, item.end)}%` }} />
-            <span className="relative flex h-full items-center px-3 text-xs font-semibold text-[#12315c]">
+            <span className="relative flex h-full items-center px-3 text-xs font-semibold text-heading">
               {item.months}-month · {money(item.amount)}
             </span>
           </div>
           <div className="mt-1 flex justify-between text-xs text-fg">
             <span>
-              <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Funding date</span>
+              <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Funding date</span>
               {formatDate(new Date(`${item.start}T00:00:00Z`))}
             </span>
             <span className="text-right">
-              <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Mature date</span>
+              <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Mature date</span>
               {item.end ? formatDate(item.end) : "—"}
             </span>
           </div>
@@ -961,7 +962,7 @@ function Celebration({ position, onOpen }: { position: FundingPosition; onOpen: 
           <dd className="font-semibold">{matures ? formatDate(matures) : "—"}</dd>
         </div>
       </dl>
-      <button type="button" className="mt-5 min-h-11 rounded-md bg-white px-5 py-2 text-sm font-semibold text-[#006fcf]" onClick={onOpen}>
+      <button type="button" className="mt-5 min-h-11 rounded-md bg-white px-5 py-2 text-sm font-semibold text-action" onClick={onOpen}>
         Active CDs
       </button>
     </div>
@@ -1109,15 +1110,15 @@ function Dashboard({
                   <span className="text-fg">Opened {line.position.createdAt}</span>
                 </span>
                 <span>
-                  <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Matures</span>
+                  <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Matures</span>
                   {formatDate(line.date!)}
                 </span>
                 <span>
-                  <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Principal</span>
+                  <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Principal</span>
                   {money(line.principal)}
                 </span>
                 <span>
-                  <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Expected payout</span>
+                  <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Expected payout</span>
                   {money(line.payout)}
                 </span>
               </li>
@@ -1329,7 +1330,7 @@ function ActiveCd({ position, account }: { position: FundingPosition; account: P
 function Highlight({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="rounded-md border border-border bg-bg px-3 py-3">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-heading uppercase">
         <Icon className="size-3.5" aria-hidden="true" />
         {label}
       </p>
@@ -1347,7 +1348,7 @@ function slashDate(iso: string) {
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="border-r border-b border-border px-3 py-3">
-      <dt className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">{label}</dt>
+      <dt className="text-[11px] font-semibold tracking-wide text-heading uppercase">{label}</dt>
       <dd className="mt-1 text-sm text-fg">{value || "—"}</dd>
     </div>
   );
@@ -1405,7 +1406,7 @@ function InvoiceDownload({ position }: { position: FundingPosition }) {
 
   return (
     <div className="mt-4 rounded-md border border-border bg-white px-4 py-3">
-      <p className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Payment invoice</p>
+      <p className="text-[11px] font-semibold tracking-wide text-heading uppercase">Payment invoice</p>
       {ready ? (
         <>
           <p className="mt-1 text-sm text-fg">Use this invoice for the wire. Include the customer reference on the payment.</p>
@@ -1493,11 +1494,11 @@ function InvestmentCard({ position, signature, phone, email, onSigned }: { posit
       {position.status === "cancelled" ? null : <InvoiceDownload position={position} />}
       <div className="mt-3 grid grid-cols-2 gap-3">
         <p>
-          <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Promo APY</span>
+          <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Promo APY</span>
           <span className="text-sm font-semibold text-fg">{rates.promo}</span>
         </p>
         <p>
-          <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Final APY</span>
+          <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">Final APY</span>
           <span className="text-sm font-semibold text-fg">{rates.final}</span>
         </p>
       </div>
@@ -1727,7 +1728,7 @@ function SignTerms({
                       <input className="mt-1 w-full rounded-md border border-border px-3 py-2" value={callNumber} onChange={(event) => setCallNumber(event.target.value)} />
                     </label>
                   ) : (
-                    <p className="mt-1 text-lg font-semibold text-[#12315c]">{callNumber || "No number on the application"}</p>
+                    <p className="mt-1 text-lg font-semibold text-heading">{callNumber || "No number on the application"}</p>
                   )}
                   <button type="button" className="mt-2 text-sm font-semibold text-action" onClick={() => setEditingNumber((value) => !value)}>
                     {editingNumber ? "Use this number" : "Call another number"}
@@ -1760,7 +1761,7 @@ function TermLine({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
     <li className="flex items-start gap-3 bg-surface px-3 py-3 text-sm">
       <Icon className="menu-icon mt-0.5 size-4 shrink-0 text-action" aria-hidden="true" />
       <span>
-        <span className="block text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">{label}</span>
+        <span className="block text-[11px] font-semibold tracking-wide text-heading uppercase">{label}</span>
         <span className="text-fg">{value || "—"}</span>
       </span>
     </li>
