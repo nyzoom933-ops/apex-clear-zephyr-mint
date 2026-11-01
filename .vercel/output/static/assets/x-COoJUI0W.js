@@ -1,0 +1,1 @@
+import{r as e}from"./index-BrxN_9LE.js";var t=e(`menu`,[[`path`,{d:`M4 12h16`,key:`1lakjw`}],[`path`,{d:`M4 18h16`,key:`19g7jn`}],[`path`,{d:`M4 6h16`,key:`1o0s65`}]]),n=e(`x`,[[`path`,{d:`M18 6 6 18`,key:`1bl5f8`}],[`path`,{d:`m6 6 12 12`,key:`d8bk6v`}]]);export{t as n,n as t};

@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ApiCronBackupRouteImport } from './routes/api/cron/backup'
+import { Route as ApiCronLeadRemindersRouteImport } from './routes/api/cron/lead-reminders'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -52,6 +53,11 @@ const ApiCronBackupRoute = ApiCronBackupRouteImport.update({
   path: '/api/cron/backup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronLeadRemindersRoute = ApiCronLeadRemindersRouteImport.update({
+  id: '/api/cron/lead-reminders',
+  path: '/api/cron/lead-reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,6 +67,7 @@ export interface FileRoutesByFullPath {
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
+  '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByTo {
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
+  '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +88,7 @@ export interface FileRoutesById {
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
+  '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +100,7 @@ export interface FileRouteTypes {
     | '/portal'
     | '/reset-password'
     | '/api/cron/backup'
+    | '/api/cron/lead-reminders'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/portal'
     | '/reset-password'
     | '/api/cron/backup'
+    | '/api/cron/lead-reminders'
   id:
     | '__root__'
     | '/'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
     | '/portal'
     | '/reset-password'
     | '/api/cron/backup'
+    | '/api/cron/lead-reminders'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,6 +131,7 @@ export interface RootRouteChildren {
   PortalRoute: typeof PortalRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiCronBackupRoute: typeof ApiCronBackupRoute
+  ApiCronLeadRemindersRoute: typeof ApiCronLeadRemindersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -172,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronBackupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/lead-reminders': {
+      id: '/api/cron/lead-reminders'
+      path: '/api/cron/lead-reminders'
+      fullPath: '/api/cron/lead-reminders'
+      preLoaderRoute: typeof ApiCronLeadRemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -183,6 +203,7 @@ const rootRouteChildren: RootRouteChildren = {
   PortalRoute: PortalRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ApiCronBackupRoute: ApiCronBackupRoute,
+  ApiCronLeadRemindersRoute: ApiCronLeadRemindersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

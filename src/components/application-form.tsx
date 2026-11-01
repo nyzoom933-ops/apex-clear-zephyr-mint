@@ -21,7 +21,8 @@ import {
   validateStep,
   type FormState,
 } from "@/lib/application-data";
-import { getInvestorSession, investorLogout, submitApplication, type InvestorSession } from "@/lib/admin.functions";
+import { getCdTerms, getInvestorSession, getLeadInvite, getPromo, investorLogout, submitApplication, type CdTerm, type InvestorSession } from "@/lib/admin.functions";
+import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, promoMonths, type PromoOffer } from "@/lib/promo";
 import { AppCover, headerActionClass, SiteHeader } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
 
@@ -100,6 +101,9 @@ export function ApplicationForm() {
   const [submitted, setSubmitted] = useState(false);
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<InvestorSession | null | undefined>(undefined);
+  const [terms, setTerms] = useState<CdTerm[]>([]);
+  const [offer, setOffer] = useState<PromoOffer>(EMPTY_PROMO);
+  const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired">("none");
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,8 +119,52 @@ export function ApplicationForm() {
   }, [navigate]);
 
   useEffect(() => {
-    setForm(loadDraft());
-    setReady(true);
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get("invite")?.trim() || "";
+    const draft = loadDraft();
+    if (!invite) {
+      const term = params.get("term")?.replace(/\D/g, "") || "";
+      const code = params.get("code")?.trim().slice(0, 40) || "";
+      setForm({ ...draft, preferredTerm: term || draft.preferredTerm, promoCode: code || draft.promoCode || "", inviteToken: "" });
+      setInviteGate("none");
+      setReady(true);
+      return;
+    }
+    setInviteGate("checking");
+    void getLeadInvite({ data: { token: invite } })
+      .then((result) => {
+        if (result.status !== "open") {
+          setInviteGate("expired");
+          setReady(true);
+          return;
+        }
+        const first = result.name.split(" ")[0] || "";
+        setForm({
+          ...draft,
+          preferredTerm: String(result.months),
+          promoCode: result.promoCode,
+          inviteToken: invite,
+          firstName: draft.firstName || first,
+        });
+        setInviteGate("open");
+        setReady(true);
+      })
+      .catch(() => {
+        setInviteGate("expired");
+        setReady(true);
+      });
+  }, []);
+
+  useEffect(() => {
+    void Promise.all([getCdTerms(), getPromo()])
+      .then(([nextTerms, nextOffer]) => {
+        setTerms(nextTerms);
+        setOffer(nextOffer);
+      })
+      .catch(() => {
+        setTerms([]);
+        setOffer(EMPTY_PROMO);
+      });
   }, []);
 
   useEffect(() => {
@@ -164,12 +212,27 @@ export function ApplicationForm() {
     void navigate({ to: "/login" });
   }
 
-  if (session === undefined) {
+  if (session === undefined || inviteGate === "checking") {
     return (
       <div className="min-h-screen">
         <SiteHeader eyebrow="Investor application" />
         <AppCover />
         <main className="mx-auto max-w-3xl px-4 py-10 text-sm text-fg">Checking your application…</main>
+      </div>
+    );
+  }
+
+  if (inviteGate === "expired") {
+    return (
+      <div className="min-h-screen">
+        <SiteHeader eyebrow="Investor application" />
+        <AppCover />
+        <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+          <section className="rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10">
+            <h1 className="text-3xl font-semibold">This application link has expired</h1>
+            <p className="mx-auto mt-3 max-w-md text-fg">The link in your email lasts 24 hours. Ask your advisor to send a new one.</p>
+          </section>
+        </main>
       </div>
     );
   }
@@ -246,7 +309,7 @@ export function ApplicationForm() {
         }
       />
       <AppCover />
-      <main className="mx-auto my-6 max-w-3xl rounded-lg border border-border bg-surface px-4 py-8 shadow-sm sm:my-10 sm:px-8 sm:py-12">
+      <main className="mx-auto my-6 w-full max-w-3xl overflow-hidden rounded-lg border border-border bg-surface px-4 py-8 shadow-sm sm:my-10 sm:px-8 sm:py-12">
         <header className="mb-8 text-center">
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Open an account relationship</h1>
           <p className="mx-auto mt-3 max-w-xl text-fg">
@@ -315,7 +378,8 @@ export function ApplicationForm() {
             ) : null}
             {step === 2 ? <Address form={form} patch={patch} /> : null}
             {step === 3 ? (
-              <div className="grid gap-10">
+              <div className="grid min-w-0 gap-10">
+                <Preference form={form} patch={patch} terms={terms} offer={offer} locked={inviteGate === "open"} />
                 <Financial form={form} patch={patch} />
                 <Funding form={form} patch={patch} />
               </div>
@@ -515,6 +579,127 @@ function Address({ form, patch }: { form: FormState; patch: <K extends keyof For
   );
 }
 
+function Preference({
+  form,
+  patch,
+  terms,
+  offer,
+  locked = false,
+}: {
+  form: FormState;
+  patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  terms: CdTerm[];
+  offer: PromoOffer;
+  locked?: boolean;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(0);
+  const promo = new Set(promoMonths(offer));
+  const ordered = [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
+  const months = Number(form.preferredTerm);
+  const amount = Number(form.preferredAmount.replace(/[^0-9.]/g, ""));
+  const tiers = offer.tiers.filter((tier) => tier.months.includes(months));
+  const matched = matchTier(offer, months, amount);
+
+  function move(direction: number) {
+    const next = Math.min(Math.max(page + direction, 0), Math.max(ordered.length - 1, 0));
+    setPage(next);
+    scroller.current?.querySelectorAll<HTMLElement>("[data-term]")[next]?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+  }
+
+  return (
+    <div className="grid min-w-0 max-w-full gap-5">
+      <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : "Choose a term and the amount you expect to invest. Promotional terms are shown first."} />
+      {ordered.length === 0 ? (
+        <p className="text-sm text-fg">No certificate terms are available right now.</p>
+      ) : (
+        <div className="max-w-full overflow-hidden rounded-xl bg-[#f3f4f6] px-4 py-6">
+          <div ref={scroller} className="w-full max-w-full overflow-x-auto scroll-smooth pb-2">
+            <div className="flex w-max items-stretch gap-3 pt-4">
+              {ordered.map((term) => {
+                const selected = form.preferredTerm === String(term.months);
+                const isPromo = promo.has(term.months);
+                return (
+                  <button
+                    key={term.id}
+                    type="button"
+                    data-term
+                    className={"relative mt-3 flex min-h-40 min-w-[200px] shrink-0 flex-col rounded-xl border bg-white px-5 pt-12 pb-5 text-left " + (selected ? "border-[#006fcf]" : "border-[#e7e7e7]")}
+                    onClick={() => {
+                      if (!locked) patch("preferredTerm", String(term.months));
+                    }}
+                  >
+                    {term.featured || isPromo ? (
+                      <span className="absolute -top-3 left-4 flex flex-col items-start gap-1">
+                        {isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
+                        {term.featured ? <span className="inline-flex rounded-md bg-[#006fcf] px-2 py-1 text-xs font-semibold text-white">Featured APY</span> : null}
+                      </span>
+                    ) : null}
+                    <span className="block text-2xl font-semibold text-[#262626]">{term.apy.includes("APY") ? term.apy : `${term.apy} APY`}</span>
+                    <span className="mt-1 block text-sm text-fg">{term.months}-month term</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Previous terms" onClick={() => move(-1)}>
+              ‹
+            </button>
+            <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5">
+              {ordered.map((term, index) => (
+                <button
+                  key={term.id}
+                  type="button"
+                  aria-label={`Show term ${index + 1}`}
+                  className={index === page ? "h-1.5 w-5 rounded-full bg-[#006fcf]" : "size-1.5 rounded-full bg-[#c5c8ce]"}
+                  onClick={() => {
+                    setPage(index);
+                    scroller.current?.querySelectorAll<HTMLElement>("[data-term]")[index]?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+                  }}
+                />
+              ))}
+            </div>
+            <button type="button" className="flex size-8 items-center justify-center text-[#006fcf]" aria-label="Next terms" onClick={() => move(1)}>
+              ›
+            </button>
+          </div>
+        </div>
+      )}
+      <Field label="Promotional code">
+        <input className={controlClass} value={form.promoCode} placeholder="Optional" readOnly={locked} onChange={(event) => patch("promoCode", event.target.value)} />
+      </Field>
+      <Field label="Preferred investment amount">
+        <input
+          className={controlClass}
+          inputMode="decimal"
+          placeholder="$100,000"
+          value={form.preferredAmount}
+          onChange={(event) => patch("preferredAmount", event.target.value)}
+        />
+      </Field>
+      {tiers.length > 0 ? (
+        <div className="overflow-hidden rounded-xl border border-border bg-white text-sm">
+          <div className="border-b border-border px-4 py-3 font-semibold text-primary">{months}-month promo bonus</div>
+          {offer.startsOn && offer.endsOn ? (
+            <p className="border-b border-border px-4 py-3 text-fg">Offer available from {formatOfferDate(offer.startsOn)} – {formatOfferDate(offer.endsOn)}.</p>
+          ) : null}
+          <div className="grid grid-cols-2 bg-[#f7f7f7] px-4 py-2 text-xs font-semibold tracking-wide text-[#12315c] uppercase">
+            <span>Deposit</span>
+            <span>Promo bonus</span>
+          </div>
+          {tiers.map((tier) => (
+            <div key={tier.id} className={"grid grid-cols-2 border-t border-border px-4 py-3 " + (matched?.id === tier.id ? "bg-[#e8f4ff] font-semibold" : "")}>
+              <span>{amountRange(tier)}</span>
+              <span>{formatBonus(tier.bonusPercent)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Financial({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
   return (
     <div className="grid gap-5">
@@ -553,11 +738,11 @@ function Documents({ form, patch }: { form: FormState; patch: <K extends keyof F
     <div className="grid gap-5">
       <SectionIntro eyebrow="Section" title="Verification documents" body="Choose the document types and attach files for identity and address verification." />
       <SelectField label="Identity document" value={form.idType} options={ID_TYPES} onChange={(value) => patch("idType", value as FormState["idType"])} />
-      <Field label="Identity file" hint={form.idFileName || "PDF, PNG, or JPEG"}>
+      <Field label="Identity file" hint={form.idFileName || "Optional. PDF, PNG, or JPEG"}>
         <input type="file" accept="application/pdf,image/png,image/jpeg" className={controlClass} onChange={(event) => take(event.target.files?.[0], "idFileName", "idFile")} />
       </Field>
       <SelectField label="Proof of address" value={form.addressDocType} options={ADDRESS_DOCS} onChange={(value) => patch("addressDocType", value as FormState["addressDocType"])} />
-      <Field label="Address file" hint={form.addressFileName || "PDF, PNG, or JPEG"}>
+      <Field label="Address file" hint={form.addressFileName || "Optional. PDF, PNG, or JPEG"}>
         <input type="file" accept="application/pdf,image/png,image/jpeg" className={controlClass} onChange={(event) => take(event.target.files?.[0], "addressFileName", "addressFile")} />
       </Field>
       {fileError ? <p className="text-sm text-danger">{fileError}</p> : null}

@@ -218,6 +218,10 @@ export type FormState = {
   sourceOfFunds: string;
   investmentPurpose: string;
   netWorth: string;
+  preferredAmount: string;
+  preferredTerm: string;
+  promoCode: string;
+  inviteToken: string;
   idType: (typeof ID_TYPES)[number];
   addressDocType: (typeof ADDRESS_DOCS)[number];
   idFileName: string;
@@ -269,6 +273,10 @@ export const EMPTY_FORM: FormState = {
   sourceOfFunds: "",
   investmentPurpose: "",
   netWorth: "",
+  preferredAmount: "",
+  preferredTerm: "",
+  promoCode: "",
+  inviteToken: "",
   idType: "Passport",
   addressDocType: "Bank or credit-card statement",
   idFileName: "",
@@ -320,10 +328,9 @@ export function validateStep(step: number, form: FormState): string[] {
     if (!form.accountHolder.trim()) errors.push("Enter the account holder's name.");
     if (!/^\d{9}$/.test(form.routingNumber.replace(/\D/g, ""))) errors.push("Enter a 9-digit routing number.");
     if (form.accountNumber.replace(/\D/g, "").length < 4) errors.push("Enter the account number.");
-  }
-  if (step === 4) {
-    if (!form.idFile.startsWith("data:")) errors.push("Attach an identity document.");
-    if (!form.addressFile.startsWith("data:")) errors.push("Attach a proof-of-address document.");
+    const preferred = Number(form.preferredAmount.replace(/[^0-9.]/g, ""));
+    if (!Number.isFinite(preferred) || preferred <= 0) errors.push("Enter a preferred investment amount.");
+    if (!form.preferredTerm) errors.push("Choose a promotional term.");
   }
   if (step === 5) {
     if (!form.d1 || !form.d2 || !form.d3 || !form.d4) {

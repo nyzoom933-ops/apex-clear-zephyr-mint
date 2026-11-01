@@ -231,7 +231,10 @@ const globalBoot = globalThis as typeof globalThis & {
 };
 if (typeof window === "undefined" && dbSource === "pglite") {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady()
-    .then(() => startBackupSchedule())
+    .then(() => {
+      startBackupSchedule();
+      startInviteReminders();
+    })
     .catch((err) => {
       globalBoot.__pgBootstrapPromise__ = undefined;
       console.error("[db] PGLite bootstrap failed:", err);
@@ -239,6 +242,19 @@ if (typeof window === "undefined" && dbSource === "pglite") {
     });
 } else if (typeof window === "undefined") {
   startBackupSchedule();
+  startInviteReminders();
+}
+
+function startInviteReminders() {
+  const boot = globalThis as typeof globalThis & { __inviteBoot?: boolean };
+  if (boot.__inviteBoot) return;
+  boot.__inviteBoot = true;
+  void import("@/lib/lead-invites.server")
+    .then((mod) => mod.ensureInviteReminderSchedule())
+    .catch((err) => {
+      boot.__inviteBoot = false;
+      console.error("[db] Invite reminder schedule failed:", err);
+    });
 }
 
 function startBackupSchedule() {

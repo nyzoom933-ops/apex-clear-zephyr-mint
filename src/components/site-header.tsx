@@ -12,8 +12,11 @@ const BrandContext = createContext<BrandState>({
   cover: null,
   socialBanner: null,
   emailLogo: null,
+  footerLogo: null,
+  footerText: "",
   backupEmail: "",
   lastBackupAt: "",
+  publicDomain: "",
   ready: false,
   refresh: async () => {},
 });
@@ -31,8 +34,11 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     cover: null,
     socialBanner: null,
     emailLogo: null,
-  backupEmail: "",
-  lastBackupAt: "",
+    footerLogo: null,
+    footerText: "",
+    backupEmail: "",
+    lastBackupAt: "",
+    publicDomain: "",
   });
   const [ready, setReady] = useState(false);
 

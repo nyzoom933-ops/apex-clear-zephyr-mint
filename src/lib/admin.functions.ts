@@ -1,10 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormState } from "@/lib/application-data";
-import { cleanBackupEmail, cleanCloudflareCode, cleanCompanyName, DEFAULT_COMPANY_NAME } from "@/lib/company";
+import { cleanBackupEmail, cleanCloudflareCode, cleanCompanyName, cleanPublicDomain, DEFAULT_COMPANY_NAME } from "@/lib/company";
 import type { Sql } from "@/lib/db";
 import { isWorkspacePreview } from "@/lib/env.server";
 import type { MailStep } from "@/lib/mail.server";
+import type { LeadCopy, ApplicationCopy } from "@/lib/email-templates";
 import { formatBonus, matchTier, type PromoOffer, type PromoTier } from "@/lib/promo";
 import { resolveInvoiceBilling, type InvoiceBilling } from "@/lib/invoice-billing";
 
@@ -169,22 +170,48 @@ export const submitApplication = createServerFn({ method: "POST" })
     const { hashPassword } = await import("@/lib/passwords.server");
     const sql = await getSql();
     const id = crypto.randomUUID();
-    const payload = { ...stripSecrets(data), currency: "USD" as const };
     const email = data.email.trim().toLowerCase();
-    const name = [payload.firstName, payload.middleName, payload.surname].filter(Boolean).join(" ");
+    const inviteToken = data.inviteToken?.trim() || "";
+    let invited: { months: number; promoCode: string } | null = null;
+    if (inviteToken) {
+      const { readLeadInvite } = await import("@/lib/lead-invites.server");
+      const invite = await readLeadInvite(sql, inviteToken);
+      if (invite.status !== "open") throw new Error("This application link has expired.");
+      invited = { months: invite.months, promoCode: invite.promoCode };
+    }
+    const payload = { ...stripSecrets(data), currency: "USD" as const };
+    const { inviteToken: _inviteToken, ...stored } = payload;
+    void _inviteToken;
+    if (invited) {
+      stored.preferredTerm = String(invited.months);
+      stored.promoCode = invited.promoCode;
+    }
+    const name = [stored.firstName, stored.middleName, stored.surname].filter(Boolean).join(" ");
     const passwordHash = await hashPassword(data.password);
     await sql`
       insert into applications (id, applicant_name, email, account_type, currency, payload, password_hash)
-      values (${id}, ${name}, ${email}, ${payload.accountType}, ${payload.currency}, ${JSON.stringify(payload)}::jsonb, ${passwordHash})
+      values (${id}, ${name}, ${email}, ${stored.accountType}, ${stored.currency}, ${JSON.stringify(stored)}::jsonb, ${passwordHash})
     `;
+    if (inviteToken) await sql`update lead_invites set used_at = now() where token = ${inviteToken} and used_at is null`;
     await sendStep(sql, {
       step: "application_submitted",
       clientEmail: email,
       clientName: name,
       detail: [`${payload.accountType} account`, `Sign-in email ${email}`].join("\n"),
+      adminDetail: applicationDeskDetail(payload),
+      attachments: applicationFiles(payload),
       relatedId: id,
     });
     return { id };
+  });
+
+export const getLeadInvite = createServerFn({ method: "GET" })
+  .validator((input: { token: string }) => ({ token: (input.token || "").trim().slice(0, 80) }))
+  .handler(async ({ data }) => {
+    if (!data.token) return { status: "missing" as const };
+    const { getSql } = await import("@/lib/db");
+    const { readLeadInvite } = await import("@/lib/lead-invites.server");
+    return readLeadInvite(await getSql(), data.token);
   });
 
 export const listApplications = createServerFn({ method: "GET" }).handler(async () => {
@@ -258,6 +285,58 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
     return { ok: true as const, loginEmail: null };
   });
 
+export const deleteApplication = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ email: string }>`select email from applications where id = ${data.id}`;
+    if (!rows[0]) throw new Error("Application not found.");
+    const email = String(rows[0].email).trim().toLowerCase();
+    await sql`
+      delete from notifications
+      where lower(recipient) = ${email}
+         or related_id = ${data.id}
+         or related_id in (select id from fundings where lower(email) = ${email})
+    `;
+    await sql`delete from fundings where lower(email) = ${email}`;
+    await sql`
+      delete from investor_users
+      where application_id = ${data.id}
+         or (lower(email) = ${email} and not exists (
+           select 1 from applications where lower(email) = ${email} and id <> ${data.id}
+         ))
+    `;
+    await sql`delete from applications where id = ${data.id}`;
+    return { ok: true as const };
+  });
+
+export const clearDatabase = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  await sql`delete from notifications`;
+  await sql`delete from fundings`;
+  await sql`delete from investor_users`;
+  await sql`delete from applications`;
+  return { ok: true as const };
+});
+
+export const deleteFunding = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ id: string; status: string }>`select id, status from fundings where id = ${data.id}`;
+    if (!rows[0]) throw new Error("Investment not found.");
+    if (rows[0].status === "payment_approved") throw new Error("An active CD is removed only when the client is deleted.");
+    await sql`delete from notifications where related_id = ${data.id}`;
+    await sql`delete from fundings where id = ${data.id}`;
+    return { ok: true as const };
+  });
+
 export const signInAsClient = createServerFn({ method: "POST" })
   .validator((input: { id: string }) => input)
   .handler(async ({ data }) => {
@@ -306,8 +385,11 @@ export type SiteBrand = {
   cover: string | null;
   socialBanner: string | null;
   emailLogo: string | null;
+  footerLogo: string | null;
+  footerText: string;
   backupEmail: string;
   lastBackupAt: string;
+  publicDomain: string;
 };
 
 function assertShareImage(value: string | null) {
@@ -356,7 +438,7 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const rows = await sql<{ key: string; value: string }>`
-    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'backup_email', 'backup_at')
+    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain')
   `;
   const brand: SiteBrand = {
     logo: null,
@@ -366,17 +448,23 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     cover: null,
     socialBanner: null,
     emailLogo: null,
+    footerLogo: null,
+    footerText: "",
     backupEmail: "",
     lastBackupAt: "",
+    publicDomain: "",
   };
   for (const row of rows) {
     if (row.key === "logo" || row.key === "favicon" || row.key === "cover") brand[row.key] = row.value;
     if (row.key === "social_banner") brand.socialBanner = row.value;
     if (row.key === "email_logo") brand.emailLogo = row.value;
+    if (row.key === "footer_logo") brand.footerLogo = row.value;
+    if (row.key === "footer_text") brand.footerText = row.value;
     if (row.key === "backup_email") brand.backupEmail = row.value;
     if (row.key === "backup_at") brand.lastBackupAt = row.value;
     if (row.key === "company_name" && row.value.trim()) brand.companyName = row.value.trim();
     if (row.key === "cloudflare_code") brand.cloudflareCode = row.value;
+    if (row.key === "public_domain") brand.publicDomain = row.value;
   }
   return brand;
 });
@@ -386,19 +474,22 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     logo: assertImage(input.logo),
     favicon: assertImage(input.favicon),
     companyName: cleanCompanyName(input.companyName || DEFAULT_COMPANY_NAME),
-    cloudflareCode: cleanCloudflareCode(input.cloudflareCode || ""),
+    cloudflareCode: input.cloudflareCode || "",
     cover: assertShareImage(input.cover),
     socialBanner: assertShareImage(input.socialBanner),
     emailLogo: assertImage(input.emailLogo),
+    footerLogo: assertImage(input.footerLogo),
+    footerText: (input.footerText || "").slice(0, 800),
     backupEmail: cleanBackupEmail(input.backupEmail || ""),
     lastBackupAt: input.lastBackupAt || "",
+    publicDomain: cleanPublicDomain(input.publicDomain || ""),
   }))
   .handler(async ({ data }) => {
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    for (const key of ["logo", "favicon", "cover", "socialBanner", "emailLogo"] as const) {
-      const column = key === "socialBanner" ? "social_banner" : key === "emailLogo" ? "email_logo" : key;
+    for (const key of ["logo", "favicon", "cover", "socialBanner", "emailLogo", "footerLogo"] as const) {
+      const column = key === "socialBanner" ? "social_banner" : key === "emailLogo" ? "email_logo" : key === "footerLogo" ? "footer_logo" : key;
       const value = data[key];
       if (!value) {
         await sql`delete from site_settings where key = ${column}`;
@@ -414,11 +505,20 @@ export const setSiteBrand = createServerFn({ method: "POST" })
       insert into site_settings (key, value) values ('company_name', ${data.companyName})
       on conflict (key) do update set value = excluded.value
     `;
-    if (!data.cloudflareCode) {
+    const cloudflare = cleanCloudflareCode(data.cloudflareCode);
+    if (cloudflare === "") {
       await sql`delete from site_settings where key = 'cloudflare_code'`;
+    } else if (cloudflare) {
+      await sql`
+        insert into site_settings (key, value) values ('cloudflare_code', ${cloudflare})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    if (!data.footerText.trim()) {
+      await sql`delete from site_settings where key = 'footer_text'`;
     } else {
       await sql`
-        insert into site_settings (key, value) values ('cloudflare_code', ${data.cloudflareCode})
+        insert into site_settings (key, value) values ('footer_text', ${data.footerText.trim()})
         on conflict (key) do update set value = excluded.value
       `;
     }
@@ -427,6 +527,14 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     } else {
       await sql`
         insert into site_settings (key, value) values ('backup_email', ${data.backupEmail})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    if (!data.publicDomain) {
+      await sql`delete from site_settings where key = 'public_domain'`;
+    } else {
+      await sql`
+        insert into site_settings (key, value) values ('public_domain', ${data.publicDomain})
         on conflict (key) do update set value = excluded.value
       `;
     }
@@ -474,6 +582,29 @@ export const saveMailSetup = createServerFn({ method: "POST" })
     } else {
       await sql`
         insert into site_settings (key, value) values ('mail_from', ${mailFrom})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    const { mailSetupView } = await import("@/lib/mail.server");
+    return mailSetupView(sql);
+  });
+
+export const saveSmtpSetup = createServerFn({ method: "POST" })
+  .validator((input: { apiKey: string; clearKey: boolean }) => ({
+    apiKey: input.apiKey || "",
+    clearKey: Boolean(input.clearKey),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { cleanSmtpKey } = await import("@/lib/mail.server");
+    const apiKey = cleanSmtpKey(data.apiKey);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    if (data.clearKey) {
+      await sql`delete from site_settings where key = 'smtp2go_api_key'`;
+    } else if (apiKey) {
+      await sql`
+        insert into site_settings (key, value) values ('smtp2go_api_key', ${apiKey})
         on conflict (key) do update set value = excluded.value
       `;
     }
@@ -788,6 +919,8 @@ export type FundingPosition = {
   accountNumber: string;
   referenceNumber: string;
   paymentFileName: string;
+  promoApy: string;
+  finalApy: string;
   createdAt: string;
 };
 
@@ -797,9 +930,10 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
   if (!email) throw new Error("Sign in required.");
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
+  await ensureFundingExtras(sql);
   const { ensureDemoApplications } = await import("@/lib/seed-applications.server");
   await ensureDemoApplications(sql);
-  const rows = await sql<{ id: string; type_id: string; name: string; issuer: string; structure: string; currency: string; jurisdiction: string; coupon_type: string; minimum_investment: string; credit_rating: string; capital_protection: string; amount: string; frequency: string; term_label: string; status: FundingPosition["status"]; advisor_name: string | null; advisor_phone: string | null; signed: boolean; signer_name: string; signed_on: string | null; confirmed_on: string; deposit_code: string; deposit_number: string; account_number: string; reference_number: string; payment_file_name: string; created_at: string }>`
+  const rows = await sql<{ id: string; type_id: string; name: string; issuer: string; structure: string; currency: string; jurisdiction: string; coupon_type: string; minimum_investment: string; credit_rating: string; capital_protection: string; amount: string; frequency: string; term_label: string; status: FundingPosition["status"]; advisor_name: string | null; advisor_phone: string | null; signed: boolean; signer_name: string; signed_on: string | null; confirmed_on: string | null; deposit_code: string; deposit_number: string; account_number: string; reference_number: string; payment_file_name: string; promo_apy: string; final_apy: string; created_at: string }>`
     select f.id, f.type_id, t.name, t.issuer, t.structure, t.currency, t.jurisdiction, t.coupon_type,
            t.minimum_investment, t.credit_rating, t.capital_protection,
            f.amount, f.frequency, f.term_label, f.status,
@@ -807,9 +941,9 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
            (f.signed_at is not null) as signed,
            f.signer_name,
            to_char(f.signed_at at time zone 'UTC', 'YYYY-MM-DD') as signed_on,
-           to_char(coalesce(f.payment_uploaded_at, f.created_at) at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
+           to_char(f.payment_approved_at at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
            f.deposit_code, f.deposit_number, f.account_number, f.reference_number,
-           f.payment_file_name,
+           f.payment_file_name, f.promo_apy, f.final_apy,
            to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at
     from fundings f
     join investment_types t on t.id = f.type_id
@@ -838,12 +972,14 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
     signed: Boolean(row.signed),
     signerName: row.signer_name ?? "",
     signedOn: row.signed_on ?? "",
-    confirmedOn: row.confirmed_on,
+    confirmedOn: row.confirmed_on ?? "",
     depositCode: row.deposit_code ?? "",
     depositNumber: row.deposit_number ?? "",
     accountNumber: row.account_number ?? "",
     referenceNumber: row.reference_number ?? "",
     paymentFileName: row.payment_file_name ?? "",
+    promoApy: row.promo_apy ?? "",
+    finalApy: row.final_apy ?? "",
     createdAt: row.created_at,
   }));
 });
@@ -857,6 +993,7 @@ export const submitFunding = createServerFn({ method: "POST" })
     if (data.typeId !== "cd") throw new Error("Choose a certificate term.");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    await ensureFundingExtras(sql);
     const types = await sql<InvestmentRow>`select * from investment_types where id = 'cd'`;
     const type = types[0];
     if (!type) throw new Error("Certificates are not available.");
@@ -874,18 +1011,19 @@ export const submitFunding = createServerFn({ method: "POST" })
     const label = `${Number(term.months)}-month · ${term.apy} APY`;
     const { nextFundingCodes } = await import("@/lib/funding-codes.server");
     const codes = await nextFundingCodes(sql);
-    await sql`
-      insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number)
-      values (${id}, ${email}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"pending"}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber})
-    `;
     const offer = await loadPromo(sql);
     const rates = ratesFor(label, formatted, offer.tiers);
+    await sql`
+      insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy)
+      values (${id}, ${email}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"pending"}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber}, ${rates.promo}, ${rates.final})
+    `;
     await sendStep(sql, {
       step: "investment_submitted",
       clientEmail: email,
       clientName: await investorName(sql, email),
       detail: [`${label}`, formatted, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`].join("\n"),
       relatedId: id,
+      skipAdmin: true,
     });
     return { id };
   });
@@ -916,15 +1054,157 @@ export const cancelFunding = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export type Advisor = { id: string; name: string; phone: string; email: string };
+export type Advisor = { id: string; name: string; phone: string; email: string; mailbox: string };
 
-export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling };
+export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling; contactPhone: string; contactBy: string };
+
+export const sendLeadIntro = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; copy?: LeadCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 140),
+          headline: clip(input.copy.headline, 180),
+          welcome: clip(input.copy.welcome, 800),
+          certificate: clip(input.copy.certificate, 500),
+          offer: clip(input.copy.offer, 800),
+          protection: clip(input.copy.protection, 500),
+          ready: clip(input.copy.ready, 500),
+          thanks: clip(input.copy.thanks, 400),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { leadLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox from advisors where id = ${data.advisorId}`;
+    const advisor = advisors[0];
+    if (!advisor) throw new Error("Select an advisor.");
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
+    const types = await sql<{ minimum_investment: string; capital_protection: string }>`select minimum_investment, capital_protection from investment_types where id = 'cd'`;
+    const offer = await loadPromo(sql);
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain')`;
+    const logo = settings.find((row) => row.key === "email_logo")?.value || null;
+    const portalUrl = settings.find((row) => row.key === "public_domain")?.value || "";
+    const letter = leadLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      terms: terms.map((term) => ({ months: Number(term.months), apy: term.apy })),
+      offer,
+      advisor,
+      minimum: types[0]?.minimum_investment,
+      protection: types[0]?.capital_protection,
+      logo,
+      portalUrl,
+      copy: data.copy,
+    });
+    await sendStep(sql, {
+      step: "lead_intro",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      extraHtml: letter.html,
+      subject: data.copy?.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+    });
+    return { ok: true as const };
+  });
+
+export const sendLeadApplication = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; months: number; kind?: "custom" | "promo"; copy?: ApplicationCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    const months = Number(input.months);
+    const kind = input.kind === "promo" ? "promo" : "custom";
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    if (!Number.isFinite(months) || months <= 0) throw new Error("Choose a certificate term.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 140),
+          headline: clip(input.copy.headline, 180),
+          hope: clip(input.copy.hope, 240),
+          ready: clip(input.copy.ready, 800),
+          instruction: clip(input.copy.instruction, 400),
+          codeNote: clip(input.copy.codeNote, 400),
+          followUp: clip(input.copy.followUp, 800),
+          thanks: clip(input.copy.thanks, 400),
+          promoCode: clip(input.copy.promoCode, 40),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, months, kind, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { applicationLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox from advisors where id = ${data.advisorId}`;
+    const advisor = advisors[0];
+    if (!advisor) throw new Error("Select an advisor.");
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms where months = ${data.months} limit 1`;
+    if (!terms[0]) throw new Error("Choose a certificate term.");
+    const types = await sql<{ minimum_investment: string }>`select minimum_investment from investment_types where id = 'cd'`;
+    const offer = await loadPromo(sql);
+    const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
+    if (data.kind === "promo" && !promoMonths.has(data.months)) throw new Error("Choose a promotional term.");
+    if (data.kind === "custom" && promoMonths.has(data.months)) throw new Error("Choose a term that is not on promotion.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const kind = data.kind === "promo" ? "promo" : "custom";
+    const promoCode = kind === "promo" ? data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}` : data.copy?.promoCode || "";
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode, kind, advisor });
+    const letter = applicationLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      months: data.months,
+      apy: terms[0].apy,
+      offer,
+      advisor,
+      minimum: types[0]?.minimum_investment,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      link: inviteApplicationUrl(origin, token),
+      variant: kind,
+      copy: data.copy ? { ...data.copy, promoCode } : { subject: "", headline: "", hope: "", ready: "", instruction: "", codeNote: "", followUp: "", thanks: "", promoCode },
+    });
+    await sendStep(sql, {
+      step: kind === "promo" ? "lead_promo" : "lead_application",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+    });
+    return { ok: true as const };
+  });
 
 export const listAdvisors = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
-  return sql<Advisor>`select id, name, phone, email from advisors order by name`;
+  return sql<Advisor>`select id, name, phone, email, coalesce(mailbox, '') as mailbox from advisors order by name`;
 });
 
 export const saveAdvisor = createServerFn({ method: "POST" })
@@ -932,13 +1212,15 @@ export const saveAdvisor = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await requireAdmin();
     if (!data.name.trim()) throw new Error("Name is required.");
+    const { cleanMailFrom } = await import("@/lib/mail.server");
+    const mailbox = data.mailbox?.trim() ? cleanMailFrom(data.mailbox) : "";
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into advisors (id, name, phone, email)
-      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()})
-      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email
+      insert into advisors (id, name, phone, email, mailbox)
+      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()}, ${mailbox})
+      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email, mailbox = excluded.mailbox
     `;
     return { id };
   });
@@ -954,6 +1236,31 @@ export const deleteAdvisor = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+async function ensureFundingExtras(sql: Sql) {
+  await sql`alter table fundings add column if not exists promo_apy text not null default ''`;
+  await sql`alter table fundings add column if not exists final_apy text not null default ''`;
+  await sql`alter table fundings add column if not exists payment_approved_at timestamptz`;
+  await sql`
+    update fundings
+    set payment_approved_at = coalesce(payment_uploaded_at, created_at)
+    where status = 'payment_approved' and payment_approved_at is null
+  `;
+  const open = await sql<{ id: string; term_label: string; amount: string }>`
+    select id, term_label, amount from fundings where final_apy = ''
+  `;
+  if (open.length === 0) return;
+  const offer = await loadPromo(sql);
+  for (const row of open) {
+    const rates = ratesFor(row.term_label, row.amount, offer.tiers);
+    await sql`update fundings set promo_apy = ${rates.promo}, final_apy = ${rates.final} where id = ${row.id} and final_apy = ''`;
+  }
+}
+
+async function ensureContactColumns(sql: Sql) {
+  await sql`alter table fundings add column if not exists contact_phone text not null default ''`;
+  await sql`alter table fundings add column if not exists contact_by text not null default 'call'`;
+}
+
 async function ensureInvoiceBillingColumn(sql: Sql) {
   await sql`alter table fundings add column if not exists invoice_billing jsonb not null default '{}'::jsonb`;
 }
@@ -963,6 +1270,8 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   await ensureInvoiceBillingColumn(sql);
+  await ensureContactColumns(sql);
+  await ensureFundingExtras(sql);
   const { ensureDemoApplications } = await import("@/lib/seed-applications.server");
   await ensureDemoApplications(sql);
   const rows = await sql<{
@@ -988,13 +1297,17 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
     signed: boolean;
     signer_name: string;
     signed_on: string | null;
-    confirmed_on: string;
+    confirmed_on: string | null;
     deposit_code: string;
     deposit_number: string;
     account_number: string;
     reference_number: string;
     payment_file_name: string;
+    promo_apy: string;
+    final_apy: string;
     invoice_billing: unknown;
+    contact_phone: string;
+    contact_by: string;
     created_at: string;
   }>`
     select f.id, f.email, f.type_id, t.name, t.issuer, t.structure, t.currency, t.jurisdiction,
@@ -1004,9 +1317,9 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
            (f.signed_at is not null) as signed,
            f.signer_name,
            to_char(f.signed_at at time zone 'UTC', 'YYYY-MM-DD') as signed_on,
-           to_char(coalesce(f.payment_uploaded_at, f.created_at) at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
+           to_char(f.payment_approved_at at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
            f.deposit_code, f.deposit_number, f.account_number, f.reference_number,
-           f.payment_file_name, f.invoice_billing,
+           f.payment_file_name, f.promo_apy, f.final_apy, f.invoice_billing, f.contact_phone, f.contact_by,
            to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at
     from fundings f
     join investment_types t on t.id = f.type_id
@@ -1036,12 +1349,16 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
     signed: Boolean(row.signed),
     signerName: row.signer_name ?? "",
     signedOn: row.signed_on ?? "",
-    confirmedOn: row.confirmed_on,
+    confirmedOn: row.confirmed_on ?? "",
     depositCode: row.deposit_code ?? "",
     depositNumber: row.deposit_number ?? "",
     accountNumber: row.account_number ?? "",
     referenceNumber: row.reference_number ?? "",
     paymentFileName: row.payment_file_name ?? "",
+    promoApy: row.promo_apy ?? "",
+    finalApy: row.final_apy ?? "",
+    contactPhone: row.contact_phone ?? "",
+    contactBy: row.contact_by ?? "call",
     createdAt: row.created_at,
     billing: resolveInvoiceBilling(row.invoice_billing, row.signer_name || row.email, row.reference_number ?? ""),
   }));
@@ -1066,6 +1383,7 @@ export const updateFunding = createServerFn({ method: "POST" })
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    await ensureFundingExtras(sql);
     const taken = await sql<{ id: string }>`
       select id from fundings
       where id <> ${data.id}
@@ -1079,6 +1397,16 @@ export const updateFunding = createServerFn({ method: "POST" })
     `;
     if (taken[0]) throw new Error("That number is already used on another investment.");
     const current = await fundingDetail(sql, data.id);
+    if (!current) throw new Error("Investment not found.");
+    if (data.status !== current.status) {
+      const from = current.status;
+      const to = data.status;
+      const allowed =
+        ((from === "pending" || from === "approved_phone") && (to === "pending" || to === "approved_phone" || to === "cancelled"))
+        || (from === "instructions_sent" && to === "cancelled");
+      if (!allowed) throw new Error("Create the invoice on the Invoices tab. Confirm the payment there after the wire file is attached.");
+    }
+    const rates = current.amount === data.amount ? null : ratesFor(current.term_label, data.amount, (await loadPromo(sql)).tiers);
     await sql`
       update fundings
       set status = ${data.status},
@@ -1088,6 +1416,8 @@ export const updateFunding = createServerFn({ method: "POST" })
           account_number = ${data.accountNumber},
           reference_number = ${data.referenceNumber},
           amount = ${data.amount},
+          promo_apy = ${rates ? rates.promo : (current.promo_apy ?? "")},
+          final_apy = ${rates ? rates.final : (current.final_apy ?? "")},
           created_at = ${data.openedOn}::timestamp
       where id = ${data.id}
     `;
@@ -1167,7 +1497,7 @@ export const approvePayment = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     const rows = await sql<{ id: string }>`
-      update fundings set status = 'payment_approved'
+      update fundings set status = 'payment_approved', payment_approved_at = now()
       where id = ${data.id} and payment_file <> '' and status = 'instructions_sent'
       returning id
     `;
@@ -1185,14 +1515,46 @@ export const approvePayment = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const rejectPayment = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ id: string }>`
+      update fundings
+      set payment_file_name = '', payment_file = '', payment_uploaded_at = null
+      where id = ${data.id} and status = 'instructions_sent' and payment_file <> ''
+      returning id
+    `;
+    if (!rows[0]) throw new Error("There is no wire confirmation to reject.");
+    const detail = await fundingDetail(sql, data.id);
+    if (detail) {
+      await sendStep(sql, {
+        step: "payment_rejected",
+        clientEmail: detail.email,
+        clientName: await investorName(sql, detail.email),
+        detail: await detailText(sql, detail),
+        relatedId: data.id,
+      });
+    }
+    return { ok: true };
+  });
+
 export const signFunding = createServerFn({ method: "POST" })
-  .validator((input: { id: string; signature?: string }) => input)
+  .validator((input: { id: string; signature?: string; contactPhone?: string; contactBy?: string }) => ({
+    id: input.id,
+    signature: input.signature,
+    contactPhone: (input.contactPhone || "").trim().slice(0, 80),
+    contactBy: input.contactBy === "email" ? "email" : "call",
+  }))
   .handler(async ({ data }) => {
     const { getCookie } = await import("@tanstack/react-start/server");
     const email = getCookie("ah_investor");
     if (!email) throw new Error("Sign in required.");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    await ensureContactColumns(sql);
     const apps = await sql<{ id: string; applicant_name: string; payload: ApplicationPayload | string }>`
       select id, applicant_name, payload from applications
       where lower(email) = ${email.toLowerCase()}
@@ -1203,6 +1565,7 @@ export const signFunding = createServerFn({ method: "POST" })
     const drawn = data.signature?.startsWith("data:image/png;base64,") ? data.signature : "";
     const signature = drawn || payload?.signature || "";
     if (!signature.startsWith("data:image/png;base64,")) throw new Error("Draw your signature.");
+    if (data.contactBy === "call" && data.contactPhone.replace(/\D/g, "").length < 7) throw new Error("Enter the number to call.");
     if (drawn && apps[0]) {
       const next = { ...(payload ?? {}), signature: drawn };
       await sql`update applications set payload = ${JSON.stringify(next)}::jsonb where id = ${apps[0].id}`;
@@ -1210,17 +1573,19 @@ export const signFunding = createServerFn({ method: "POST" })
     const signerName = apps[0]?.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || email;
     const rows = await sql<{ id: string }>`
       update fundings
-      set signer_name = ${signerName}, signature = ${signature}, signed_at = now()
+      set signer_name = ${signerName}, signature = ${signature}, signed_at = now(),
+          contact_phone = ${data.contactPhone}, contact_by = ${data.contactBy}
       where id = ${data.id} and lower(email) = ${email.toLowerCase()} and status in ('pending', 'approved_phone', 'instructions_sent') and signed_at is null
       returning id
     `;
     if (!rows[0]) throw new Error("These terms cannot be accepted.");
     const detail = await fundingDetail(sql, data.id);
+    const contact = data.contactBy === "email" ? `Do not call. Use email ${email}` : `Call ${data.contactPhone}`;
     await sendStep(sql, {
       step: "terms_accepted",
       clientEmail: email,
       clientName: signerName,
-      detail: await detailText(sql, detail),
+      detail: [await detailText(sql, detail), contact].filter(Boolean).join("\n"),
       relatedId: data.id,
     });
     return { ok: true };
@@ -1234,6 +1599,7 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
     if (!email) throw new Error("Sign in required.");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    await ensureFundingExtras(sql);
     const rows = await sql<{
       id: string;
       status: string;
@@ -1245,7 +1611,9 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
       signature: string;
       signed_on: string | null;
       opened_on: string;
-      confirmed_on: string;
+      confirmed_on: string | null;
+      promo_apy: string;
+      final_apy: string;
       issuer: string;
       structure: string;
       currency: string;
@@ -1266,7 +1634,8 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
       select f.id, f.status, f.email, f.amount, f.frequency, f.term_label, f.signer_name, f.signature,
              to_char(f.signed_at at time zone 'UTC', 'YYYY-MM-DD') as signed_on,
              to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as opened_on,
-             to_char(coalesce(f.payment_uploaded_at, f.created_at) at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
+             to_char(f.payment_approved_at at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
+             f.promo_apy, f.final_apy,
              t.issuer, t.structure, t.currency, t.jurisdiction, t.coupon_type,
              t.minimum_investment, t.credit_rating, t.capital_protection,
              a.name as advisor_name, a.phone as advisor_phone,
@@ -1287,7 +1656,7 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
     if (!row) throw new Error("Investment not found.");
     const { buildConfirmationPdf, buildInvestmentPdf } = await import("@/lib/investment-pdf.server");
     const promo = await loadPromo(sql);
-    const rates = ratesFor(row.term_label, row.amount, promo.tiers);
+    const rates = row.final_apy ? { promo: row.promo_apy || "—", final: row.final_apy } : ratesFor(row.term_label, row.amount, promo.tiers);
     const months = Number(row.term_label.match(/(\d+)-month/)?.[1] ?? 0);
     const payload = row.payload ? (typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload) : null;
     const clientName = row.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || row.signer_name || row.email;
@@ -1329,7 +1698,7 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
             address,
             issueDate: usDate(row.opened_on),
             maturityDate: plusMonths(row.opened_on, months),
-            confirmationDate: usDate(row.confirmed_on),
+            confirmationDate: usDate(row.confirmed_on || row.opened_on),
             termMonths: months,
             depositCode: row.deposit_code,
             depositNumber: row.deposit_number,
@@ -1355,8 +1724,8 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
         frequency: row.frequency,
         promoApy: rates.promo,
         finalApy: rates.final,
-        signerName: row.signer_name,
-        signedOn: row.signed_on ?? "",
+        signerName: row.signer_name || (png ? clientName : ""),
+        signedOn: row.signed_on || (png ? "Signed on the account application" : ""),
         email: row.email,
       },
     };
@@ -1510,6 +1879,8 @@ type FundingMail = {
   reference_number: string | null;
   advisor_name: string | null;
   advisor_phone: string | null;
+  promo_apy: string | null;
+  final_apy: string | null;
 };
 
 async function readCompanyName(sql: Sql) {
@@ -1531,6 +1902,7 @@ async function fundingDetail(sql: Sql, id: string) {
   const rows = await sql<FundingMail>`
     select f.email, f.term_label, f.amount, f.frequency, f.status,
            f.deposit_code, f.account_number, f.reference_number,
+           f.promo_apy, f.final_apy,
            a.name as advisor_name, a.phone as advisor_phone
     from fundings f
     left join advisors a on a.id = f.advisor_id
@@ -1541,8 +1913,7 @@ async function fundingDetail(sql: Sql, id: string) {
 
 async function detailText(sql: Sql, row: FundingMail | null) {
   if (!row) return "";
-  const offer = await loadPromo(sql);
-  const rates = ratesFor(row.term_label, row.amount, offer.tiers);
+  const rates = row.final_apy ? { promo: row.promo_apy || "—", final: row.final_apy } : ratesFor(row.term_label, row.amount, (await loadPromo(sql)).tiers);
   const status = STATUS_LABEL[row.status] || row.status;
   return [
     row.term_label,
@@ -1560,7 +1931,7 @@ async function detailText(sql: Sql, row: FundingMail | null) {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: "Pending",
+  pending: "Pending call/email",
   approved_phone: "Approved by phone",
   instructions_sent: "Invoice generated",
   payment_approved: "Active",
@@ -1575,7 +1946,60 @@ function fundingStep(status: string): MailStep | null {
   return null;
 }
 
-async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; relatedId?: string }) {
+function applicationDeskDetail(payload: ApplicationPayload) {
+  const line = (label: string, value: string) => `${label}: ${value.trim() || "—"}`;
+  return [
+    line("Account", payload.accountType),
+    line("Name", [payload.firstName, payload.middleName, payload.surname].filter(Boolean).join(" ")),
+    line("Email", payload.email),
+    line("Phone", `${payload.phoneCountry} ${payload.phone}`),
+    line("Date of birth", [payload.dobDay, payload.dobMonth, payload.dobYear].filter(Boolean).join(" ")),
+    line("Nationality", payload.nationality),
+    line("Residence", payload.residence),
+    line("Occupation", payload.occupation),
+    line("Address", [payload.street, payload.apt, payload.city, payload.region, payload.postal, payload.country].filter(Boolean).join(", ")),
+    line("Tax residence", payload.taxResidence),
+    line("Tax ID", payload.taxId),
+    line("Source of wealth", payload.sourceOfWealth),
+    line("Source of funds", payload.sourceOfFunds),
+    line("Purpose", payload.investmentPurpose),
+    line("Net worth", payload.netWorth),
+    line("Preferred amount", payload.preferredAmount || "—"),
+    line("Preferred term", payload.preferredTerm ? `${payload.preferredTerm}-month` : "—"),
+    line("Promotional code", payload.promoCode || "—"),
+    line("Identity document", `${payload.idType}${payload.idFileName ? ` · ${payload.idFileName}` : " · not attached"}`),
+    line("Address document", `${payload.addressDocType}${payload.addressFileName ? ` · ${payload.addressFileName}` : " · not attached"}`),
+    line("Bank", payload.bankName),
+    line("Account holder", payload.accountHolder),
+    line("Bank address", [payload.bankStreet, payload.bankLine2, payload.bankCity, payload.bankState, payload.bankZip].filter(Boolean).join(", ")),
+    line("Routing number", payload.routingNumber),
+    line("Account number", payload.accountNumber),
+    line("Information is accurate", payload.d1 ? "Yes" : "No"),
+    line("Beneficial owner", payload.d2 ? "Yes" : "No"),
+    line("Portfolio stays unavailable until approval", payload.d3 ? "Yes" : "No"),
+    line("Agrees to account terms", payload.d4 ? "Yes" : "No"),
+    line("Signature", payload.signature.startsWith("data:image/") ? "Attached" : "Not attached"),
+  ].join("\n");
+}
+
+function applicationFiles(payload: ApplicationPayload) {
+  return [
+    dataFile(payload.idFileName ? `identity-${payload.idFileName}` : "identity-document", payload.idFile),
+    dataFile(payload.addressFileName ? `address-${payload.addressFileName}` : "address-document", payload.addressFile),
+    dataFile("signature.png", payload.signature),
+  ].filter((file): file is { filename: string; content: string } => Boolean(file));
+}
+
+function dataFile(name: string, value: string) {
+  const match = value.match(/^data:[^;]+;base64,([a-zA-Z0-9+/=\s]+)$/);
+  if (!match) return null;
+  const content = match[1].replace(/\s/g, "");
+  if (!content) return null;
+  const filename = name.trim() || "document";
+  return { filename, content };
+}
+
+async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string }) {
   try {
     const { notifyStep } = await import("@/lib/mail.server");
     await notifyStep(sql, input);
@@ -1594,6 +2018,8 @@ export type NotificationRow = {
   body: string;
   html: string;
   delivery: string;
+  resendId: string;
+  mailStatus: string;
 };
 
 export const listNotifications = createServerFn({ method: "GET" }).handler(async () => {
@@ -1612,9 +2038,11 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
     body: string;
     html: string;
     delivery: string;
+    resend_id: string;
+    mail_status: string;
   }>`
     select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at,
-           audience, recipient, step, subject, body, html, delivery
+           audience, recipient, step, subject, body, html, delivery, resend_id, mail_status
     from notifications
     order by created_at desc
     limit 200
@@ -1629,7 +2057,16 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
     body: row.body,
     html: row.html ?? "",
     delivery: row.delivery,
+    resendId: row.resend_id || "",
+    mailStatus: row.mail_status || "",
   }));
+});
+
+export const syncMailStatuses = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { syncResendStatuses } = await import("@/lib/mail.server");
+  return syncResendStatuses(await getSql());
 });
 
 export const listMyNotifications = createServerFn({ method: "GET" }).handler(async () => {

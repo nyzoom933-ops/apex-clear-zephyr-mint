@@ -1,16 +1,31 @@
-import { n as __exportAll } from "../_runtime.mjs";
-import { E as fromJSON, F as resolveManifestCssLink, G as isRedirect, H as isDangerousProtocol, I as waitForReason, J as isNotFound, L as _getRenderedMatches, M as getScriptPreloadAttrs, N as getStylesheetHref, O as toCrossJSONAsync, P as resolveManifestAssetLink, R as executeRewriteInput, S as require_jsx_runtime, U as isPromise, Y as require_react, a as isSsrResponse, c as stripSsrResponseBody, i as disposeSsrResponse, k as toCrossJSONStream, n as bindSsrResponseToRequest, o as normalizeSsrResponse, p as RouterProvider, q as rootRouteId, r as defineHandlerCallback, s as replaceSsrResponse, t as renderRouterToStream, z as invariant } from "../_libs/@tanstack/react-router+[...].mjs";
+import { r as __exportAll$1 } from "../_runtime.mjs";
+import { E as fromJSON, F as resolveManifestCssLink, G as isRedirect, H as isDangerousProtocol, I as waitForReason, J as rootRouteId, K as parseRedirect, L as _getRenderedMatches, M as getScriptPreloadAttrs, N as getStylesheetHref, O as toCrossJSONAsync, P as resolveManifestAssetLink, R as executeRewriteInput, S as require_jsx_runtime, U as isPromise, X as require_react, Y as isNotFound, a as isSsrResponse, c as stripSsrResponseBody, i as disposeSsrResponse, k as toCrossJSONStream, n as bindSsrResponseToRequest, o as normalizeSsrResponse, p as RouterProvider, r as defineHandlerCallback, s as replaceSsrResponse, t as renderRouterToStream, z as invariant } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as createServerHistory } from "../_libs/tanstack__history.mjs";
 import { a as defaultSerovalDeserializerPlugins, i as createRawStreamRPCPlugin, n as attachRouterServerSsrUtils, o as makeSerovalPlugin, r as getNormalizedURL, s as createSerializationAdapter, t as mergeHeaders } from "../_libs/@tanstack/router-core+[...].mjs";
-import { n as toResponse, t as H3Event } from "../_libs/h3-v2+rou3.mjs";
+import { i as toResponse, n as parseCookies, r as setCookie, t as H3Event } from "../_libs/h3-v2+rou3.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 //#region node_modules/.nitro/vite/services/ssr/index.js
-var ssr_exports = /* @__PURE__ */ __exportAll({
+var ssr_exports = /* @__PURE__ */ __exportAll$1({
+	a: () => __exportAll,
 	createServerEntry: () => createServerEntry,
-	default: () => server_default
+	default: () => server_default,
+	i: () => getServerFnById,
+	n: () => createServerFn,
+	r: () => TSS_SERVER_FUNCTION,
+	t: () => server_exports
 });
 require_react();
 var import_jsx_runtime = require_jsx_runtime();
+var __defProp = Object.defineProperty;
+var __exportAll = (all, no_symbols) => {
+	let target = {};
+	for (var name in all) __defProp(target, name, {
+		get: all[name],
+		enumerable: true
+	});
+	if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
+	return target;
+};
 function StartServer(props) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RouterProvider, { router: props.router });
 }
@@ -86,6 +101,45 @@ function getH3Event() {
 	if (!event) throw new Error(`No StartEvent found in AsyncLocalStorage. Make sure you are using the function within the server runtime.`);
 	return event.h3Event;
 }
+function getRequest() {
+	return getH3Event().req;
+}
+/**
+* Parse the request to get HTTP Cookie header string and return an object of all cookie name-value pairs.
+* @returns Object of cookie name-value pairs
+* ```ts
+* const cookies = getCookies()
+* ```
+*/
+function getCookies() {
+	const cookies = parseCookies(getH3Event());
+	const definedCookies = Object.create(null);
+	for (const [name, value] of Object.entries(cookies)) if (value !== void 0) definedCookies[name] = value;
+	return definedCookies;
+}
+/**
+* Get a cookie value by name.
+* @param name Name of the cookie to get
+* @returns {*} Value of the cookie (String or undefined)
+* ```ts
+* const authorization = getCookie('Authorization')
+* ```
+*/
+function getCookie(name) {
+	return getCookies()[name];
+}
+/**
+* Set a cookie value by name.
+* @param name Name of the cookie to set
+* @param value Value of the cookie to set
+* @param options {CookieSerializeOptions} Options for serializing the cookie
+* ```ts
+* setCookie('Authorization', '1234567')
+* ```
+*/
+function setCookie$1(name, value, options) {
+	setCookie(getH3Event(), name, value, options);
+}
 function getResponse() {
 	return getH3Event().res;
 }
@@ -100,7 +154,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-JtK9F9VK.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-D9jWwMQ0.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -119,7 +173,196 @@ async function getStartManifest(matchedRoutes) {
 		routes: manifestRoutes
 	};
 }
-var manifest = {};
+var manifest = {
+	"0188318a2c47fa577e85feac06e6f5e249d0b6c7e53b943032e8bf9cbd432ce9": {
+		functionName: "getInvestmentTypes_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"0a4e4b3c4401fa3b3502245b8864092fe1dfbf357dc425ac9e606cc03de423a5": {
+		functionName: "listAdvisors_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"15bb4887dde39d3cd45f0ac0f1099831bb1e30bc708e9002486e6ac16d71333a": {
+		functionName: "investorLogin_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"15dca57f795e6ae56b7ab042755d2eeb7fb1aee841f555b937707d59a5fcbb88": {
+		functionName: "markMyNotificationsRead_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"19f1231488dc5a012a40246146c49a527b94c53d3a06a4387cc28d0d8f08e030": {
+		functionName: "getMailSetup_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"1b0a37303ffbd8eb9e7d9ffb7033bf9c04a2d7776b7ca0438dc0376b0f8319cb": {
+		functionName: "saveMailSetup_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"1b59404f5dd7ebf22a4802040e66ad34f86c454a3111963b9acb931d6cb5f54e": {
+		functionName: "listApplications_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"1d916ce53ed1636f14f29e607d03cd01c89f6e35b988da74a2dc466789b5ee25": {
+		functionName: "getCdTerms_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"219438d22bbc21708bd4abc3bd7eddea3cd96ec5b11376a18ba34dd62bba657c": {
+		functionName: "downloadInvoicePdf_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"238daabfda5c31e82d6a467078e892b727c983c5c9d29aa504fae0102a20f263": {
+		functionName: "investorLogout_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"28f25c5a8580090bdf548d7bf75d08544cfe13fdbdcb7b4bd24ed2098d8f3703": {
+		functionName: "getPromo_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"2e2eafc3c130800cd476299ebeff265ed2f9d9548eb67737a5d554f9e06a20e8": {
+		functionName: "rejectPayment_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"2f83f4b9946b9da9bedd5b26404c83efb0b680df2d872ad2ea3fa0ce99fcd863": {
+		functionName: "updateFunding_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"343321a975f0f5b1926cf4a4b702a28553cc355cbf8a5f1ca79197a7593bb8cf": {
+		functionName: "clearDatabase_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"36d26e5dce43d3d3a77fb6d34d8199bf57c9136b23385e8382c2cf06b4630848": {
+		functionName: "signFunding_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"371eaa94c7375a34014cafb3e1a903c29a0227fb832652248e5dfd387c9b158c": {
+		functionName: "getMyFundings_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"46b1c2c15b64cae3a5f34e1f1853ec2283ddfdfe186c71434db5870369340362": {
+		functionName: "setSiteBrand_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"48d5a6ea211957ef115da61e253a9c39f785ebf602da2d8a44e4178e61018144": {
+		functionName: "getSiteBrand_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"4e0ee8356c5ccf6f9221df4d98ab36de6079de15b47569f344278a4287a5594b": {
+		functionName: "deleteFunding_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"5edd854841c5220bfdf7cd162ccff167680add27784ef7b26a1accec376751da": {
+		functionName: "saveInvestmentType_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"65a7a10b5c938741219fad35d71a6925b4094c3763aee671945a0ed540ab4900": {
+		functionName: "saveInvoiceBilling_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"670101ceb9a8c4921096966f8043a6883d6040bc7c4869c99684ec1805a93a9d": {
+		functionName: "getPaymentFile_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"6d04e2b2142ca7fdd455d85b986e7dc11f966e7df5a2ab55be070d017bdfb090": {
+		functionName: "runDatabaseBackup_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"6e1efb263437baa4a649ac0395fdbd6290df839cd5f5e0afeb5b6fd9c9ff443f": {
+		functionName: "createDeskLogin_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"7123a0f1827ab182e080b8ee5731e8656bf3eda9f728947ac3649ee265ee4bda": {
+		functionName: "deleteApplication_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"765c7c71751ca870f5f7258b7f800a304c6a7ca77be480b2eeb48d9bf4356d6d": {
+		functionName: "saveDeskLogin_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"77d03951a209f31c50c597255d022704b13de997f740c7fb04bbbdb2cc02d8ee": {
+		functionName: "downloadInvestmentPdf_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"7a25bb9444ff54d726f867aa071c78571c98f0852fce3af75bf6e281aaee9022": {
+		functionName: "cancelFunding_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"7b50bd6e596679fe8759352efff6da788bf65b5c6f4458e7d4e70bcd96c23585": {
+		functionName: "listNotifications_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"7dfd9b8a9038d0c6d84532cfdd58c0318d9fd8830fd7a88e28882e95dfaf5b9a": {
+		functionName: "uploadPaymentConfirmation_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"8822e6aa5afc9ef8a0275f464bef174b9273dd274d0ef1ea1c5de2610cd2b22d": {
+		functionName: "getInvestorPortal_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"89f029f4fc21ed092423cd54f44fb61078423691288a3a89663a6e0973cd86ea": {
+		functionName: "adminLogin_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"8b04ddee08d00402f35af241b8797321407d2743498150ff1167939f742f711c": {
+		functionName: "listMyNotifications_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"8f2bb3bdd3e9a32bf9d20870c5b92b09afddb820fe7293f95701022b9848bc75": {
+		functionName: "submitApplication_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"adcbca43e56dbbae11c96adf856861fa5bc00e25f0f7449583c4ec9b411e38d6": {
+		functionName: "deleteAdvisor_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"b778199f0067dc3af0626a35537d9640eabb3a694e5f097e062cd440c74c2c03": {
+		functionName: "adminLogout_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"bd6078a16a27d37284969ff6fdbb85e565608b225b79da5f7e5edee1af8cc404": {
+		functionName: "approveInvoice_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"be572942eeb298238365c54abae7a3b9a7377c3f9af2e62338f4a18ac7ca30c6": {
+		functionName: "approvePayment_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"c22e4f32fb4962874ec7588e1e0ddec4eddb22eaa12f9f6151d706503efd2f50": {
+		functionName: "saveAdvisor_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"c50efd40f7ae5cda51cd811e78d0e181402c25d11e95d42ed97f5803896f8074": {
+		functionName: "signInAsClient_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"cd1fbe67fd52ea928df985cb29f4a0ad9e2a1ba0b044e5e598e5be1cbb04b220": {
+		functionName: "saveCdTerms_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"d1ae43cae6d0be2d1f69d39a6ad79c690664eebd84c9b6bfd72617c644ea6513": {
+		functionName: "getInvestorSession_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"dd2a8c89ce3736258bb458077f853a2565c444665a699be34aede0a82db3cbaf": {
+		functionName: "setApplicationStatus_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"e79aab6a9c5d4179f7a176a6a650c1161fe7e7439ce653697dcfba8240b8006e": {
+		functionName: "getAdminSession_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"e7d636636dc82c29558eb161011e78a0c993c313f396b7945fbd947e74255a10": {
+		functionName: "submitFunding_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"fcde75496a4a883be99631cbde15fcf5e2c6609cc6764c5351fe6366e3922405": {
+		functionName: "listFundings_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	},
+	"fe12b8e84d6c20adda97886a656f77d13598a1a522761d051162002f72576797": {
+		functionName: "savePromo_createServerFn_handler",
+		importer: () => import("./admin.functions-BKIN3O9A.mjs")
+	}
+};
 async function getServerFnById(id, access) {
 	const serverFnInfo = manifest[id];
 	if (!serverFnInfo) throw new Error("Server function info not found for " + id);
@@ -131,6 +374,7 @@ async function getServerFnById(id, access) {
 }
 var TSS_FORMDATA_CONTEXT = "__TSS_CONTEXT";
 var TSS_SERVER_FUNCTION = Symbol.for("TSS_SERVER_FUNCTION");
+var TSS_SERVER_FUNCTION_FACTORY = Symbol.for("TSS_SERVER_FUNCTION_FACTORY");
 var X_TSS_SERIALIZED = "x-tss-serialized";
 var X_TSS_RAW_RESPONSE = "x-tss-raw";
 /** Content-Type for multiplexed framed responses (RawStream support) */
@@ -380,6 +624,152 @@ function createNullProtoObject(source) {
 	for (const key of Object.keys(source)) if (isSafeKey(key)) obj[key] = source[key];
 	return obj;
 }
+var getStartContextServerOnly = getStartContext;
+var createServerFn = (options, __opts) => {
+	const resolvedOptions = __opts || options || {};
+	if (typeof resolvedOptions.method === "undefined") resolvedOptions.method = "GET";
+	const setValidator = (validator) => {
+		return createServerFn(void 0, {
+			...resolvedOptions,
+			validator,
+			inputValidator: validator
+		});
+	};
+	const res = {
+		options: resolvedOptions,
+		middleware: (middleware) => {
+			const newMiddleware = [...resolvedOptions.middleware || []];
+			middleware.forEach((item) => {
+				if (TSS_SERVER_FUNCTION_FACTORY in item) {
+					if (item.options.middleware) newMiddleware.push(...item.options.middleware);
+				} else newMiddleware.push(item);
+			});
+			const res = createServerFn(void 0, {
+				...resolvedOptions,
+				middleware: newMiddleware
+			});
+			res[TSS_SERVER_FUNCTION_FACTORY] = true;
+			return res;
+		},
+		validator: setValidator,
+		inputValidator: setValidator,
+		handler: (...args) => {
+			const [extractedFn, serverFn] = args;
+			const newOptions = {
+				...resolvedOptions,
+				extractedFn,
+				serverFn
+			};
+			const resolvedMiddleware = [...newOptions.middleware || [], serverFnBaseToMiddleware(newOptions)];
+			extractedFn.method = resolvedOptions.method;
+			return Object.assign(async (opts) => {
+				const result = await executeMiddleware$1(resolvedMiddleware, "client", {
+					...extractedFn,
+					...newOptions,
+					data: opts?.data,
+					headers: opts?.headers,
+					signal: opts?.signal,
+					fetch: opts?.fetch,
+					context: createNullProtoObject()
+				});
+				const redirect = parseRedirect(result.error);
+				if (redirect) throw redirect;
+				if (result.error) throw result.error;
+				return result.result;
+			}, {
+				...extractedFn,
+				method: resolvedOptions.method,
+				__executeServer: async (opts) => {
+					const startContext = getStartContextServerOnly();
+					const serverContextAfterGlobalMiddlewares = startContext.contextAfterGlobalMiddlewares;
+					return await executeMiddleware$1(resolvedMiddleware, "server", {
+						...extractedFn,
+						data: opts.data,
+						method: opts.method ?? resolvedOptions.method,
+						serverFnMeta: extractedFn.serverFnMeta,
+						context: safeObjectMerge(opts.context, serverContextAfterGlobalMiddlewares),
+						request: startContext.request
+					}).then((d) => ({
+						result: d.result,
+						error: d.error,
+						context: d.sendContext
+					}));
+				}
+			});
+		}
+	};
+	const fun = (options) => {
+		return createServerFn(void 0, {
+			...resolvedOptions,
+			...options
+		});
+	};
+	return Object.assign(fun, res);
+};
+async function executeMiddleware$1(middlewares, env, opts) {
+	let flattenedMiddlewares = flattenMiddlewares([...getStartOptions()?.functionMiddleware || [], ...middlewares]);
+	if (env === "server") {
+		const startContext = getStartContextServerOnly({ throwIfNotFound: false });
+		if (startContext?.executedRequestMiddlewares) flattenedMiddlewares = flattenedMiddlewares.filter((m) => !startContext.executedRequestMiddlewares.has(m));
+	}
+	const callNextMiddleware = async (ctx) => {
+		const nextMiddleware = flattenedMiddlewares.shift();
+		if (!nextMiddleware) return ctx;
+		try {
+			let validator = "validator" in nextMiddleware.options ? nextMiddleware.options.validator : void 0;
+			if (!validator && "inputValidator" in nextMiddleware.options) validator = nextMiddleware.options.inputValidator;
+			if (validator && env === "server") ctx.data = await execValidator(validator, ctx.data);
+			let middlewareFn = void 0;
+			if (env === "client") {
+				if ("client" in nextMiddleware.options) middlewareFn = nextMiddleware.options.client;
+			} else if ("server" in nextMiddleware.options) middlewareFn = nextMiddleware.options.server;
+			if (middlewareFn) {
+				const userNext = async (userCtx = {}) => {
+					const result = await callNextMiddleware({
+						...ctx,
+						...userCtx,
+						context: safeObjectMerge(ctx.context, userCtx.context),
+						sendContext: safeObjectMerge(ctx.sendContext, userCtx.sendContext),
+						headers: mergeHeaders(ctx.headers, userCtx.headers),
+						_callSiteFetch: ctx._callSiteFetch,
+						fetch: ctx._callSiteFetch ?? userCtx.fetch ?? ctx.fetch,
+						result: userCtx.result !== void 0 ? userCtx.result : userCtx instanceof Response ? userCtx : ctx.result,
+						error: userCtx.error ?? ctx.error
+					});
+					if (result.error) throw result.error;
+					return result;
+				};
+				const result = await middlewareFn({
+					...ctx,
+					next: userNext
+				});
+				if (isRedirect(result)) return {
+					...ctx,
+					error: result
+				};
+				if (result instanceof Response) return {
+					...ctx,
+					result
+				};
+				if (!result) throw new Error("User middleware returned undefined. You must call next() or return a result in your middlewares.");
+				return result;
+			}
+			return callNextMiddleware(ctx);
+		} catch (error) {
+			return {
+				...ctx,
+				error
+			};
+		}
+	};
+	return callNextMiddleware({
+		...opts,
+		headers: opts.headers || {},
+		sendContext: opts.sendContext || {},
+		context: opts.context || createNullProtoObject(),
+		_callSiteFetch: opts.fetch
+	});
+}
 function flattenMiddlewares(middlewares, maxDepth = 100) {
 	const seen = /* @__PURE__ */ new Set();
 	const flattened = [];
@@ -395,6 +785,40 @@ function flattenMiddlewares(middlewares, maxDepth = 100) {
 	};
 	recurse(middlewares, 0);
 	return flattened;
+}
+async function execValidator(validator, input) {
+	if (validator == null) return {};
+	if ("~standard" in validator) {
+		const result = await validator["~standard"].validate(input);
+		if (result.issues) throw new Error(JSON.stringify(result.issues, void 0, 2));
+		return result.value;
+	}
+	if ("parse" in validator) return validator.parse(input);
+	if (typeof validator === "function") return validator(input);
+	throw new Error("Invalid validator type!");
+}
+function serverFnBaseToMiddleware(options) {
+	return {
+		"~types": void 0,
+		options: {
+			inputValidator: options.validator ?? options.inputValidator,
+			client: async ({ next, sendContext, fetch, ...ctx }) => {
+				const payload = {
+					...ctx,
+					context: sendContext,
+					fetch
+				};
+				return next(await options.extractedFn?.(payload));
+			},
+			server: async ({ next, ...ctx }) => {
+				const result = await options.serverFn?.(ctx);
+				return next({
+					...ctx,
+					result
+				});
+			}
+		}
+	};
 }
 var createMiddleware = (options, __opts) => {
 	const resolvedOptions = {
@@ -1341,7 +1765,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-CTr_LyGe.mjs").then((n) => n.t),
+		import("./router-B75_K_o9.mjs").then((n) => n.t),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);
@@ -1798,6 +2222,11 @@ async function handleServerRoutes({ getRouter, request, url, executeRouter, cont
 		handlerType: "router"
 	}, request.signal, terminalNext));
 }
+var server_exports = /* @__PURE__ */ __exportAll({
+	getCookie: () => getCookie,
+	getRequest: () => getRequest,
+	setCookie: () => setCookie$1
+});
 var fetch = createStartHandler(defaultStreamHandler);
 function createServerEntry(entry) {
 	return { async fetch(...args) {
@@ -1806,4 +2235,4 @@ function createServerEntry(entry) {
 }
 var server_default = createServerEntry({ fetch });
 //#endregion
-export { createServerEntry, server_default as default, ssr_exports as t };
+export { __exportAll as a, createServerEntry, server_default as default, getServerFnById as i, createServerFn as n, ssr_exports as o, TSS_SERVER_FUNCTION as r, server_exports as t };

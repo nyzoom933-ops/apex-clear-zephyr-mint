@@ -1,11 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
+import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, FileUp, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { headerActionClass, SiteHeader } from "@/components/site-header";
+import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
 import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
+import { DEFAULT_COMPANY_NAME } from "@/lib/company";
 import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, promoMonths, type PromoOffer } from "@/lib/promo";
 
 export const Route = createFileRoute("/portal")({
@@ -53,7 +54,7 @@ function PortalPage() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader
         eyebrow="Investor portal"
         action={
@@ -70,13 +71,13 @@ function PortalPage() {
           </div>
         }
       />
-      <main className="mx-auto max-w-6xl px-4 py-8">
-        {!account ? (
+      {!account ? (
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
           <p className="text-sm text-fg">Opening your account…</p>
-        ) : (
-          <PortalBody account={account} />
-        )}
-      </main>
+        </main>
+      ) : (
+        <PortalBody account={account} />
+      )}
     </div>
   );
 }
@@ -198,43 +199,98 @@ function PortalBody({ account }: { account: PortalAccount }) {
 
   return (
     <PromoContext.Provider value={offer}>
-      <PortalMenu tab={tab} onChange={setTab} />
-      {notice ? <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">{notice}</p> : null}
-      <div key={tab} className="step-enter">
-      {tab === "dashboard" ? (
-        <Dashboard
-          account={account}
-          holdings={holdings}
-          pipeline={pipeline}
-          onAdd={() => setTab("fund")}
-          onActive={() => setTab("active")}
-          onView={() => setTab("investments")}
-        />
-      ) : null}
-      {tab === "active" ? <ActiveCds positions={holdings} waiting={pipeline.length} account={account} onAdd={() => setTab("fund")} /> : null}
-      {tab === "investments" ? <InvestmentList positions={pipeline} signature={account.payload.signature} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
-      {tab === "fund" ? (
-        <FundingPanel
-          onSubmitted={() => {
-            setNotice("Investment submitted. Accept the terms on the investment to continue.");
-            setTab("investments");
-            void refresh();
-          }}
-        />
-      ) : null}
-      {tab === "manage" ? <ManageInvestments positions={positions} onAdd={() => setTab("fund")} onChanged={() => void refresh()} /> : null}
+      <div className="flex flex-1 flex-col">
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+          <PortalMenu tab={tab} onChange={setTab} />
+          {notice ? <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">{notice}</p> : null}
+          <CelebrationBanners holdings={holdings} onActive={() => setTab("active")} />
+          <div key={tab} className="step-enter">
+          {tab === "dashboard" ? (
+            <Dashboard
+              account={account}
+              holdings={holdings}
+              pipeline={pipeline}
+              onAdd={() => setTab("fund")}
+              onActive={() => setTab("active")}
+              onView={() => setTab("investments")}
+            />
+          ) : null}
+          {tab === "active" ? <ActiveCds positions={holdings} waiting={pipeline.length} account={account} onAdd={() => setTab("fund")} /> : null}
+          {tab === "investments" ? <InvestmentList positions={pipeline} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
+          {tab === "fund" ? (
+            <FundingPanel
+              preferredTerm={account.payload.preferredTerm ?? ""}
+              preferredAmount={account.payload.preferredAmount ?? ""}
+              onSubmitted={() => {
+                setNotice("Investment submitted. Accept the terms on the investment to continue.");
+                setTab("investments");
+                void refresh();
+              }}
+            />
+          ) : null}
+          {tab === "manage" ? <ManageInvestments positions={positions} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onChanged={() => void refresh()} /> : null}
+          </div>
+        </main>
+        <PortalFooter tab={tab} onChange={setTab} />
       </div>
     </PromoContext.Provider>
   );
 }
 
-function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
+const DEFAULT_FOOTER_TEXT = "FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply.";
+
+function PortalFooter({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalTab) => void }) {
+  const { companyName, footerLogo, footerText } = useBrand();
+  const name = companyName || DEFAULT_COMPANY_NAME;
+  const note = footerText.trim() || DEFAULT_FOOTER_TEXT;
+  return (
+    <footer className="mt-8 border-t border-border bg-surface">
+      <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:grid-cols-[1.4fr_1fr]">
+        <div>
+          {footerLogo ? (
+            <img src={footerLogo} alt={name} className="h-8 w-auto max-w-[180px] object-contain" />
+          ) : (
+            <p className="text-sm font-bold tracking-wide text-primary">{name.toUpperCase()}</p>
+          )}
+          <p className="mt-1 text-sm text-fg">Investor accounts</p>
+          <p className="mt-4 max-w-xl text-xs leading-5 text-fg">{note}</p>
+        </div>
+        <nav aria-label="Portal">
+          <p className="text-xs font-semibold tracking-widest text-[#12315c] uppercase">Portal</p>
+          <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+            {PORTAL_TABS.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={"text-left text-sm " + (tab === item.id ? "font-semibold text-action" : "text-primary")}
+                  aria-current={tab === item.id ? "page" : undefined}
+                  onClick={() => {
+                    onChange(item.id);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+      <div className="border-t border-border">
+        <p className="mx-auto max-w-6xl px-4 py-4 text-xs text-fg">© {new Date().getFullYear()} {name}</p>
+      </div>
+    </footer>
+  );
+}
+
+function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }: { onSubmitted: () => void; preferredTerm?: string; preferredAmount?: string }) {
   const offer = usePromo();
   const scroller = useRef<HTMLDivElement>(null);
   const [cd, setCd] = useState<InvestmentType | null>(null);
   const [terms, setTerms] = useState<CdTerm[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(preferredAmount);
+  const [appliedPreference, setAppliedPreference] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [page, setPage] = useState(0);
@@ -252,6 +308,24 @@ function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
 
   const orderedTerms = [...terms].sort((a, b) => Number(b.featured) - Number(a.featured) || a.months - b.months);
   const selected = orderedTerms.find((term) => term.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (appliedPreference || !preferredTerm || terms.length === 0) return;
+    const sorted = [...terms].sort((a, b) => Number(b.featured) - Number(a.featured) || a.months - b.months);
+    const months = Number(preferredTerm);
+    const index = sorted.findIndex((term) => term.months === months);
+    if (index < 0) {
+      setAppliedPreference(true);
+      return;
+    }
+    setSelectedId(sorted[index].id);
+    setPage(index);
+    setRatesOpen(promoMonths(offer).includes(months));
+    setAppliedPreference(true);
+    window.setTimeout(() => {
+      scroller.current?.querySelectorAll<HTMLElement>("[data-term]")[index]?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+    }, 0);
+  }, [appliedPreference, offer, terms, preferredTerm]);
 
   function move(direction: number) {
     const next = Math.min(Math.max(page + direction, 0), Math.max(orderedTerms.length - 1, 0));
@@ -399,17 +473,22 @@ function FundingPanel({ onSubmitted }: { onSubmitted: () => void }) {
           setError("");
         }}
       />
+      {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
       {cd && selected ? (
-        <InvestmentDetail type={cd} term={selected} amount={amount} onAmount={setAmount} />
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-white px-5 py-4">
+          <div>
+            <p className="text-sm text-fg">{cd.issuer}</p>
+            <p className="text-lg font-semibold text-[#12315c]">
+              {selected.months}-month · {moneyLabel(amount)}
+            </p>
+          </div>
+          <button type="button" disabled={pending} className="min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={openSummary}>
+            {pending ? "Submitting…" : "Review and confirm"}
+          </button>
+        </div>
       ) : (
         <p className="mt-4 text-sm text-fg">Select a term to review the certificate.</p>
       )}
-      {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
-      {selected ? (
-        <button type="button" disabled={pending} className="mt-5 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={openSummary}>
-          {pending ? "Submitting…" : "Confirm funding"}
-        </button>
-      ) : null}
       {summaryOpen && cd && selected ? (
         <InvestmentSummary
           type={cd}
@@ -466,7 +545,7 @@ function InvestmentSummary({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
       role="presentation"
       onClick={onClose}
     >
@@ -474,34 +553,50 @@ function InvestmentSummary({
         role="dialog"
         aria-modal="true"
         aria-labelledby="investment-summary-title"
-        className="grid max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl sm:grid-cols-[240px_1fr]"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <img src="/funding-advisor.jpg" alt="" className="h-48 w-full object-cover sm:h-full" />
-        <div className="relative overflow-y-auto bg-[#0c2348] px-6 py-6 text-white sm:px-8">
-          <button type="button" className="absolute top-3 right-4 text-xl leading-none text-white/80" aria-label="Close" onClick={onClose}>
-            ×
+        <div className="bg-[#0c2348] px-6 py-6 text-white">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold tracking-widest text-white/70 uppercase">Investment summary</p>
+              <h2 id="investment-summary-title" className="confirm-title mt-1 text-3xl font-semibold text-white">{shown}</h2>
+              <p className="mt-1 text-sm text-white/90">{term.months}-month certificate · {apy} final APY</p>
+            </div>
+            <button type="button" className="text-2xl leading-none text-white/80" aria-label="Close" onClick={onClose}>
+              ×
+            </button>
+          </div>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 px-6 py-5 text-sm">
+          <SummaryFact label="Issuer" value={type.issuer} />
+          <SummaryFact label="Structure" value={type.structure} />
+          <SummaryFact label="Term" value={`${term.months}-month`} />
+          <SummaryFact label="Final APY" value={apy} />
+          <SummaryFact label="Minimum" value={type.minimumInvestment || "—"} />
+          <SummaryFact label="Callable" value="Non-callable" />
+          <div className="col-span-2">
+            <dt className="text-xs font-semibold tracking-wide text-[#12315c] uppercase">Capital protection</dt>
+            <dd className="mt-1 text-fg">FDIC. 100% cover on the first $250,000 per individual or $500,000 per joint account.</dd>
+          </div>
+        </dl>
+        <ol className="mx-6 grid gap-3 border-t border-border pt-5">
+          {SUMMARY_STEPS.map((step, index) => (
+            <li key={step} className="flex items-start gap-3">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#006fcf] text-xs font-semibold text-white">{index + 1}</span>
+              <span className="text-sm text-fg">{step}</span>
+            </li>
+          ))}
+        </ol>
+        {error ? <p className="mx-6 mt-4 text-sm text-danger">{error}</p> : null}
+        <div className="flex flex-wrap gap-2 px-6 py-6">
+          <button type="button" className="min-h-11 rounded-md border border-border px-5 py-2 font-semibold text-primary" onClick={onClose}>
+            Back
           </button>
-          <h2 id="investment-summary-title" className="pr-6 text-2xl font-semibold">Investment summary</h2>
-          <p className="mt-3 text-sm text-white/90">
-            {type.issuer}
-            <br />
-            {term.months}-month certificate · {apy} APY
-            <br />
-            {shown}
-          </p>
-          <ol className="mt-5 grid gap-3">
-            {SUMMARY_STEPS.map((step, index) => (
-              <li key={step}>
-                <p className="font-semibold">{index + 1}. {step}</p>
-              </li>
-            ))}
-          </ol>
-          {error ? <p className="mt-4 text-sm text-red-200">{error}</p> : null}
           <button
             type="button"
             disabled={pending}
-            className="mt-6 min-h-11 rounded-md bg-white px-5 py-2 font-semibold text-[#006fcf] disabled:opacity-60"
+            className="min-h-11 flex-1 rounded-md bg-action px-5 py-2 font-semibold text-on-primary disabled:opacity-60"
             onClick={onConfirm}
           >
             {pending ? "Submitting…" : "Confirm investment"}
@@ -510,6 +605,20 @@ function InvestmentSummary({
       </div>
     </div>
   );
+}
+
+function SummaryFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold tracking-wide text-[#12315c] uppercase">{label}</dt>
+      <dd className="mt-1 text-fg">{value || "—"}</dd>
+    </div>
+  );
+}
+
+function moneyLabel(amount: string) {
+  const value = Number(amount.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(value) && value > 0 ? value.toLocaleString("en-US", { style: "currency", currency: "USD" }) : "Enter an amount";
 }
 
 function PromoRates({ offer, term }: { offer: PromoOffer; term: CdTerm }) {
@@ -666,79 +775,6 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
   );
 }
 
-function InvestmentDetail({
-  type,
-  term,
-  amount,
-  onAmount,
-}: {
-  type: InvestmentType;
-  term: CdTerm;
-  amount: string;
-  onAmount: (value: string) => void;
-}) {
-  const overview: Array<[string, string]> = [
-    ["Issuer", type.issuer],
-    ["Structure", type.structure],
-  ];
-  const terms: Array<[string, string]> = [
-    ["APY", term.apy.includes("APY") ? term.apy : `${term.apy} APY`],
-    ["Term", `${term.months}-month`],
-    ["Minimum investment", type.minimumInvestment],
-    ["Callable feature", "Non-callable"],
-  ];
-  return (
-    <div className="mt-4 overflow-hidden rounded-md border border-border">
-      <div className="grid lg:grid-cols-2">
-        <div className="p-3 lg:border-r lg:border-border">
-          <h4 className="text-xs font-semibold tracking-widest text-primary uppercase">Certificate overview</h4>
-          <dl className="mt-2">
-            {overview.map(([label, value]) => (
-              <div key={label} className="flex items-baseline justify-between gap-3 border-b border-border py-1.5">
-                <dt className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">{label}</dt>
-                <dd className="text-right text-sm text-fg">{value || "—"}</dd>
-              </div>
-            ))}
-            <div className="flex items-center justify-between gap-3 py-1.5">
-              <dt className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Capital protection</dt>
-              <dd className="flex items-center gap-1.5 text-sm text-fg">
-                FDIC
-                <span className="group relative">
-                  <button
-                    type="button"
-                    aria-label="100% cover on the first $250,000 per individual or $500,000 per joint account"
-                    className="inline-flex size-4 items-center justify-center rounded-full border border-border text-[10px] leading-none font-semibold text-primary"
-                  >
-                    i
-                  </button>
-                  <span className="pointer-events-none absolute right-0 bottom-full z-10 mb-1 hidden w-56 rounded-md border border-border bg-white p-2 text-left text-xs leading-4 font-normal text-fg shadow-sm group-hover:block group-focus-within:block">
-                    100% cover on the first $250,000 per individual or $500,000 per joint account
-                  </span>
-                </span>
-              </dd>
-            </div>
-          </dl>
-        </div>
-        <div className="border-t border-border p-3 lg:border-t-0">
-          <h4 className="text-xs font-semibold tracking-widest text-primary uppercase">Key terms</h4>
-          <dl className="mt-2">
-            {terms.map(([label, value]) => (
-              <div key={label} className="flex items-baseline justify-between gap-3 border-b border-border py-1.5">
-                <dt className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">{label}</dt>
-                <dd className="text-right text-sm text-fg">{value || "—"}</dd>
-              </div>
-            ))}
-          </dl>
-          <label className="mt-2 flex items-center gap-3">
-            <span className="text-[11px] font-semibold tracking-wide text-[#12315c] uppercase">Amount</span>
-            <input className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg outline-none focus:border-primary" value={amount} onChange={(event) => onAmount(event.target.value)} placeholder={type.minimumInvestment || "0.00"} />
-          </label>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function moneyValue(amount: string) {
   const value = Number(amount.replace(/[^0-9.]/g, ""));
   return Number.isFinite(value) ? value : 0;
@@ -756,34 +792,40 @@ function wholeDollars(value: number) {
 
 function investmentRates(position: FundingPosition, offer: PromoOffer) {
   const months = Number(position.termLabel.match(/(\d+)-month/)?.[1] ?? 0);
+  const principal = moneyValue(position.amount);
+  if (position.finalApy) {
+    return { promo: position.promoApy || "—", final: position.finalApy, rate: parseApy(position.finalApy), months, principal };
+  }
   const basePercent = Number(position.termLabel.match(/([\d.]+)%/)?.[1] ?? 0);
-  const bonus = matchTier(offer, months, moneyValue(position.amount));
+  const bonus = matchTier(offer, months, principal);
   const finalRate = basePercent / 100 + (bonus ? bonus.bonusPercent / 100 : 0);
   return {
     promo: bonus ? formatBonus(bonus.bonusPercent) : "—",
     final: basePercent ? formatApy(finalRate) : "—",
     rate: finalRate,
     months,
-    principal: moneyValue(position.amount),
+    principal,
   };
 }
 
-const FUND_STEPS = ["Terms", "Advisor call", "Fund"];
+const DEAL_STEPS = ["Accept terms", "Advisor call", "Invoice", "Upload payment", "Confirmation"];
 
 function fundStep(position: FundingPosition) {
-  if (position.status === "payment_approved") return 3;
+  if (position.status === "payment_approved") return DEAL_STEPS.length;
   if (!position.signed) return 0;
-  if (position.status === "instructions_sent" || position.status === "approved_phone") return 2;
   if (position.status === "pending") return 1;
+  if (position.status === "approved_phone") return 2;
+  if (position.status === "instructions_sent" && !position.paymentFileName) return 3;
+  if (position.status === "instructions_sent") return 4;
   return 0;
 }
 
 function statusLabel(status: FundingPosition["status"]) {
   if (status === "cancelled") return "Cancelled";
   if (status === "approved_phone") return "Approved by phone";
-  if (status === "instructions_sent") return "Invoice generated";
+  if (status === "instructions_sent") return "Invoice created";
   if (status === "payment_approved") return "Active";
-  return "Pending";
+  return "Pending call/email";
 }
 
 function certificateTitle(position: FundingPosition, months = 0, apy = "") {
@@ -855,6 +897,77 @@ function TermChart({ items }: { items: Array<{ id: string; months: number; amoun
   );
 }
 
+function CelebrationBanners({ holdings, onActive }: { holdings: FundingPosition[]; onActive: () => void }) {
+  const [hidden, setHidden] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("ah-cd-celebrated") || "[]");
+      setHidden(Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : []);
+    } catch {
+      setHidden([]);
+    }
+  }, []);
+
+  if (!hidden) return null;
+  const fresh = holdings.filter((position) => !hidden.includes(position.id));
+  if (fresh.length === 0) return null;
+
+  function dismiss(id: string) {
+    const next = [...hidden!, id];
+    setHidden(next);
+    localStorage.setItem("ah-cd-celebrated", JSON.stringify(next));
+  }
+
+  return (
+    <div className="mt-4 grid gap-3">
+      {fresh.map((position) => (
+        <Celebration
+          key={position.id}
+          position={position}
+          onOpen={() => {
+            dismiss(position.id);
+            onActive();
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function Celebration({ position, onOpen }: { position: FundingPosition; onOpen: () => void }) {
+  const rates = investmentRates(position, usePromo());
+  const matures = maturityOn(position.createdAt, rates.months);
+  return (
+    <div className="overflow-hidden rounded-2xl bg-[#0c2348] px-5 py-5 text-white sm:px-6">
+      <p className="text-xs font-semibold tracking-widest text-white/70 uppercase">Payment confirmed</p>
+      <h2 className="confirm-title mt-1 text-2xl font-semibold text-white">Congratulations</h2>
+      <p className="mt-2 text-sm text-white/90">Your advisor confirmed the payment. This certificate is now active.</p>
+      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
+        <div>
+          <dt className="text-white/70">Certificate</dt>
+          <dd className="font-semibold">{rates.months ? `${rates.months}-month` : position.termLabel}</dd>
+        </div>
+        <div>
+          <dt className="text-white/70">Amount</dt>
+          <dd className="font-semibold">{position.amount}</dd>
+        </div>
+        <div>
+          <dt className="text-white/70">Final APY</dt>
+          <dd className="font-semibold">{rates.final}</dd>
+        </div>
+        <div>
+          <dt className="text-white/70">Matures</dt>
+          <dd className="font-semibold">{matures ? formatDate(matures) : "—"}</dd>
+        </div>
+      </dl>
+      <button type="button" className="mt-5 min-h-11 rounded-md bg-white px-5 py-2 text-sm font-semibold text-[#006fcf]" onClick={onOpen}>
+        Active CDs
+      </button>
+    </div>
+  );
+}
+
 function Dashboard({
   account,
   holdings,
@@ -911,6 +1024,12 @@ function Dashboard({
               ? "A certificate becomes active only after your advisor confirms the payment. Figures below use active CDs."
               : "Figures below use active CDs."}
       </p>
+      {account.payload.preferredTerm ? (
+        <p className="mt-2 text-sm text-fg">
+          From your application: {account.payload.preferredTerm}-month
+          {account.payload.preferredAmount ? ` · ${account.payload.preferredAmount}` : ""}. Add investment opens with this choice.
+        </p>
+      ) : null}
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Committed" value={money(total)} icon={Wallet} />
         <Stat label="Interest to maturity" value={money(interest)} icon={Landmark} />
@@ -1079,10 +1198,8 @@ function EmptyBanners({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-const DEAL_STEPS = ["Accept terms", "Advisor call", "Upload payment"];
-
 function DealProgress({ step }: { step: number }) {
-  const percent = Math.min(100, ((Math.min(step, DEAL_STEPS.length - 1) + 1) / DEAL_STEPS.length) * 100);
+  const percent = Math.min(100, (Math.min(step, DEAL_STEPS.length) / DEAL_STEPS.length) * 100);
   return (
     <div className="mt-3">
       <div className="relative h-1.5 overflow-hidden rounded-full bg-step-track" aria-hidden="true">
@@ -1103,7 +1220,7 @@ function DealProgress({ step }: { step: number }) {
                 >
                   {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
                 </span>
-                <span className={"max-w-16 text-center text-[11px] leading-tight " + (active ? "font-semibold text-step" : "text-fg")}>{label}</span>
+                <span className={"max-w-[4.5rem] text-center text-[10px] leading-tight sm:text-[11px] " + (active ? "font-semibold text-step" : "text-fg")}>{label}</span>
               </div>
               {index < DEAL_STEPS.length - 1 ? (
                 <span className={"mx-1 mb-4 h-0.5 flex-1 rounded-full " + (done ? "bg-step-done" : "bg-step-idle")} aria-hidden="true" />
@@ -1336,7 +1453,7 @@ function savePdf(pdf: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function InvestmentList({ positions, signature, onAdd, onSigned }: { positions: FundingPosition[]; signature: string; onAdd: () => void; onSigned: () => void }) {
+function InvestmentList({ positions, signature, phone, email, onAdd, onSigned }: { positions: FundingPosition[]; signature: string; phone: string; email: string; onAdd: () => void; onSigned: () => void }) {
   return (
     <section className="mt-6">
       <h1 className="text-3xl font-semibold">Investments</h1>
@@ -1350,7 +1467,7 @@ function InvestmentList({ positions, signature, onAdd, onSigned }: { positions: 
       ) : (
         <ul className="mt-4 grid gap-3">
           {positions.map((position) => (
-            <InvestmentCard key={position.id} position={position} signature={signature} onSigned={onSigned} />
+            <InvestmentCard key={position.id} position={position} signature={signature} phone={phone} email={email} onSigned={onSigned} />
           ))}
         </ul>
       )}
@@ -1358,10 +1475,9 @@ function InvestmentList({ positions, signature, onAdd, onSigned }: { positions: 
   );
 }
 
-function InvestmentCard({ position, signature, onSigned }: { position: FundingPosition; signature: string; onSigned: () => void }) {
+function InvestmentCard({ position, signature, phone, email, onSigned }: { position: FundingPosition; signature: string; phone: string; email: string; onSigned: () => void }) {
   const rates = investmentRates(position, usePromo());
   const step = fundStep(position);
-  const percent = Math.min(100, (step / (FUND_STEPS.length - 1)) * 100);
   return (
     <div className="rounded-md border border-border bg-surface px-4 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1391,34 +1507,11 @@ function InvestmentCard({ position, signature, onSigned }: { position: FundingPo
         <p className="mt-2 text-sm text-fg">Advisor not assigned yet.</p>
       ) : null}
       {position.status === "cancelled" ? null : (
-        <div className="mt-4">
-          <div className="h-1.5 overflow-hidden rounded-full bg-step-track" aria-hidden="true">
-            <div className="h-full rounded-full bg-step-fill" style={{ width: `${percent}%` }} />
-          </div>
-          <ol className="mt-3 grid grid-cols-3 gap-2">
-            {FUND_STEPS.map((name, index) => {
-              const done = index < step;
-              const active = index === step;
-              return (
-                <li key={name} className="min-w-0 text-center">
-                  <span
-                    className={
-                      "mx-auto mb-1 flex size-7 items-center justify-center rounded-full text-sm font-semibold " +
-                      (active ? "bg-step text-on-primary" : done ? "bg-step-done text-on-primary" : "bg-step-idle text-step")
-                    }
-                  >
-                    {done ? <Check className="size-4" aria-hidden="true" /> : index + 1}
-                  </span>
-                  <span className={"block text-xs leading-tight " + (active ? "font-semibold text-step" : done ? "text-step-done" : "text-step")}>{name}</span>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
+        <DealProgress step={step} />
       )}
-      {position.status === "cancelled" ? null : <TermsPdf id={position.id} />}
-      {position.status !== "cancelled" && position.status !== "payment_approved" && !position.signed ? <SignTerms position={position} signature={signature} rates={rates} onSigned={onSigned} /> : null}
-      {position.signed && position.status === "instructions_sent" && !position.paymentFileName ? <PaymentUpload id={position.id} onUploaded={onSigned} /> : null}
+      {position.status === "cancelled" ? null : <TermsPdf id={position.id} signed={position.signed} />}
+      {position.status !== "cancelled" && position.status !== "payment_approved" && !position.signed ? <SignTerms position={position} signature={signature} phone={phone} email={email} rates={rates} onSigned={onSigned} /> : null}
+      {position.signed && position.status === "instructions_sent" ? <PaymentUpload id={position.id} replacing={Boolean(position.paymentFileName)} onUploaded={onSigned} /> : null}
       {position.paymentFileName ? <PaymentFileNote id={position.id} name={position.paymentFileName} approved={position.status === "payment_approved"} /> : null}
     </div>
   );
@@ -1462,38 +1555,78 @@ function PaymentFileNote({ id, name, approved }: { id: string; name: string; app
   );
 }
 
-function PaymentUpload({ id, onUploaded }: { id: string; onUploaded: () => void }) {
+function PaymentUpload({ id, replacing = false, onUploaded }: { id: string; replacing?: boolean; onUploaded: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [name, setName] = useState("");
+  const [over, setOver] = useState(false);
 
   function onFile(file: File | undefined) {
     if (!file) return;
-    if (file.size > 5_000_000) {
-      setError("Use a PDF or image under 5 MB.");
+    if (file.size > 5_000_000 || !/^(application\/pdf|image\/png|image\/jpeg)$/.test(file.type)) {
+      setError("Use a PDF, PNG, or JPEG under 5 MB.");
       return;
     }
     setPending(true);
+    setName(file.name);
     setError("");
     const reader = new FileReader();
     reader.onload = () => {
       void uploadPaymentConfirmation({ data: { id, fileName: file.name, file: String(reader.result) } })
-        .then(() => onUploaded())
+        .then(() => {
+          setPending(false);
+          onUploaded();
+        })
         .catch(() => {
           setError("The confirmation could not be uploaded.");
           setPending(false);
+          setName("");
         });
+    };
+    reader.onerror = () => {
+      setError("The confirmation could not be read.");
+      setPending(false);
+      setName("");
     };
     reader.readAsDataURL(file);
   }
 
   return (
-    <form className="mt-4 border-t border-border pt-4">
-      <h3 className="text-sm font-semibold text-primary">Upload payment confirmation</h3>
-      <p className="mt-1 text-sm text-fg">Attach the wire confirmation after you send funds using the payment instructions.</p>
-      <label className="mt-3 block text-sm">
-        <span className="font-semibold text-primary">Wire confirmation</span>
-        <input className="mt-1 block w-full text-sm" type="file" accept="application/pdf,image/png,image/jpeg" disabled={pending} onChange={(event) => onFile(event.target.files?.[0])} />
-      </label>
+    <form className="mt-4 border-t border-border pt-4" onSubmit={(event) => event.preventDefault()}>
+      <h3 className="text-sm font-semibold text-primary">{replacing ? "Replace the wire confirmation" : "Upload payment confirmation"}</h3>
+      <p className="mt-1 text-sm text-fg">{replacing ? "Upload another file if this confirmation is wrong. It replaces the one already sent." : "After you send the wire, attach the bank confirmation so your advisor can approve the payment."}</p>
+      <button
+        type="button"
+        disabled={pending}
+        className={"mt-3 flex w-full flex-col items-center rounded-xl border border-dashed px-4 py-6 text-center " + (over ? "border-action bg-[#e8f4ff]" : "border-[#8c8c8c] bg-white")}
+        onClick={() => input.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setOver(false);
+          onFile(event.dataTransfer.files?.[0]);
+        }}
+      >
+        <span className="flex size-11 items-center justify-center rounded-full bg-[#e8f4ff] text-action">
+          <FileUp className="size-5" aria-hidden="true" />
+        </span>
+        <span className="mt-3 text-sm font-semibold text-primary">{pending ? "Uploading…" : "Drop the wire confirmation here"}</span>
+        <span className="mt-1 text-sm text-fg">{name || "or choose a PDF, PNG, or JPEG under 5 MB"}</span>
+        <span className="mt-3 inline-flex min-h-11 items-center rounded-md bg-action px-4 text-sm font-semibold text-on-primary">{pending ? "Please wait" : "Choose file"}</span>
+      </button>
+      <input
+        ref={input}
+        className="sr-only"
+        type="file"
+        accept="application/pdf,image/png,image/jpeg"
+        disabled={pending}
+        onChange={(event) => onFile(event.target.files?.[0])}
+      />
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
     </form>
   );
@@ -1502,11 +1635,15 @@ function PaymentUpload({ id, onUploaded }: { id: string; onUploaded: () => void 
 function SignTerms({
   position,
   signature,
+  phone,
+  email,
   rates,
   onSigned,
 }: {
   position: FundingPosition;
   signature: string;
+  phone: string;
+  email: string;
   rates: { promo: string; final: string };
   onSigned: () => void;
 }) {
@@ -1514,12 +1651,25 @@ function SignTerms({
   const [drawn, setDrawn] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [callNumber, setCallNumber] = useState(phone);
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [emailInstead, setEmailInstead] = useState(false);
+
+  function openConfirm() {
+    if (!saved && !drawn) {
+      setError("Sign in the box before accepting the terms.");
+      return;
+    }
+    setError("");
+    setOpen(true);
+  }
 
   async function sign() {
     setPending(true);
     setError("");
     try {
-      await signFunding({ data: { id: position.id, signature: saved ? "" : drawn } });
+      await signFunding({ data: { id: position.id, signature: saved ? "" : drawn, contactPhone: callNumber, contactBy: emailInstead ? "email" : "call" } });
       onSigned();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The terms could not be accepted.");
@@ -1528,10 +1678,10 @@ function SignTerms({
   }
 
   return (
-    <form className="mt-4 border-t border-border pt-4" onSubmit={(event) => { event.preventDefault(); void sign(); }}>
+    <form className="mt-4 border-t border-border pt-4" onSubmit={(event) => { event.preventDefault(); openConfirm(); }}>
       <h3 className="text-sm font-semibold text-primary">Accept the investment terms</h3>
       <p className="mt-1 text-sm text-fg">
-        {saved ? "Your application signature is applied to this certificate. No further signature is required." : "This account has no signature yet. Draw it once. It is saved on the account and used on this certificate."}
+        {saved ? "Your application signature is applied to this certificate." : "Sign in the box below. This signature is saved on the account and used on this certificate."}
       </p>
       <ul className="mt-3 divide-y divide-border overflow-hidden rounded-md border border-border">
         <TermLine icon={CalendarRange} label="Term" value={position.termLabel} />
@@ -1543,11 +1693,64 @@ function SignTerms({
         <TermLine icon={TriangleAlert} label="Early withdrawal" value="Penalties may apply" />
         <TermLine icon={Shield} label="Capital protection" value="First $250,000 per individual or $500,000 per joint account" />
       </ul>
-      {saved ? null : <SignaturePad onChange={(value) => setDrawn(value ?? "")} />}
-      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
-      <button type="submit" disabled={pending || (!saved && !drawn)} className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60">
-        {pending ? "Saving…" : "Accept terms"}
+      {saved ? null : (
+        <div className="mt-4">
+          <p className="text-sm font-semibold text-primary">Sign here</p>
+          <p className="mt-1 text-sm text-fg">Draw your signature inside the box.</p>
+          <div className="relative mt-2">
+            {drawn ? null : <span className="pointer-events-none absolute top-4 left-4 text-sm text-[#8c8c8c]">Sign here</span>}
+            <SignaturePad onChange={(value) => setDrawn(value ?? "")} />
+          </div>
+        </div>
+      )}
+      {error && !open ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      <button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary">
+        Accept terms
       </button>
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" role="presentation" onClick={() => !pending && setOpen(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="terms-confirmed-title" className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="bg-[#0c2348] px-6 py-6 text-white">
+              <p className="text-xs font-semibold tracking-widest text-white/70 uppercase">Investment summary</p>
+              <h2 id="terms-confirmed-title" className="confirm-title mt-1 text-3xl font-semibold text-white">You confirmed</h2>
+              <p className="mt-2 text-sm text-white/90">The investment process starts here.</p>
+            </div>
+            <div className="px-6 py-5">
+              {emailInstead ? (
+                <p className="text-sm text-fg">We will email {email} instead of calling.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-fg">Wait for an advisor to call</p>
+                  {editingNumber ? (
+                    <label className="mt-3 block text-sm">
+                      <span className="font-semibold text-primary">Call this number</span>
+                      <input className="mt-1 w-full rounded-md border border-border px-3 py-2" value={callNumber} onChange={(event) => setCallNumber(event.target.value)} />
+                    </label>
+                  ) : (
+                    <p className="mt-1 text-lg font-semibold text-[#12315c]">{callNumber || "No number on the application"}</p>
+                  )}
+                  <button type="button" className="mt-2 text-sm font-semibold text-action" onClick={() => setEditingNumber((value) => !value)}>
+                    {editingNumber ? "Use this number" : "Call another number"}
+                  </button>
+                </>
+              )}
+              <label className="mt-4 flex items-start gap-2 text-sm text-fg">
+                <input type="checkbox" className="mt-1" checked={emailInstead} onChange={(event) => setEmailInstead(event.target.checked)} />
+                <span>Do not call, use email instead</span>
+              </label>
+              {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" disabled={pending} onClick={() => setOpen(false)}>
+                  Back
+                </button>
+                <button type="button" className="min-h-11 flex-1 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sign()}>
+                  {pending ? "Saving…" : "Start the process"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -1566,7 +1769,7 @@ function TermLine({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-function TermsPdf({ id, compact = false }: { id: string; compact?: boolean }) {
+function TermsPdf({ id, compact = false, signed = false }: { id: string; compact?: boolean; signed?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [sheet, setSheet] = useState<InvestmentSheet | null>(null);
@@ -1592,7 +1795,7 @@ function TermsPdf({ id, compact = false }: { id: string; compact?: boolean }) {
       live = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [id]);
+  }, [id, signed]);
 
   return (
     <div className={compact ? "mt-4" : "mt-4 rounded-md border border-border bg-white p-4"}>
@@ -1639,7 +1842,7 @@ function TermsPdf({ id, compact = false }: { id: string; compact?: boolean }) {
           <p className="mt-3 font-semibold text-primary">Fees</p>
           <p className="mt-1">A fixed $4.99 dealing fee applies to each purchase. Early liquidation, where available, is $4.99 per request. No early-liquidation fee applies if the certificate is held to maturity.</p>
           <p className="mt-3 font-semibold text-primary">Signature</p>
-          <p className="mt-1">{sheet.signerName ? `${sheet.signerName} · signed ${sheet.signedOn}` : "Not signed yet."}</p>
+          <p className="mt-1">{sheet.signerName ? `${sheet.signerName}${sheet.signedOn ? ` · signed ${sheet.signedOn}` : ""}` : "Not signed yet."}</p>
         </div>
       ) : null}
       {viewing && bytes ? (
@@ -1809,7 +2012,7 @@ function NotificationBell() {
   );
 }
 
-function ManageInvestments({ positions, onAdd, onChanged }: { positions: FundingPosition[]; onAdd: () => void; onChanged: () => void }) {
+function ManageInvestments({ positions, signature, phone, email, onAdd, onChanged }: { positions: FundingPosition[]; signature: string; phone: string; email: string; onAdd: () => void; onChanged: () => void }) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -1841,7 +2044,7 @@ function ManageInvestments({ positions, onAdd, onChanged }: { positions: Funding
         <ul className="mt-4 grid gap-3">
           {positions.map((position) => (
             <li key={position.id}>
-              <InvestmentCard position={position} onSigned={onChanged} />
+              <InvestmentCard position={position} signature={signature} phone={phone} email={email} onSigned={onChanged} />
               {position.status === "pending" ? (
                 <button
                   type="button"

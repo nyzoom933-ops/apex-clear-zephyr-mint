@@ -22,10 +22,23 @@ export function cleanBackupEmail(value: string) {
   return email;
 }
 
+export function cleanPublicDomain(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error("Enter a public domain, such as https://example.com.");
+  }
+  if (!url.hostname || !url.hostname.includes(".")) throw new Error("Enter a public domain, such as https://example.com.");
+  return url.origin;
+}
+
 export function cleanCloudflareCode(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
-  if (trimmed.length > 2000) throw new Error("Cloudflare code is too long.");
-  if (!cloudflareToken(trimmed)) throw new Error("Paste the Cloudflare analytics snippet or its token.");
+  if (trimmed.length > 2000 || !cloudflareToken(trimmed)) return null;
   return trimmed;
 }

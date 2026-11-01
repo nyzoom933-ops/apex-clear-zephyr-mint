@@ -83,7 +83,8 @@ h3 {
   color: #12315c;
 }
 
-h3.calc-title {
+h3.calc-title,
+h2.confirm-title {
   color: #fff;
 }
 
