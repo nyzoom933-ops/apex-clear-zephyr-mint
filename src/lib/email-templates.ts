@@ -214,7 +214,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor) : sampleApplicationLetter(input.portalUrl, input.advisor));
+      (step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   return {
     step,
     audience,
@@ -232,8 +232,8 @@ export function renderPair(step: MailStep, input: { name: string; email: string;
   };
 }
 
-export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor) {
-  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor };
+export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "") {
+  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone };
   return (Object.keys(STEPS) as MailStep[]).flatMap((step) => [
     renderStep(step, "client", sample),
     renderStep(step, "admin", sample),
@@ -263,9 +263,8 @@ function mailLink(email: string) {
   return contactLink(email, /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? `mailto:${email}` : "");
 }
 
-function companyCredit(company: string, phone?: string) {
-  const number = phone?.trim();
-  return `${escapeHtml(company)}${number ? ` · ${escapeHtml(number)}` : ""}. © ${new Date().getFullYear()}`;
+function companyCredit(company: string) {
+  return `${escapeHtml(company)}. © ${new Date().getFullYear()}`;
 }
 
 function advisorSignature(advisor: MailAdvisor | undefined, company: string) {
@@ -511,7 +510,7 @@ export function leadLetter(input: {
           <tr>
             <td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
               <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">${escapeHtml(fine || `This message was sent regarding a new-account promotion for a certificate of deposit. Promotional bonuses require ${minimum} in new money${window ? ` and are available ${window.replace("Offer available from ", "")}` : ""}. A penalty may be imposed for early withdrawal. Offer subject to account requirements and availability.`)}</p>
-              <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company, input.companyPhone)}</p>
+              <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
             </td>
           </tr>
         </table>
@@ -698,7 +697,7 @@ export function applicationLetter(input: {
         </td></tr>
         <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
           <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">${escapeHtml(fine)}</p>
-          <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company, input.companyPhone)}</p>
+          <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
         </td></tr>
       </table>
     </td></tr>
@@ -718,7 +717,7 @@ function applicationLink(origin: string | undefined, months: number, code: strin
   return query ? `${base}?${query}` : base;
 }
 
-function sampleApplicationLetter(portalUrl?: string, advisor?: MailAdvisor) {
+function sampleApplicationLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
   return applicationLetter({
     leadName: "Jonah Hale",
     company: DEFAULT_COMPANY_NAME,
@@ -740,10 +739,11 @@ function sampleApplicationLetter(portalUrl?: string, advisor?: MailAdvisor) {
       ],
     },
     minimum: "$100,000",
+    companyPhone,
   }).html;
 }
 
-function samplePromoLetter(portalUrl?: string, advisor?: MailAdvisor) {
+function samplePromoLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
   return applicationLetter({
     leadName: "Jonah Hale",
     company: DEFAULT_COMPANY_NAME,
@@ -765,11 +765,12 @@ function samplePromoLetter(portalUrl?: string, advisor?: MailAdvisor) {
       ],
     },
     advisor: advisor ?? { name: "Alex Morgan", phone: "(202) 555-0148", email: "alex@example.com" },
+    companyPhone,
     minimum: "$100,000",
   }).html;
 }
 
-function sampleReminderLetter(portalUrl?: string, advisor?: MailAdvisor) {
+function sampleReminderLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
   const link = applicationLink(portalUrl, 10, "CD48K2MP") || "https://example.com/application?invite=preview";
   return inviteReminderLetter({
     leadName: "Jonah Hale",
@@ -780,6 +781,7 @@ function sampleReminderLetter(portalUrl?: string, advisor?: MailAdvisor) {
     link,
     advisorName: advisor?.name || "Alex Morgan",
     advisor,
+    companyPhone,
   }).html;
 }
 
@@ -871,7 +873,7 @@ function finalApy(apy: string, bonusPercent: number) {
   return `${final.toFixed(digits)}%`;
 }
 
-function sampleLeadLetter(portalUrl?: string, advisor?: MailAdvisor) {
+function sampleLeadLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
   return leadLetter({
     leadName: "Jonah Hale",
     company: DEFAULT_COMPANY_NAME,
@@ -894,6 +896,7 @@ function sampleLeadLetter(portalUrl?: string, advisor?: MailAdvisor) {
       ],
     },
     advisor: advisor ?? { name: "Alex Morgan", phone: "(202) 555-0148", email: "alex@example.com" },
+    companyPhone,
     minimum: "$100,000",
   }).html;
 }
@@ -962,7 +965,7 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
         ${next}
         ${portal}
         ${helpFooter(input.companyPhone)}
-        <tr><td style="padding:8px 32px 28px;font-family:Arial,sans-serif;font-size:12px;color:#8c8c8c;">${escapeHtml(input.company)}${input.companyPhone?.trim() ? ` · ${escapeHtml(input.companyPhone.trim())}` : ""} · Investor accounts</td></tr>
+        <tr><td style="padding:8px 32px 28px;font-family:Arial,sans-serif;font-size:12px;color:#8c8c8c;">${escapeHtml(input.company)} · Investor accounts</td></tr>
       </table>
     </td></tr>
   </table>

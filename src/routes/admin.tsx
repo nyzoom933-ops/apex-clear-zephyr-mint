@@ -384,7 +384,7 @@ function EmailsPanel() {
   const [origin, setOrigin] = useState("");
   const brand = useBrand();
   const signature = advisors.find((item) => item.id === signatureId) ?? advisors[0];
-  const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin, signature).filter((item) => audience === "all" || item.audience === audience);
+  const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin, signature, brand.companyPhone).filter((item) => audience === "all" || item.audience === audience);
 
   useEffect(() => {
     setOrigin(window.location.origin);
