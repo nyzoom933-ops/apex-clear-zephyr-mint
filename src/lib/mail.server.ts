@@ -14,6 +14,7 @@ export async function ensureMailColumn(sql: Sql) {
   await sql`alter table notifications add column if not exists mail_status text not null default ''`;
   await sql`alter table notifications add column if not exists status_at timestamptz`;
   await sql`alter table notifications add column if not exists mail_provider text not null default ''`;
+  await sql`alter table notifications add column if not exists advisor_id text not null default ''`;
 }
 
 async function readDeskEmail(sql: Sql) {
@@ -37,6 +38,7 @@ export async function notifyStep(
     replyName?: string;
     fromAddress?: string;
     subject?: string;
+    advisorId?: string;
   },
 ) {
   const companyName = await readCompanyName(sql);
@@ -73,7 +75,7 @@ export async function notifyStep(
     const advisorMail = message.audience === "client" && Boolean(input.replyTo);
     const result = await deliver(message.recipient, subject, message.mail.text, message.mail.html, companyName, sql, message.attachments, advisorMail ? input.replyTo || "" : "", advisorMail ? input.replyName || "" : "", advisorMail ? input.fromAddress || "" : "");
     await sql`
-      insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider)
+      insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
       values (
         ${crypto.randomUUID()},
         ${message.audience},
@@ -86,7 +88,8 @@ export async function notifyStep(
         ${result.delivery},
         ${result.messageId},
         ${result.delivery === "sent" ? "sent" : ""},
-        ${result.provider}
+        ${result.provider},
+        ${input.advisorId ?? ""}
       )
     `;
   }
@@ -249,54 +252,164 @@ const STATUS_RANK: Record<string, number> = {
 };
 
 function rankStatus(event: string) {
-  if (event === "hard-bounced" || event === "soft-bounced" || event === "rejected" || event === "spam") return "bounced";
-  if (event === "processed") return "sent";
-  return STATUS_RANK[event] ? event : "";
+  const name = event.trim().toLowerCase();
+  if (name === "open") return "opened";
+  if (name === "click") return "clicked";
+  if (name === "hard-bounced" || name === "soft-bounced" || name === "rejected" || name === "spam") return "bounced";
+  if (name === "processed") return "sent";
+  return STATUS_RANK[name] ? name : "";
+}
+
+type ActivityEvent = { email_id?: string; event?: string; recipient?: string; to?: string; subject?: string };
+
+const SMTP_ACTIVITY_URLS = ["https://us-api.smtp2go.com/v3/activity/search", "https://api.smtp2go.com/v3/activity/search", "https://eu-api.smtp2go.com/v3/activity/search"];
+
+function smtpStamp(date: Date) {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+async function searchSmtpActivity(apiKey: string) {
+  const end = new Date();
+  const start = new Date(end.getTime() - 4 * 24 * 60 * 60 * 1000);
+  const events: ActivityEvent[] = [];
+  let sawOk = false;
+  let lastStatus = 0;
+  let lastError = "";
+  for (const url of SMTP_ACTIVITY_URLS) {
+    let token = "";
+    let hostEvents = 0;
+    for (let page = 0; page < 6; page += 1) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": apiKey, accept: "application/json" },
+        signal: AbortSignal.timeout(12000),
+        body: JSON.stringify({
+          start_date: smtpStamp(start),
+          end_date: smtpStamp(end),
+          event_types: ["opened", "clicked", "delivered", "hard-bounced", "soft-bounced", "rejected", "spam"],
+          limit: 100,
+          ...(token ? { continue_token: token } : {}),
+        }),
+      });
+      if (!response.ok) {
+        lastStatus = response.status;
+        const text = await response.text().catch(() => "");
+        try {
+          const parsed = JSON.parse(text) as { data?: { error?: string } };
+          lastError = parsed.data?.error || text.slice(0, 180);
+        } catch {
+          lastError = text.slice(0, 180);
+        }
+        break;
+      }
+      sawOk = true;
+      const payload = (await response.json()) as { data?: { events?: ActivityEvent[]; continue_token?: string } };
+      const batch = payload.data?.events ?? [];
+      events.push(...batch);
+      hostEvents += batch.length;
+      token = payload.data?.continue_token || "";
+      if (!token || batch.length === 0) break;
+    }
+    if (hostEvents > 0) break;
+  }
+  return { events, sawOk, lastStatus, lastError };
+}
+
+function activityKey(recipient: string, subject: string) {
+  const clean = subject.trim().toLowerCase().replace(/[—–]/g, "-").replace(/\s+/g, " ");
+  return `${recipient.trim().toLowerCase()}|${clean}`;
+}
+
+type SentMail = { email_id?: string; recipient?: string; to?: string; subject?: string; status?: string };
+
+async function searchSentMail(apiKey: string, emailIds: string[], flag?: "opened" | "clicked") {
+  const end = new Date();
+  const start = new Date(end.getTime() - 4 * 24 * 60 * 60 * 1000);
+  const ids = emailIds.map((id) => id.trim()).filter(Boolean).slice(0, 50);
+  if (!ids.length) return { ok: false, emails: [] as SentMail[], lastError: "" };
+  const urls = ["https://us-api.smtp2go.com/v3/email/search", "https://api.smtp2go.com/v3/email/search"];
+  let lastError = "";
+  for (const url of urls) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": apiKey, accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify({
+        start_date: smtpStamp(start),
+        end_date: smtpStamp(end),
+        email_id: ids,
+        limit: 100,
+        ...(flag ? { [flag]: true } : {}),
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      try {
+        const parsed = JSON.parse(text) as { data?: { error?: string } };
+        lastError = parsed.data?.error || text.slice(0, 180);
+      } catch {
+        lastError = text.slice(0, 180);
+      }
+      continue;
+    }
+    const payload = (await response.json()) as { data?: { emails?: SentMail[] } };
+    return { ok: true, emails: payload.data?.emails ?? [], lastError: "" };
+  }
+  return { ok: false, emails: [] as SentMail[], lastError };
 }
 
 export async function syncResendStatuses(sql: Sql) {
   const mail = await readMailConfig(sql);
   await ensureMailColumn(sql);
-  const rows = await sql<{ id: string; resend_id: string; mail_provider: string }>`
-    select id, resend_id, coalesce(mail_provider, '') as mail_provider from notifications
-    where resend_id <> ''
+  const rows = await sql<{ id: string; resend_id: string; mail_provider: string; recipient: string; subject: string; mail_status: string }>`
+    select id, resend_id, coalesce(mail_provider, '') as mail_provider, recipient, subject, coalesce(mail_status, '') as mail_status
+    from notifications
+    where created_at > now() - interval '30 days'
       and coalesce(mail_status, '') not in ('bounced', 'complained', 'clicked')
     order by created_at desc
-    limit 40
+    limit 80
   `;
   let updated = 0;
   let opened = 0;
   const smtpRows = rows.filter((row) => row.mail_provider === "smtp2go");
-  const resendRows = rows.filter((row) => row.mail_provider !== "smtp2go");
+  const resendRows = rows.filter((row) => row.mail_provider !== "smtp2go" && row.resend_id);
   if (smtpRows.length) {
     if (!mail.smtpKey) throw new Error("Add the SMTP2GO API key in Settings before syncing advisor mail.");
-    const end = new Date();
-    const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
-    const stamp = (date: Date) => date.toISOString().slice(0, 10);
-    const response = await fetch("https://api.smtp2go.com/v3/activity/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": mail.smtpKey, accept: "application/json" },
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        start_date: stamp(start),
-        end_date: stamp(end),
-        event_types: ["opened", "clicked", "delivered", "hard-bounced", "soft-bounced", "rejected", "spam"],
-        limit: 1000,
-      }),
-    });
-    if (!response.ok) throw new Error("SMTP2GO could not return open events.");
-    const payload = (await response.json()) as { data?: { events?: { email_id?: string; event?: string }[] } };
-    const best = new Map<string, string>();
-    for (const event of payload.data?.events ?? []) {
-      const id = event.email_id || "";
+    const found = await searchSmtpActivity(mail.smtpKey);
+    let events = found.events;
+    if (!found.sawOk) {
+      const detail = found.lastError || (found.lastStatus ? `SMTP2GO activity search failed (${found.lastStatus}).` : "SMTP2GO activity search did not respond.");
+      if (!/permission/i.test(detail)) throw new Error(detail);
+      const ids = smtpRows.map((row) => row.resend_id);
+      const [clicked, openedMail, sent] = await Promise.all([
+        searchSentMail(mail.smtpKey, ids, "clicked"),
+        searchSentMail(mail.smtpKey, ids, "opened"),
+        searchSentMail(mail.smtpKey, ids),
+      ]);
+      if (!clicked.ok && !openedMail.ok && !sent.ok) {
+        throw new Error("Open tracking is already on. That only records opens inside SMTP2GO. Click the API key name itself, open Permissions, and turn on Reports. If that section is not there, add a new key with every permission enabled and paste it into Settings.");
+      }
+      events = [
+        ...clicked.emails.map((email) => ({ ...email, event: "clicked" })),
+        ...openedMail.emails.map((email) => ({ ...email, event: "opened" })),
+        ...sent.emails.map((email) => ({ ...email, event: email.status || "delivered" })),
+      ];
+    }
+    if (!events.length) throw new Error("SMTP2GO returned no events for the last 4 days.");
+    const bestById = new Map<string, string>();
+    const bestByLetter = new Map<string, string>();
+    const keep = (current: string, next: string) => ((STATUS_RANK[next] || 0) >= (STATUS_RANK[current] || 0) ? next : current);
+    for (const event of events) {
       const next = rankStatus(event.event || "");
-      if (!id || !next) continue;
-      const current = best.get(id) || "";
-      if ((STATUS_RANK[next] || 0) >= (STATUS_RANK[current] || 0)) best.set(id, next);
+      if (!next) continue;
+      const id = (event.email_id || "").trim();
+      if (id) bestById.set(id, keep(bestById.get(id) || "", next));
+      const recipient = event.recipient || event.to || "";
+      if (recipient && event.subject) bestByLetter.set(activityKey(recipient, event.subject), keep(bestByLetter.get(activityKey(recipient, event.subject)) || "", next));
     }
     for (const row of smtpRows) {
-      const status = best.get(row.resend_id);
-      if (!status) continue;
+      const status = bestById.get(row.resend_id.trim()) || bestByLetter.get(activityKey(row.recipient, row.subject)) || "";
+      if (!status || (STATUS_RANK[status] || 0) <= (STATUS_RANK[row.mail_status] || 0)) continue;
       await sql`update notifications set mail_status = ${status}, status_at = now() where id = ${row.id}`;
       updated += 1;
       if (status === "opened" || status === "clicked") opened += 1;

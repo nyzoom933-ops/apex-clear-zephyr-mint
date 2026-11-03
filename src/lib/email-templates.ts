@@ -17,7 +17,8 @@ export type MailStep =
   | "lead_intro"
   | "lead_application"
   | "lead_promo"
-  | "lead_invite_reminder";
+  | "lead_invite_reminder"
+  | "lead_extension";
 
 export type MailAudience = "client" | "admin";
 
@@ -168,6 +169,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminSubject: "Application reminder for {{name}}",
     adminLead: "A reminder was sent to {{name}} ({{email}}) because the application link is about to expire.",
   },
+  lead_extension: {
+    label: "Rate extension",
+    clientSubject: "Our New Account Promotional CD Offer is extended through November 6",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Rate extension sent to {{name}}",
+    adminLead: "The extended promotional CD offer was sent to {{name}} ({{email}}).",
+  },
 };
 
 export const SAMPLE_EMAIL = {
@@ -199,7 +208,7 @@ export function renderStep(
   const lead = fill(audience === "client" ? item.clientLead : item.adminLead, name, input.email, company);
   const subject = fill(audience === "client" ? item.clientSubject : item.adminSubject, name, input.email, company);
   const next = audience === "client" && item.clientNext ? fill(item.clientNext, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -214,7 +223,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   return {
     step,
     audience,
@@ -273,8 +282,9 @@ function advisorSignature(advisor: MailAdvisor | undefined, company: string) {
   const email = advisor?.email?.trim() || "";
   const role = advisor?.role?.trim() || "";
   const mailbox = advisor?.mailbox?.trim() && advisor.mailbox.trim().toLowerCase() !== email.toLowerCase() ? advisor.mailbox.trim() : "";
-  const html = `Best regards,<br><strong>${escapeHtml(name)}</strong>${direct ? `<br>${escapeHtml(direct)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}${mailbox ? `<br>${escapeHtml(mailbox)}` : ""}${role ? `<br>${escapeHtml(role)}` : ""}`;
-  const text = ["Best regards", name, direct, email, mailbox, role].filter(Boolean).join("\n");
+  const firm = company.trim() && company.trim().toLowerCase() !== name.toLowerCase() ? company.trim() : "";
+  const html = `Best regards,<br><strong>${escapeHtml(name)}</strong>${role ? `<br>${escapeHtml(role)}` : ""}${direct ? `<br>${escapeHtml(direct)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}${mailbox ? `<br>${escapeHtml(mailbox)}` : ""}${firm ? `<br>${escapeHtml(firm)}` : ""}`;
+  const text = ["Best regards", name, role, direct, email, mailbox, firm].filter(Boolean).join("\n");
   return { html, text };
 }
 
@@ -377,9 +387,11 @@ export function leadLetter(input: {
       const last = index === input.offer.tiers.length - 1;
       const background = last ? "#e7f3fb" : index % 2 ? "#f7fbfe" : "#ffffff";
       const rule = last ? "" : "border-bottom:1px solid #e7eef4;";
+      const total = promotionalTotal(input.terms, tier.months, tier.bonusPercent);
       return `<tr>
         <td style="padding:11px 14px; background:${background}; ${rule} ${last ? "font-weight:700; color:#12315c;" : ""}">${escapeHtml(amountRange(tier))}</td>
         <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:${last ? "#006fcf" : "#12315c"};">${escapeHtml(formatBonus(tier.bonusPercent))}</td>
+        <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:${last ? "#006fcf" : "#12315c"};">${total}</td>
       </tr>`;
     })
     .join("");
@@ -392,7 +404,7 @@ export function leadLetter(input: {
     cards.map((card) => `${card.month}-month CD ${card.apy} APY`).join("\n"),
     `Early withdrawal penalties may apply. Minimum balance to open: ${minimum} new money required.`,
     offerText,
-    input.offer.tiers.map((tier) => `${amountRange(tier)} ${formatBonus(tier.bonusPercent)}`).join("\n"),
+    input.offer.tiers.map((tier) => `${amountRange(tier)} · additional bonus ${formatBonus(tier.bonusPercent)} · total promotional APY ${promotionalTotal(input.terms, tier.months, tier.bonusPercent, "text")}`).join("\n"),
     window,
     protectionText,
     ready,
@@ -459,10 +471,11 @@ export function leadLetter(input: {
               <p style="margin:0 0 12px 0; font-size:14px; line-height:21px;">${escapeHtml(offerText)}</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
                 <tr>
-                  <td style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:12px; font-weight:700; letter-spacing:0.5px;">BALANCE</td>
-                  <td align="right" style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:12px; font-weight:700; letter-spacing:0.5px;">BONUS</td>
+                  <td style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Qualifying Deposit</td>
+                  <td align="right" style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Additional Bonus</td>
+                  <td align="right" style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Total Promotional APY</td>
                 </tr>
-                ${bonuses || `<tr><td colspan="2" style="padding:11px 14px;">No bonus tiers are set.</td></tr>`}
+                ${bonuses || `<tr><td colspan="3" style="padding:11px 14px;">No bonus tiers are set.</td></tr>`}
               </table>
               ${window ? `<p style="margin:10px 0 0 0; text-align:center; font-size:13px; font-style:italic; color:#333;">${escapeHtml(window)}</p>` : ""}
             </td>
@@ -591,9 +604,11 @@ export function applicationLetter(input: {
       const last = index === list.length - 1;
       const background = last ? "#e7f3fb" : index % 2 ? "#f7fbfe" : "#ffffff";
       const rule = last ? "" : "border-bottom:1px solid #e7eef4;";
+      const total = promotionalTotal([{ months, apy: input.apy }], [months], tier.bonusPercent);
       return `<tr>
         <td style="padding:11px 14px; background:${background}; ${rule} ${last ? "font-weight:700; color:#12315c;" : ""}">${escapeHtml(amountRange(tier))}</td>
         <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:${last ? "#006fcf" : "#12315c"};">${escapeHtml(formatBonus(tier.bonusPercent))}</td>
+        <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:${last ? "#006fcf" : "#12315c"};">${total}</td>
       </tr>`;
     })
     .join("");
@@ -619,8 +634,9 @@ export function applicationLetter(input: {
     ? `<p style="margin:16px 0 8px 0; font-size:13px; font-weight:700; color:#12315c;">Relationship bonus for the full term</p>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
             <tr>
-              <td style="background:#12315c; color:#fff; padding:10px 14px; font-size:12px; font-weight:700; letter-spacing:0.5px;">BALANCE</td>
-              <td align="right" style="background:#12315c; color:#fff; padding:10px 14px; font-size:12px; font-weight:700; letter-spacing:0.5px;">BONUS</td>
+              <td style="background:#12315c; color:#fff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Qualifying Deposit</td>
+              <td align="right" style="background:#12315c; color:#fff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Additional Bonus</td>
+              <td align="right" style="background:#12315c; color:#fff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Total Promotional APY</td>
             </tr>
             ${rows}
           </table>`
@@ -830,47 +846,160 @@ export function inviteReminderLetter(input: { leadName: string; company: string;
 
 export function leadRatesChart(terms: { months: number; apy: string }[], offer: PromoOffer) {
   const months = [...new Set(offer.tiers.flatMap((tier) => tier.months))].sort((a, b) => a - b);
-  const textRows = months.map((month) => {
-    const term = terms.find((item) => item.months === month);
-    return `${month}-month base ${term?.apy || "—"} APY`;
-  });
-  for (const tier of offer.tiers) {
-    const cells = months.map((month) => {
-      if (!tier.months.includes(month)) return `${month}-month —`;
-      const term = terms.find((item) => item.months === month);
-      const bonus = formatBonus(tier.bonusPercent);
-      return `${month}-month ${bonus} → ${finalApy(term?.apy || "", tier.bonusPercent)}`;
-    });
-    textRows.push(`${amountRange(tier)}: ${cells.join("; ")}`);
-  }
-  const header = months
-    .map((month) => {
-      const term = terms.find((item) => item.months === month);
-      return `<th style="padding:8px;border:1px solid #e0e0e0;text-align:left;color:#12315c;">${month}-month<br><span style="font-weight:normal;color:#3d3d3d;">${escapeHtml(term?.apy || "—")} base</span></th>`;
-    })
-    .join("");
+  const textRows = offer.tiers.map((tier) => `${amountRange(tier)} · additional bonus ${formatBonus(tier.bonusPercent)} · total promotional APY ${promotionalTotal(terms, tier.months, tier.bonusPercent, "text")}`);
   const body = offer.tiers
-    .map((tier) => {
-      const cells = months
-        .map((month) => {
-          if (!tier.months.includes(month)) return `<td style="padding:8px;border:1px solid #e0e0e0;color:#8c8c8c;">—</td>`;
-          const term = terms.find((item) => item.months === month);
-          return `<td style="padding:8px;border:1px solid #e0e0e0;"><strong>${finalApy(term?.apy || "", tier.bonusPercent)}</strong><br><span style="color:#3d3d3d;">${escapeHtml(formatBonus(tier.bonusPercent))}</span></td>`;
-        })
-        .join("");
-      return `<tr><td style="padding:8px;border:1px solid #e0e0e0;">${escapeHtml(amountRange(tier))}</td>${cells}</tr>`;
-    })
+    .map((tier) => `<tr><td style="padding:8px;border:1px solid #e0e0e0;">${escapeHtml(amountRange(tier))}</td><td style="padding:8px;border:1px solid #e0e0e0;text-align:right;">${escapeHtml(formatBonus(tier.bonusPercent))}</td><td style="padding:8px;border:1px solid #e0e0e0;text-align:right;"><strong>${promotionalTotal(terms, tier.months, tier.bonusPercent)}</strong></td></tr>`)
     .join("");
   const html = months.length && offer.tiers.length
-    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;"><tr><th style="padding:8px;border:1px solid #e0e0e0;text-align:left;color:#12315c;">Amount</th>${header}</tr>${body}</table>`
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;"><tr><th style="padding:8px;border:1px solid #e0e0e0;text-align:left;color:#12315c;">Qualifying Deposit</th><th style="padding:8px;border:1px solid #e0e0e0;text-align:right;color:#12315c;">Additional Bonus</th><th style="padding:8px;border:1px solid #e0e0e0;text-align:right;color:#12315c;">Total Promotional APY</th></tr>${body}</table>`
     : `<p style="margin:0;font-size:14px;color:#3d3d3d;">Promotional rates are not published yet.</p>`;
   return { text: textRows.join("\n"), html };
+}
+
+function promotionalTotal(terms: { months: number; apy: string }[], months: number[], bonusPercent: number, mode: "html" | "text" = "html") {
+  const labeled = terms
+    .filter((term) => months.includes(term.months))
+    .map((term) => ({ months: term.months, total: finalApy(term.apy, bonusPercent) }));
+  if (!labeled.length) return "—";
+  const unique = [...new Set(labeled.map((item) => item.total))];
+  if (unique.length === 1) return escapeHtml(unique[0] || "—");
+  const lines = labeled.map((item) => `${item.total} (${item.months}-mo)`);
+  return mode === "text" ? lines.join(", ") : lines.map((line) => escapeHtml(line)).join("<br>");
 }
 
 function finalApy(apy: string, bonusPercent: number) {
   const final = parseApy(apy) * 100 + bonusPercent;
   const digits = Math.round(final * 1000) % 10 === 0 ? 2 : 3;
   return `${final.toFixed(digits)}%`;
+}
+
+const EXTENSION_RATES = [
+  ["$100,000 – $174,999", "+0.75%", "5.25% APY"],
+  ["$175,000 – $249,999", "+0.99%", "5.49% APY"],
+  ["$250,000 – $499,999", "+1.125%", "5.625% APY"],
+  ["$500,000 and above", "+1.25%", "5.75% APY"],
+] as const;
+
+export type ExtensionCopy = {
+  subject: string;
+  announce: string;
+  base: string;
+  flexibility: string;
+  opportunity: string;
+  contact: string;
+  urgency: string;
+  closing: string;
+};
+
+export function defaultExtensionCopy(): ExtensionCopy {
+  return {
+    subject: "Our New Account Promotional CD Offer is extended through November 6",
+    announce: "We are pleased to announce that our New Account Promotional CD Offer has been extended through **Friday, November 6 (the end of this week)**, and we've increased our rates on both our **10-month and 22-month CD terms**!",
+    base: "Both terms now feature a base rate of **4.50% APY**, with additional New Account Promotional Bonuses available based on your deposit amount.",
+    flexibility: "These promotional rates are available on both the 10-month and 22-month terms, giving you the flexibility to choose the maturity period that best fits your financial objectives.",
+    opportunity: "If you've been considering taking advantage of our high-yield CD offerings, this is an excellent opportunity to secure an enhanced rate while our promotion remains available.",
+    contact: "To learn more or get started, simply reply to this email or call the 1-800 number listed below to speak directly with one of our representatives. We would be happy to walk you through the available options and assist with the application process.",
+    urgency: "**With the promotion ending this Friday, November 6, we encourage you to reach out before the end of this week to take advantage of these enhanced rates.**",
+    closing: "We look forward to hearing from you!",
+  };
+}
+
+export function extensionLetter(input: { leadName: string; company: string; advisor?: MailAdvisor; logo?: string | null; portalUrl?: string; companyPhone?: string; copy?: ExtensionCopy | null }) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.leadName.trim() || "Client";
+  const fallback = defaultExtensionCopy();
+  const copy = input.copy;
+  const subject = copy?.subject.trim() || fallback.subject;
+  const announce = copy?.announce.trim() || fallback.announce;
+  const base = copy?.base.trim() || fallback.base;
+  const flexibility = copy?.flexibility.trim() || fallback.flexibility;
+  const opportunity = copy?.opportunity.trim() || fallback.opportunity;
+  const contact = copy?.contact.trim() || fallback.contact;
+  const urgency = copy?.urgency.trim() || fallback.urgency;
+  const closing = copy?.closing.trim() || fallback.closing;
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
+  const mark = logo
+    ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
+    : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
+  const sign = advisorSignature(input.advisor, company);
+  const help = companyHelp(input.companyPhone);
+  const rows = EXTENSION_RATES.map((row, index) => {
+    const last = index === EXTENSION_RATES.length - 1;
+    const background = last ? "#e7f3fb" : index % 2 ? "#f7fbfe" : "#ffffff";
+    const rule = last ? "" : "border-bottom:1px solid #e7eef4;";
+    return `<tr>
+      <td style="padding:11px 14px; background:${background}; ${rule}">${escapeHtml(row[0])}</td>
+      <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:#12315c;">${escapeHtml(row[1])}</td>
+      <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:#006fcf;">${escapeHtml(row[2])}</td>
+    </tr>`;
+  }).join("");
+  const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(value)}</p>`;
+  const text = [`Dear ${name},`, stripMarks(announce), stripMarks(base), "New Account Promotional Rates", ...EXTENSION_RATES.map((row) => `${row[0]} · ${row[1]} · ${row[2]}`), stripMarks(flexibility), stripMarks(opportunity), stripMarks(contact), stripMarks(urgency), stripMarks(closing), sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">The New Account Promotional CD Offer is extended through Friday, November 6. 10-month and 22-month CDs now start at 4.50% APY.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;">
+    <tr><td align="center" style="padding:20px 10px;">
+      <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
+        <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
+        <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:28px 36px 8px 36px;">
+          <p style="margin:0 0 4px 0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">New account promotional CD</p>
+          <h1 style="margin:0; font-size:26px; line-height:32px; color:#12315c;">Extended through November 6</h1>
+          <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
+          ${paragraph(announce)}
+          ${paragraph(base)}
+          <p style="margin:22px 0 10px 0; font-size:18px; font-weight:700; color:#12315c;">New Account Promotional Rates</p>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
+            <tr>
+              <td style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700;">Qualifying Deposit</td>
+              <td align="right" style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700;">Additional Bonus</td>
+              <td align="right" style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700;">Total Promotional APY</td>
+            </tr>
+            ${rows}
+          </table>
+          ${paragraph(flexibility)}
+          ${paragraph(opportunity)}
+          ${paragraph(contact)}
+          ${paragraph(urgency)}
+          ${paragraph(closing)}
+          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        </td></tr>
+        <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+          <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+          <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
+        </td></tr>
+        <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
+          <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">Promotional rates are for new accounts on the 10-month and 22-month certificates and are available through Friday, November 6. A penalty may be imposed for early withdrawal. Offer subject to account requirements and availability.</p>
+          <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+  return { subject, text, html };
+}
+
+function richText(value: string) {
+  return value
+    .split(/(\*\*[^*]+\*\*)/g)
+    .map((part) => (part.startsWith("**") && part.endsWith("**") ? `<strong>${escapeHtml(part.slice(2, -2))}</strong>` : escapeHtml(part)))
+    .join("");
+}
+
+function stripMarks(value: string) {
+  return value.replace(/\*\*/g, "");
+}
+
+function sampleExtensionLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  return extensionLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone });
 }
 
 function sampleLeadLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {

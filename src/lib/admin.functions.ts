@@ -1207,6 +1207,67 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
       replyName: advisor.name,
       fromAddress: advisor.mailbox,
       relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    return { ok: true as const };
+  });
+
+export const sendLeadExtension = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").ExtensionCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 160),
+          announce: clip(input.copy.announce, 800),
+          base: clip(input.copy.base, 500),
+          flexibility: clip(input.copy.flexibility, 500),
+          opportunity: clip(input.copy.opportunity, 500),
+          contact: clip(input.copy.contact, 600),
+          urgency: clip(input.copy.urgency, 500),
+          closing: clip(input.copy.closing, 240),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { extensionLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const letter = extensionLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      copy: data.copy,
+    });
+    await sendStep(sql, {
+      step: "lead_extension",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+      advisorId: data.advisorId,
     });
     return { ok: true as const };
   });
@@ -1289,6 +1350,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       replyName: advisor.name,
       fromAddress: advisor.mailbox,
       relatedId: token,
+      advisorId: data.advisorId,
     });
     return { ok: true as const };
   });
@@ -1309,6 +1371,11 @@ async function ensureCrmLeads(sql: Sql) {
       created_at timestamptz not null default now()
     )
   `;
+  await sql`alter table crm_leads add column if not exists perfex_id text not null default ''`;
+  await sql`alter table crm_leads add column if not exists status text not null default ''`;
+  await sql`alter table crm_leads add column if not exists notes text not null default ''`;
+  await sql`alter table crm_leads add column if not exists notes_at timestamptz`;
+  await sql`alter table crm_leads add column if not exists advisor_id text not null default ''`;
 }
 
 export type CrmLead = {
@@ -1321,31 +1388,121 @@ export type CrmLead = {
   objective: string;
   liquidity: string;
   source: string;
+  status: string;
+  notes: string;
+  advisorId: string;
   receivedAt: string;
 };
 
-export const listCrmLeads = createServerFn({ method: "GET" }).handler(async () => {
-  await requireAdmin();
-  const { getSql } = await import("@/lib/db");
-  const sql = await getSql();
-  await ensureCrmLeads(sql);
-  const rows = await sql<{
-    id: string;
-    name: string;
-    email: string;
-    phone: string;
-    amount: string;
-    term: string;
-    objective: string;
-    liquidity: string;
-    source: string;
-    received_at: string | Date;
-  }>`
-    select id, name, email, phone, amount, term, objective, liquidity, source, received_at
-    from crm_leads
-    order by received_at desc, created_at desc
-  `;
-  return rows.map((row) => ({
+export type LeadPage = {
+  rows: CrmLead[];
+  total: number;
+  page: number;
+  pageSize: number;
+  sources: string[];
+  statuses: string[];
+  focus: CrmLead | null;
+};
+
+const LEAD_PAGE_SIZE = 50;
+
+export const listCrmLeads = createServerFn({ method: "GET" })
+  .validator((input: { page?: number; query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean; focusId?: string } | undefined) => {
+    const page = Math.min(10000, Math.max(1, Math.floor(Number(input?.page) || 1)));
+    const query = (input?.query || "").trim().replace(/[%_]/g, "").slice(0, 80);
+    const source = (input?.source || "").trim().slice(0, 80);
+    const status = (input?.status || "").trim().slice(0, 80);
+    const advisorId = (input?.advisorId || "").trim().slice(0, 80);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(input?.from || "") ? input?.from || "" : "";
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(input?.to || "") ? input?.to || "" : "";
+    return { page, query, source, status, advisorId, from, to, withEmail: Boolean(input?.withEmail), focusId: (input?.focusId || "").slice(0, 80) };
+  })
+  .handler(async ({ data }): Promise<LeadPage> => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (data.query) {
+      params.push(`%${data.query}%`);
+      where.push(`(name ilike $${params.length} or email ilike $${params.length} or phone ilike $${params.length})`);
+    }
+    if (data.source) {
+      params.push(data.source);
+      where.push(`source = $${params.length}`);
+    }
+    if (data.status) {
+      params.push(data.status);
+      where.push(`status = $${params.length}`);
+    }
+    if (data.advisorId) {
+      params.push(data.advisorId);
+      where.push(`advisor_id = $${params.length}`);
+    }
+    if (data.from) {
+      params.push(`${data.from}T00:00:00.000Z`);
+      where.push(`received_at >= $${params.length}`);
+    }
+    if (data.to) {
+      const end = new Date(`${data.to}T00:00:00.000Z`);
+      end.setUTCDate(end.getUTCDate() + 1);
+      params.push(end.toISOString());
+      where.push(`received_at < $${params.length}`);
+    }
+    if (data.withEmail) where.push(`email <> ''`);
+    const clause = where.length ? `where ${where.join(" and ")}` : "";
+    const counted = await sql.query<{ count: number }>(`select count(*)::int as count from crm_leads ${clause}`, params);
+    const total = Number(counted[0]?.count || 0);
+    const pageCount = Math.max(1, Math.ceil(total / LEAD_PAGE_SIZE));
+    const page = Math.min(data.page, pageCount);
+    const offset = (page - 1) * LEAD_PAGE_SIZE;
+    const rows = await sql.query<{
+      id: string;
+      name: string;
+      email: string;
+      phone: string;
+      amount: string;
+      term: string;
+      objective: string;
+      liquidity: string;
+      source: string;
+      status: string;
+      notes: string;
+      notes_at: string | Date | null;
+      perfex_id: string;
+      advisor_id: string;
+      received_at: string | Date;
+    }>(
+      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, received_at
+       from crm_leads ${clause}
+       order by received_at desc, created_at desc
+       limit $${params.length + 1} offset $${params.length + 2}`,
+      [...params, LEAD_PAGE_SIZE, offset],
+    );
+    await attachPerfexNotes(sql, rows);
+    const sources = await sql.query<{ source: string }>(`select distinct source from crm_leads where source <> '' order by source limit 200`);
+    const statuses = await sql.query<{ status: string }>(`select distinct status from crm_leads where status <> '' order by status limit 100`);
+    const focused = data.focusId
+      ? await sql.query<{ id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status: string; notes: string; notes_at: string | Date | null; perfex_id: string; advisor_id: string; received_at: string | Date }>(
+          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, received_at from crm_leads where id = $1 limit 1`,
+          [data.focusId],
+        )
+      : [];
+    if (focused[0]) await attachPerfexNotes(sql, focused);
+    return {
+      rows: rows.map(mapCrmLead),
+      total,
+      page,
+      pageSize: LEAD_PAGE_SIZE,
+      sources: sources.map((row) => row.source),
+      statuses: statuses.map((row) => row.status),
+      focus: focused[0] ? mapCrmLead(focused[0]) : null,
+    };
+  });
+
+function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; notes?: string; advisor_id?: string; received_at: string | Date }): CrmLead {
+  return {
     id: row.id,
     name: row.name,
     email: row.email,
@@ -1355,7 +1512,178 @@ export const listCrmLeads = createServerFn({ method: "GET" }).handler(async () =
     objective: row.objective,
     liquidity: row.liquidity,
     source: row.source,
+    status: row.status || "",
+    notes: row.notes || "",
+    advisorId: row.advisor_id || "",
     receivedAt: new Date(row.received_at).toISOString(),
+  };
+}
+
+export type LeadMailRow = {
+  id: string;
+  sentAt: string;
+  name: string;
+  email: string;
+  phone: string;
+  amount: string;
+  term: string;
+  step: string;
+  subject: string;
+  status: string;
+  delivery: string;
+  advisorId: string;
+  advisorName: string;
+};
+
+export const listLeadMailReport = createServerFn({ method: "GET" })
+  .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
+    const from = (input.from || "").slice(0, 10);
+    const to = (input.to || "").slice(0, 10);
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension"];
+    const step = allowed.includes(input.step || "") ? input.step || "" : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
+    return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { ensureMailColumn } = await import("@/lib/mail.server");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    await ensureMailColumn(sql);
+    const start = `${data.from}T00:00:00.000Z`;
+    const endDate = new Date(`${data.to}T00:00:00.000Z`);
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    const advisors = await sql<{ id: string; name: string; email: string }>`select id, name, email from advisors`;
+    const byId = new Map(advisors.map((advisor) => [advisor.id, advisor]));
+    const byEmail = new Map(advisors.filter((advisor) => advisor.email).map((advisor) => [advisor.email.trim().toLowerCase(), advisor]));
+    const byName = new Map(advisors.map((advisor) => [advisor.name.trim().toLowerCase(), advisor]));
+    const rows = await sql<{
+      id: string;
+      sent_at: string;
+      recipient: string;
+      step: string;
+      subject: string;
+      mail_status: string;
+      delivery: string;
+      related_id: string;
+      advisor_id: string;
+      name: string;
+      phone: string;
+      amount: string;
+      term: string;
+      invite_advisor: string;
+      invite_email: string;
+    }>`
+      select n.id, to_char(n.created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as sent_at,
+             n.recipient, n.step, n.subject, coalesce(n.mail_status, '') as mail_status, n.delivery,
+             n.related_id, coalesce(n.advisor_id, '') as advisor_id,
+             coalesce(l.name, '') as name, coalesce(l.phone, '') as phone, coalesce(l.amount, '') as amount, coalesce(l.term, '') as term,
+             coalesce(i.advisor_name, '') as invite_advisor, coalesce(i.advisor_email, '') as invite_email
+      from notifications n
+      left join crm_leads l on lower(l.email) = lower(n.recipient)
+      left join lead_invites i on i.token = n.related_id
+      where n.audience = 'client'
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension')
+        and n.created_at >= ${start}
+        and n.created_at < ${endDate.toISOString()}
+      order by n.created_at desc
+    `;
+    return rows
+      .map((row) => {
+        const advisor = byId.get(row.advisor_id) || (row.step === "lead_intro" ? byId.get(row.related_id) : undefined) || byEmail.get(row.invite_email.trim().toLowerCase()) || byName.get(row.invite_advisor.trim().toLowerCase());
+        return {
+          id: row.id,
+          sentAt: row.sent_at,
+          name: row.name || row.recipient,
+          email: row.recipient,
+          phone: row.phone,
+          amount: row.amount,
+          term: row.term,
+          step: row.step,
+          subject: row.subject,
+          status: row.mail_status,
+          delivery: row.delivery,
+          advisorId: advisor?.id || "",
+          advisorName: advisor?.name || row.invite_advisor || "Unassigned",
+        };
+      })
+      .filter((row) => !data.step || row.step === data.step)
+      .filter((row) => !data.advisorId || row.advisorId === data.advisorId);
+  });
+
+export type IntroOpen = {
+  leadId: string;
+  name: string;
+  email: string;
+  phone: string;
+  amount: string;
+  term: string;
+  advisorId: string;
+  advisorName: string;
+  sentAt: string;
+  mailStatus: string;
+  applicationSent: boolean;
+};
+
+export const listIntroOpens = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  await ensureCrmLeads(sql);
+  const rows = await sql<{
+    lead_id: string;
+    name: string;
+    email: string;
+    phone: string;
+    amount: string;
+    term: string;
+    advisor_id: string;
+    advisor_name: string;
+    sent_at: string;
+    mail_status: string;
+    application_sent: boolean;
+  }>`
+    select * from (
+      select distinct on (lower(n.recipient))
+        coalesce(l.id, '') as lead_id,
+        coalesce(nullif(l.name, ''), n.recipient) as name,
+        n.recipient as email,
+        coalesce(l.phone, '') as phone,
+        coalesce(l.amount, '') as amount,
+        coalesce(l.term, '') as term,
+        coalesce(n.advisor_id, '') as advisor_id,
+        coalesce(a.name, '') as advisor_name,
+        to_char(n.created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as sent_at,
+        coalesce(n.mail_status, '') as mail_status,
+        exists (
+          select 1 from notifications later
+          where later.audience = 'client'
+            and lower(later.recipient) = lower(n.recipient)
+            and later.step in ('lead_application', 'lead_promo')
+            and later.delivery = 'sent'
+        ) as application_sent
+      from notifications n
+      left join crm_leads l on lower(l.email) = lower(n.recipient)
+      left join advisors a on a.id = n.advisor_id
+      where n.audience = 'client' and n.step = 'lead_intro' and n.delivery = 'sent'
+      order by lower(n.recipient), n.created_at desc
+    ) opens
+    order by sent_at desc
+    limit 300
+  `;
+  return rows.map((row) => ({
+    leadId: row.lead_id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    amount: row.amount,
+    term: row.term,
+    advisorId: row.advisor_id,
+    advisorName: row.advisor_name,
+    sentAt: row.sent_at,
+    mailStatus: row.mail_status,
+    applicationSent: Boolean(row.application_sent),
   }));
 });
 
@@ -1378,6 +1706,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
       objective: clip(input.objective),
       liquidity: clip(input.liquidity),
       source: clip(input.source),
+      advisorId: input.advisorId == null ? null : (input.advisorId || "").trim().slice(0, 80),
       receivedAt: received.toISOString(),
     };
   })
@@ -1388,7 +1717,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
     await ensureCrmLeads(sql);
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, received_at)
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, received_at)
       values (
         ${id},
         ${data.name},
@@ -1399,6 +1728,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         ${data.objective},
         ${data.liquidity},
         ${data.source},
+        ${data.advisorId || ""},
         ${data.receivedAt}
       )
       on conflict (id) do update set
@@ -1410,10 +1740,281 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         objective = excluded.objective,
         liquidity = excluded.liquidity,
         source = excluded.source,
+        advisor_id = coalesce(${data.advisorId}, crm_leads.advisor_id),
         received_at = excluded.received_at
     `;
     return { id };
   });
+
+export const getPerfexSetup = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const rows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('perfex_url', 'perfex_token')`;
+  const url = rows.find((row) => row.key === "perfex_url")?.value.trim() || "";
+  const token = rows.find((row) => row.key === "perfex_token")?.value.trim() || "";
+  return { url, hasToken: Boolean(token), tokenHint: token ? `••••${token.slice(-4)}` : "" };
+});
+
+export const savePerfexSetup = createServerFn({ method: "POST" })
+  .validator((input: { url: string; token: string; clearToken: boolean }) => {
+    const url = (input.url || "").trim().replace(/\/+$/, "").slice(0, 200);
+    if (url && !/^https?:\/\/[^\s]+$/i.test(url)) throw new Error("Enter the Perfex site address, starting with https://.");
+    const token = (input.token || "").trim().slice(0, 200);
+    if (token && /\s/.test(token)) throw new Error("The API token cannot contain spaces.");
+    return { url, token, clearToken: Boolean(input.clearToken) };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`
+      insert into site_settings (key, value) values ('perfex_url', ${data.url})
+      on conflict (key) do update set value = excluded.value
+    `;
+    if (data.clearToken) await sql`delete from site_settings where key = 'perfex_token'`;
+    else if (data.token) {
+      await sql`
+        insert into site_settings (key, value) values ('perfex_token', ${data.token})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    const rows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('perfex_url', 'perfex_token')`;
+    const token = rows.find((row) => row.key === "perfex_token")?.value.trim() || "";
+    return { url: rows.find((row) => row.key === "perfex_url")?.value.trim() || "", hasToken: Boolean(token), tokenHint: token ? `••••${token.slice(-4)}` : "" };
+  });
+
+export const importPerfexLeads = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  await ensureCrmLeads(sql);
+  const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('perfex_url', 'perfex_token')`;
+  const base = (settings.find((row) => row.key === "perfex_url")?.value || "").trim().replace(/\/+$/, "");
+  const token = (settings.find((row) => row.key === "perfex_token")?.value || "").trim();
+  if (!/^https?:\/\//i.test(base) || !token) throw new Error("Save the Perfex address and API token in Settings → Misc first.");
+  const incoming = await readPerfexLeads(base, token);
+  const existing = await sql<{ id: string; email: string; perfex_id: string }>`select id, lower(email) as email, coalesce(perfex_id, '') as perfex_id from crm_leads`;
+  const byPerfex = new Map(existing.filter((row) => row.perfex_id).map((row) => [row.perfex_id, row.id]));
+  const byEmail = new Map(existing.filter((row) => row.email).map((row) => [row.email, row.id]));
+  let created = 0;
+  let skipped = 0;
+  const updates: { perfexId: string; status: string; amount: string; term: string; objective: string }[] = [];
+  for (const lead of incoming) {
+    if (byPerfex.has(lead.perfexId)) {
+      updates.push({ perfexId: lead.perfexId, status: lead.status, amount: lead.amount, term: lead.term, objective: lead.objective });
+      continue;
+    }
+    if (lead.email && byEmail.has(lead.email)) {
+      skipped += 1;
+      continue;
+    }
+    const id = crypto.randomUUID();
+    await sql`
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, status, received_at, perfex_id)
+      values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, '', ${lead.source}, ${lead.status}, ${lead.receivedAt}, ${lead.perfexId})
+    `;
+    byPerfex.set(lead.perfexId, id);
+    if (lead.email) byEmail.set(lead.email, id);
+    created += 1;
+  }
+  await updatePerfexDetails(sql, updates);
+  return { created, skipped, updated: updates.length };
+});
+
+async function readPerfexLeads(base: string, token: string) {
+  const headers = { Authtoken: token, Authorization: `Bearer ${token}`, accept: "application/json" };
+  const first = await fetch(`${base}/api/leads`, { headers, signal: AbortSignal.timeout(20000) });
+  const payload = await first.json().catch(() => null);
+  if (!first.ok || payload == null) {
+    const message = payload && typeof payload === "object" && "message" in payload ? String((payload as { message?: unknown }).message || "") : "";
+    throw new Error(message || `Perfex could not be reached (${first.status}). Check the address and that the token can read leads.`);
+  }
+  const leads = perfexRecords(payload);
+  return leads.map(perfexLead).filter((lead): lead is NonNullable<typeof lead> => Boolean(lead));
+}
+
+function perfexRecords(payload: unknown) {
+  if (Array.isArray(payload)) return payload.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  if (record.status === false || record.success === false) {
+    throw new Error(typeof record.message === "string" && record.message ? record.message : "Perfex refused the request.");
+  }
+  const lists = [record.data, record.leads, record.records];
+  for (const list of lists) {
+    if (Array.isArray(list)) return list.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+    if (list && typeof list === "object") {
+      const nested = list as Record<string, unknown>;
+      if (Array.isArray(nested.data)) return nested.data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+      if (Array.isArray(nested.leads)) return nested.leads.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+    }
+  }
+  return [];
+}
+
+function perfexText(row: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function perfexLead(row: Record<string, unknown>) {
+  if (perfexText(row, "junk") === "1") return null;
+  const perfexId = perfexText(row, "id");
+  const name = (perfexText(row, "name") || `${perfexText(row, "first_name")} ${perfexText(row, "last_name")}`.trim()).replace(/\s+/g, " ").slice(0, 120);
+  if (!perfexId || name.length < 2) return null;
+  const email = perfexText(row, "email").toLowerCase();
+  const received = new Date(perfexText(row, "dateadded", "created_at", "date_added") || Date.now());
+  const statusId = perfexText(row, "status");
+  const statusName = PERFEX_STATUS_NAMES[statusId] || perfexText(row, "status_name", "statusname");
+  const fields = perfexFieldList(row);
+  const amount = pickPerfexField(fields, ["invest amount"]);
+  const term = pickPerfexField(fields, ["invest term"]);
+  const objective = pickPerfexField(fields, ["invest in"]);
+  return {
+    perfexId: perfexId.slice(0, 40),
+    name,
+    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "",
+    phone: perfexText(row, "phonenumber", "phone").slice(0, 80),
+    amount: amount.slice(0, 80),
+    term: term.slice(0, 80),
+    objective: objective.slice(0, 240),
+    source: (perfexText(row, "source_name") || "Perfex").slice(0, 80),
+    status: (statusName || (statusId ? `Status ${statusId}` : "")).slice(0, 80),
+    receivedAt: Number.isNaN(received.getTime()) ? new Date().toISOString() : received.toISOString(),
+  };
+}
+
+const PERFEX_STATUS_NAMES: Record<string, string> = {
+  "1": "Customer",
+  "2": "Popeye 100k and up",
+  "3": "Back to Broker",
+  "4": "Call in future",
+  "5": "DNC",
+  "6": "Sent email",
+  "7": "Sent application",
+  "8": "Application received",
+  "9": "Not interested",
+  "10": "Called",
+  "16": "Wrong number",
+  "17": "App sent JP",
+  "18": "New PPC",
+  "20": "Call from JP",
+  "27": "Sent email JP",
+  "29": "popeye new under 100k",
+  "31": "20k popeye ppc",
+  "33": "App in JP",
+  "34": "NEW",
+  "35": "Project",
+};
+
+function perfexFieldList(row: Record<string, unknown>) {
+  const raw = row.customfields ?? row.custom_fields ?? row.customFields;
+  if (!Array.isArray(raw)) return [];
+  const fields: { label: string; value: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const field = item as Record<string, unknown>;
+    const label = perfexText(field, "label", "name").replace(/\s+/g, " ");
+    let value = perfexText(field, "value").replace(/\s+/g, " ");
+    if (value.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        if (Array.isArray(parsed)) value = parsed.map((part) => String(part)).join(", ");
+      } catch {
+        // Keep the original text when the value is not a JSON list.
+      }
+    }
+    if (!label || !value) continue;
+    fields.push({ label, value });
+  }
+  return fields;
+}
+
+function pickPerfexField(fields: { label: string; value: string }[], names: string[]) {
+  const wanted = new Set(names);
+  const match = fields.find((field) => wanted.has(field.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()));
+  return match?.value || "";
+}
+
+async function updatePerfexDetails(sql: Sql, rows: { perfexId: string; status: string; amount: string; term: string; objective: string }[]) {
+  const size = 80;
+  for (let index = 0; index < rows.length; index += size) {
+    const chunk = rows.slice(index, index + size);
+    const values: string[] = [];
+    const tuples = chunk.map((row) => {
+      const start = values.length + 1;
+      values.push(row.perfexId, row.status, row.amount, row.term, row.objective);
+      return `($${start}, $${start + 1}, $${start + 2}, $${start + 3}, $${start + 4})`;
+    });
+    await sql.query(
+      `update crm_leads as lead
+       set status = incoming.status,
+           amount = case when incoming.amount <> '' then incoming.amount else lead.amount end,
+           term = case when incoming.term <> '' then incoming.term else lead.term end,
+           objective = case when incoming.objective <> '' then incoming.objective else lead.objective end,
+           notes_at = null
+       from (values ${tuples.join(", ")}) as incoming(perfex_id, status, amount, term, objective)
+       where lead.perfex_id = incoming.perfex_id`,
+      values,
+    );
+  }
+}
+
+async function attachPerfexNotes(sql: Sql, rows: { perfex_id: string; notes: string; notes_at: string | Date | null }[]) {
+  const pending = rows.filter((row) => row.perfex_id && !row.notes_at);
+  if (!pending.length) return;
+  const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('perfex_url', 'perfex_token')`;
+  const base = (settings.find((row) => row.key === "perfex_url")?.value || "").trim().replace(/\/+$/, "");
+  const token = (settings.find((row) => row.key === "perfex_token")?.value || "").trim();
+  if (!/^https?:\/\//i.test(base) || !token) return;
+  const headers = { Authtoken: token, Authorization: `Bearer ${token}`, accept: "application/json" };
+  let blocked = false;
+  const queue = [...pending];
+  async function pull() {
+    while (!blocked && queue.length) {
+      const row = queue.shift();
+      if (!row) return;
+      try {
+        const response = await fetch(`${base}/api/notes/lead/${encodeURIComponent(row.perfex_id)}`, { headers, signal: AbortSignal.timeout(8000) });
+        if (response.status === 401 || response.status === 403) {
+          blocked = true;
+          return;
+        }
+        const payload = response.ok ? await response.json().catch(() => null) : null;
+        const notes = response.status === 404 ? "" : perfexNotesText(payload);
+        row.notes = notes;
+        row.notes_at = new Date().toISOString();
+        await sql.query(`update crm_leads set notes = $1, notes_at = now() where perfex_id = $2`, [notes, row.perfex_id]);
+      } catch {
+        // Leave this lead unmarked so the next page load can try again.
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, pending.length) }, () => pull()));
+}
+
+function perfexNotesText(payload: unknown) {
+  const list = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
+      ? ((payload as { data: unknown[] }).data)
+      : [];
+  const lines = list
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const note = item as Record<string, unknown>;
+      const text = perfexText(note, "description", "note", "content").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const added = perfexText(note, "dateadded", "date_added").slice(0, 16);
+      return text ? (added ? `${added} — ${text}` : text) : "";
+    })
+    .filter(Boolean);
+  return lines.join("\n").slice(0, 4000);
+}
 
 export const deleteCrmLead = createServerFn({ method: "POST" })
   .validator((input: { id: string }) => input)
@@ -1436,13 +2037,82 @@ export const listAdvisors = createServerFn({ method: "GET" }).handler(async () =
   return rows.map((row) => ({ ...row, personalPhone: row.personal_phone }));
 });
 
+export const listSmtpUsers = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { readMailConfig } = await import("@/lib/mail.server");
+  const mail = await readMailConfig(await getSql());
+  const key = mail.smtpKey.replace(/\s+/g, "");
+  if (!key) throw new Error("Save the SMTP2GO API key in Settings first.");
+  const urls = [
+    "https://api.smtp2go.com/v3/users/smtp/view",
+    "https://us-api.smtp2go.com/v3/users/smtp/view",
+    "https://eu-api.smtp2go.com/v3/users/smtp/view",
+    "https://au-api.smtp2go.com/v3/users/smtp/view",
+  ];
+  const headers: Record<string, string> = { "Content-Type": "application/json", accept: "application/json" };
+  if (/^[\x21-\x7E]+$/.test(key)) headers["X-Smtp2go-Api-Key"] = key;
+  const found = new Map<string, { username: string; address: string; comments: string }>();
+  const errors: string[] = [];
+  await Promise.all(
+    urls.map(async (url) => {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers,
+          signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ api_key: key }),
+        });
+      } catch (caught) {
+        const detail = caught instanceof Error && caught.message ? caught.message : "no response";
+        errors.push(detail);
+        return;
+      }
+      const payload = (await response.json().catch(() => ({}))) as { data?: { error?: string; error_code?: string } };
+      const error = payload.data?.error || "";
+      if (!response.ok || error) {
+        let message = error || `SMTP users could not be loaded (${response.status}).`;
+        if (/permission/i.test(message)) message = "This API key cannot list SMTP users. On the key, enable SMTP Users → /users/smtp/view, then paste that key into Settings.";
+        errors.push(message);
+        return;
+      }
+      const visit = (node: unknown) => {
+        if (!node || typeof node !== "object") return;
+        if (Array.isArray(node)) {
+          node.forEach(visit);
+          return;
+        }
+        const record = node as Record<string, unknown>;
+        const username = String(record.username || record.user_name || "").trim();
+        if (username && username.length < 160 && !/\s/.test(username)) {
+          const email = String(record.email || record.email_address || record.sender || "").trim();
+          const address = /@/.test(username) ? username : /@/.test(email) ? email : username;
+          const comments = String(record.comments || record.description || "").trim();
+          found.set(address, { username, address, comments });
+        }
+        for (const value of Object.values(record)) {
+          if (value && typeof value === "object") visit(value);
+        }
+      };
+      visit(payload);
+    }),
+  );
+  if (!found.size) {
+    const detail = errors.find((item) => /permission|could not be loaded|API key/i.test(item)) || errors[0] || "SMTP2GO returned no SMTP users.";
+    throw new Error(detail === "The operation was aborted." || /timeout|aborted|fetch failed|network/i.test(detail) ? `SMTP2GO did not respond (${detail}).` : detail);
+  }
+  return [...found.values()];
+});
+
 export const saveAdvisor = createServerFn({ method: "POST" })
   .validator((input: Advisor) => input)
   .handler(async ({ data }) => {
     await requireAdmin();
     if (!data.name.trim()) throw new Error("Name is required.");
     const { cleanMailFrom } = await import("@/lib/mail.server");
-    const mailbox = data.mailbox?.trim() ? cleanMailFrom(data.mailbox) : "";
+    const rawMailbox = (data.mailbox || "").trim();
+    const mailbox = !rawMailbox ? "" : /@/.test(rawMailbox) ? cleanMailFrom(rawMailbox) : rawMailbox.slice(0, 160);
     const role = (data.role || "").trim().slice(0, 80);
     const personalPhone = (data.personalPhone || "").trim().slice(0, 40);
     const { getSql } = await import("@/lib/db");
@@ -2232,7 +2902,7 @@ function dataFile(name: string, value: string) {
   return { filename, content };
 }
 
-async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string }) {
+async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string }) {
   try {
     const { notifyStep } = await import("@/lib/mail.server");
     await notifyStep(sql, input);
@@ -2253,9 +2923,13 @@ export type NotificationRow = {
   delivery: string;
   resendId: string;
   mailStatus: string;
+  mailProvider: string;
   link: string;
   expiresAt: string;
   usedAt: string;
+  leadId: string;
+  applicationId: string;
+  applicationStatus: string;
 };
 
 export const listNotifications = createServerFn({ method: "GET" }).handler(async () => {
@@ -2264,6 +2938,16 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
   const { ensureMailColumn } = await import("@/lib/mail.server");
   const sql = await getSql();
   await ensureMailColumn(sql);
+  await ensureCrmLeads(sql);
+  const leads = await sql<{ id: string; email: string }>`select id, lower(email) as email from crm_leads where email <> '' order by received_at desc`;
+  const applications = await sql<{ id: string; email: string; status: string }>`
+    select distinct on (lower(email)) id, lower(email) as email, status
+    from applications
+    order by lower(email), submitted_at desc
+  `;
+  const leadByEmail = new Map<string, string>();
+  for (const lead of leads) if (!leadByEmail.has(lead.email)) leadByEmail.set(lead.email, lead.id);
+  const applicationByEmail = new Map(applications.map((row) => [row.email, row]));
   const rows = await sql<{
     id: string;
     created_at: string;
@@ -2276,10 +2960,11 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
     delivery: string;
     resend_id: string;
     mail_status: string;
+    mail_provider: string;
     related_id: string;
   }>`
     select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at,
-           audience, recipient, step, subject, body, html, delivery, resend_id, mail_status, related_id
+           audience, recipient, step, subject, body, html, delivery, resend_id, mail_status, coalesce(mail_provider, '') as mail_provider, related_id
     from notifications
     order by created_at desc
     limit 200
@@ -2295,6 +2980,8 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
     const invite = byToken.get(row.related_id) || byToken.get(fromHtml);
     const token = invite?.token || "";
     const link = token && /^https?:\/\//i.test(origin) ? `${origin}/application?invite=${token}` : "";
+    const email = row.recipient.trim().toLowerCase();
+    const application = applicationByEmail.get(email);
     return {
       id: row.id,
       createdAt: row.created_at,
@@ -2307,9 +2994,13 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
       delivery: row.delivery,
       resendId: row.resend_id || "",
       mailStatus: row.mail_status || "",
+      mailProvider: row.mail_provider || "",
       link,
       expiresAt: invite?.expires_at ? new Date(invite.expires_at).toISOString() : "",
       usedAt: invite?.used_at ? new Date(invite.used_at).toISOString() : "",
+      leadId: leadByEmail.get(email) || "",
+      applicationId: application?.id || "",
+      applicationStatus: application?.status || "",
     };
   });
 });

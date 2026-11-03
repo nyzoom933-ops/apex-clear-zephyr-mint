@@ -130,6 +130,11 @@ export async function remindDueInvites() {
         advisor: { name: row.advisor_name, phone: row.advisor_phone, email: row.advisor_email, mailbox: row.advisor_mailbox, role: row.advisor_role, personalPhone: row.advisor_personal_phone },
         companyPhone: settings.find((item) => item.key === "company_phone")?.value || "",
       });
+      const advisors = await sql<{ id: string }>`
+        select id from advisors
+        where lower(email) = lower(${row.advisor_email}) or name = ${row.advisor_name}
+        limit 1
+      `;
       await notifyStep(sql, {
         step: "lead_invite_reminder",
         clientEmail: row.email,
@@ -142,6 +147,7 @@ export async function remindDueInvites() {
         replyName: row.advisor_name,
         fromAddress: row.advisor_mailbox,
         relatedId: row.token,
+        advisorId: advisors[0]?.id || "",
       });
       sent += 1;
     } catch (error) {
