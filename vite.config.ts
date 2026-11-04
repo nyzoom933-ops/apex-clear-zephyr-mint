@@ -142,6 +142,13 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+// Vercel publish keeps the vercel preset. `npm run build:node` sets
+// NITRO_PRESET=node-server so a VPS can run the output with `npm start`.
+const nitroPreset =
+  process.env.NITRO_PRESET === "node" || process.env.NITRO_PRESET === "node-server"
+    ? "node-server"
+    : "vercel";
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
@@ -170,7 +177,7 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "vercel",
+            preset: nitroPreset,
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
