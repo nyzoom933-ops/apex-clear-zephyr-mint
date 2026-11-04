@@ -870,6 +870,16 @@ export const saveCdTerms = createServerFn({ method: "POST" })
         values (${term.id || crypto.randomUUID()}, ${term.apy.trim()}, ${months}, ${Boolean(term.featured)}, ${index})
       `;
     }
+    const allowed = new Set(ordered.map((term) => Number(term.months)).filter((month) => month > 0));
+    const stored = await sql<{ id: string; months: string }>`select id, months from promo_tiers`;
+    for (const tier of stored) {
+      const months = tier.months
+        .split("|")
+        .map(Number)
+        .filter((month) => allowed.has(month));
+      const next = months.join("|");
+      if (next !== tier.months) await sql`update promo_tiers set months = ${next} where id = ${tier.id}`;
+    }
     return { ok: true };
   });
 
@@ -897,8 +907,13 @@ async function loadPromo(sql: { <T>(strings: TemplateStringsArray, ...values: un
   const tiers = await sql<{ id: string; min_amount: string; max_amount: string | null; bonus_percent: string; months: string }>`
     select id, min_amount, max_amount, bonus_percent, months from promo_tiers order by sort_order asc, min_amount asc
   `;
-  if (!settings[0]) return { intro: "", protection: "", finePrint: "", startsOn: "", endsOn: "", tiers: [] } satisfies PromoOffer;
-  return mapPromo(settings[0], tiers);
+  const termRows = await sql<{ months: number | string }>`select months from cd_terms`;
+  const allowed = new Set(termRows.map((row) => Number(row.months)));
+  const offer = settings[0] ? mapPromo(settings[0], tiers) : { intro: "", protection: "", finePrint: "", startsOn: "", endsOn: "", tiers: [] };
+  return {
+    ...offer,
+    tiers: offer.tiers.map((tier) => ({ ...tier, months: tier.months.filter((month) => allowed.has(month)) })),
+  } satisfies PromoOffer;
 }
 
 export const getPromo = createServerFn({ method: "GET" }).handler(async () => {
@@ -925,15 +940,18 @@ export const savePromo = createServerFn({ method: "POST" })
         ends_on = excluded.ends_on
     `;
     await sql`delete from promo_tiers`;
+    const termRows = await sql<{ months: number | string }>`select months from cd_terms`;
+    const allowed = new Set(termRows.map((row) => Number(row.months)));
     for (let index = 0; index < data.tiers.length; index += 1) {
       const tier = data.tiers[index];
       const min = Number(tier.minAmount);
       const max = tier.maxAmount == null || String(tier.maxAmount) === "" ? null : Number(tier.maxAmount);
       const bonus = Number(tier.bonusPercent);
-      const months = [...new Set(tier.months.map(Number).filter((month) => month > 0))];
-      if (!Number.isFinite(min) || min < 0 || !Number.isFinite(bonus) || bonus < 0 || months.length === 0) {
-        throw new Error("Each tier needs an amount, a bonus, and at least one term.");
+      const months = [...new Set(tier.months.map(Number).filter((month) => allowed.has(month)))];
+      if (!Number.isFinite(min) || min < 0 || !Number.isFinite(bonus) || bonus < 0) {
+        throw new Error("Each amount band needs a minimum and a bonus percent.");
       }
+      if (months.length === 0) throw new Error("Choose one of the current certificate terms for each amount band, or remove the band.");
       if (max != null && (!Number.isFinite(max) || max < min)) throw new Error("The maximum must be at least the minimum.");
       await sql`
         insert into promo_tiers (id, min_amount, max_amount, bonus_percent, months, sort_order)

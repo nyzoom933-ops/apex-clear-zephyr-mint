@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { createFileRoute } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import {
@@ -197,7 +197,7 @@ function Cabinet({
               kind: "custom"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <div className="grid gap-12"><InvestmentTypesPanel /><PromoPanel /></div> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
 }
 function EmailsPanel() {
   const [rows, setRows] = useState(null);
@@ -272,7 +272,31 @@ function MailStatusPanel() {
             return <tr key={row.id} className="border-b border-border last:border-0"><td className="px-4 py-3 whitespace-nowrap">{row.createdAt} UTC</td><td className="px-4 py-3"><span className="block">{row.recipient}</span><span className="text-xs text-[#8c8c8c]">{row.audience === "admin" ? "Desk" : "Client"}</span></td><td className="px-4 py-3">{row.subject}</td><td className="px-4 py-3">{row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"}</td><td className="px-4 py-3">{MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")}</td><td className="px-4 py-3">{opened ? <span className="font-semibold text-[#0d6e4f]">Opened</span> : "—"}</td><td className="px-4 py-3">{row.link ? <a className="block max-w-[220px] truncate font-semibold text-action" href={row.link} title={row.link} target="_blank" rel="noreferrer">{row.link.replace(/^https?:\/\/[^/]+/, "")}</a> : "—"}</td><td className={"px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : "")}>{expiry}</td></tr>;
           })}</tbody></table>{rows && rows.length === 0 ? <p className="px-4 py-6 text-sm text-fg">No emails yet.</p> : null}</div></section>;
 }
-function InvestmentTypesPanel() {
+function newRowId() {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch {
+    // A plain http:// address is not a secure context, so randomUUID throws.
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function alignPromoTerms(offer, terms) {
+  const allowed = new Set((terms ?? []).map(term => Number(term.months)).filter(month => month > 0));
+  return {
+    ...offer,
+    tiers: offer.tiers.map(tier => ({
+      ...tier,
+      months: tier.months.filter(month => allowed.has(Number(month)))
+    }))
+  };
+}
+function RatesAndPromo() {
+  const [terms, setTerms] = useState(null);
+  return <div className="grid gap-12"><InvestmentTypesPanel onTerms={setTerms} /><PromoPanel terms={terms} /></div>;
+}
+function InvestmentTypesPanel({
+  onTerms
+}) {
   const [draft, setDraft] = useState(null);
   const [terms, setTerms] = useState([]);
   const [notice, setNotice] = useState("");
@@ -282,6 +306,7 @@ function InvestmentTypesPanel() {
     Promise.all([getInvestmentTypes(), getCdTerms()]).then(([next, nextTerms]) => {
       setDraft(next[0] ?? null);
       setTerms(nextTerms);
+      onTerms?.(nextTerms);
     }).catch(() => setError("Certificates could not be loaded."));
   }, []);
   function patch(key, value) {
@@ -305,7 +330,8 @@ function InvestmentTypesPanel() {
       const [next, nextTerms] = await Promise.all([getInvestmentTypes(), getCdTerms()]);
       setDraft(next[0] ?? draft);
       setTerms(nextTerms);
-      setNotice("Certificate saved.");
+      onTerms?.(nextTerms);
+      setNotice("Certificate saved. Promotional offers now use these terms.");
     } catch {
       setError("Could not save this certificate.");
     } finally {
@@ -325,25 +351,29 @@ function InvestmentTypesPanel() {
                 featured
               } : item));
             }} />Featured</div><button type="button" className="min-h-11 text-sm font-semibold text-primary" onClick={() => setTerms(current => current.filter(item => item.id !== term.id))}>Remove</button></div>)}</div><button type="button" className="mt-4 text-sm font-semibold text-primary" onClick={() => setTerms(current => [...current, {
-        id: crypto.randomUUID(),
+        id: newRowId(),
         apy: "",
         months: 12,
         featured: false
       }])}>Add term</button></div>{draft ? <div className="mt-6 grid gap-4 lg:grid-cols-2"><div className="rounded-lg border border-border bg-surface p-5"><h2 className="text-sm font-semibold tracking-widest text-primary uppercase">Certificate overview</h2><div className="mt-4 grid gap-4"><AdminField label="Issuer" value={draft.issuer} onChange={value => patch("issuer", value)} /><AdminField label="Structure" value={draft.structure} onChange={value => patch("structure", value)} /></div></div><div className="rounded-lg border border-border bg-surface p-5"><h2 className="text-sm font-semibold tracking-widest text-primary uppercase">Key terms</h2><div className="mt-4 grid gap-4"><AdminField label="Minimum investment" value={draft.minimumInvestment} onChange={value => patch("minimumInvestment", value)} /></div></div><label className="block rounded-lg border border-border bg-surface p-5 lg:col-span-2"><span className="mb-1.5 block text-sm font-medium">Capital protection</span><textarea className={controlClass + " min-h-24"} value={draft.capitalProtection} onChange={event => patch("capitalProtection", event.target.value)} /></label></div> : null}{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending || !draft} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save"}</button></section>;
 }
-function PromoPanel() {
+function PromoPanel({
+  terms
+}) {
   const [offer, setOffer] = useState(null);
-  const [terms, setTerms] = useState([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [bonusDraft, setBonusDraft] = useState({});
+  const termsRef = useRef(terms);
+  termsRef.current = terms;
   useEffect(() => {
-    Promise.all([getPromo(), getCdTerms()]).then(([next, nextTerms]) => {
-      setOffer(next);
-      setTerms(nextTerms);
-    }).catch(() => setError("The promotional offer could not be loaded."));
+    getPromo().then(next => setOffer(termsRef.current ? alignPromoTerms(next, termsRef.current) : next)).catch(() => setError("The promotional offer could not be loaded."));
   }, []);
+  useEffect(() => {
+    if (!terms) return;
+    setOffer(current => current ? alignPromoTerms(current, terms) : current);
+  }, [terms]);
   function patchOffer(key, value) {
     setOffer(current => current ? {
       ...current,
@@ -400,13 +430,31 @@ function PromoPanel() {
         }
       });
       setBonusDraft({});
-      setOffer(await getPromo());
+      setOffer(alignPromoTerms(await getPromo(), terms ?? []));
       setNotice("Promotional offer saved.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the promotional offer.");
     } finally {
       setPending(false);
     }
+  }
+  function addBand() {
+    if (!terms || terms.length === 0) {
+      setNotice("");
+      setError("Add a certificate term above and save it before creating a promotional offer.");
+      return;
+    }
+    setError("");
+    setOffer(current => current ? {
+      ...current,
+      tiers: [...current.tiers, {
+        id: newRowId(),
+        minAmount: 100000,
+        maxAmount: 174999,
+        bonusPercent: 0.75,
+        months: []
+      }]
+    } : current);
   }
   if (!offer) return <p className="text-sm text-fg">{error || "Opening the promotional offer…"}</p>;
   return <section><h2 className="text-2xl font-semibold text-primary">Promotional offers</h2><p className="mt-2 text-fg">Set the offer copy, dates, and which certificate terms earn a bonus at each amount.</p><div className="mt-6 grid gap-4 lg:grid-cols-2"><label className="block lg:col-span-2"><span className="mb-1.5 block text-sm font-medium">Introduction</span><textarea className={controlClass + " min-h-24"} value={offer.intro} onChange={event => patchOffer("intro", event.target.value)} /></label><AdminField label="Protection line" value={offer.protection} onChange={value => patchOffer("protection", value)} /><div className="grid gap-4 sm:grid-cols-2"><label className="block"><span className="mb-1.5 block text-sm font-medium">Starts</span><input className={controlClass} type="date" value={offer.startsOn} onChange={event => patchOffer("startsOn", event.target.value)} /></label><label className="block"><span className="mb-1.5 block text-sm font-medium">Ends</span><input className={controlClass} type="date" value={offer.endsOn} onChange={event => patchOffer("endsOn", event.target.value)} /></label></div><label className="block lg:col-span-2"><span className="mb-1.5 block text-sm font-medium">Fine print</span><textarea className={controlClass + " min-h-20"} value={offer.finePrint} onChange={event => patchOffer("finePrint", event.target.value)} /></label></div><div className="mt-6 grid gap-4">{offer.tiers.map((tier, index) => <div key={tier.id} className="rounded-lg border border-border bg-surface p-4"><div className="grid gap-3 sm:grid-cols-[1fr_1fr_140px_auto] sm:items-end"><AdminField label="Minimum" value={String(tier.minAmount)} onChange={value => patchTier(tier.id, {
@@ -416,16 +464,7 @@ function PromoPanel() {
           })} /><AdminField label="Bonus %" value={bonusDraft[tier.id] ?? String(tier.bonusPercent)} onChange={value => setBonus(tier.id, value)} /><button type="button" className="min-h-11 text-sm font-semibold text-primary" onClick={() => setOffer({
             ...offer,
             tiers: offer.tiers.filter(item => item.id !== tier.id)
-          })}>Remove</button></div><p className="mt-3 text-sm font-medium">Terms for band {index + 1}</p><div className="mt-2 flex flex-wrap gap-3">{terms.map(term => <label key={term.id} className="inline-flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={tier.months.includes(term.months)} onChange={() => toggleMonth(tier, term.months)} />{term.months}-month</label>)}</div><p className="mt-1 text-xs text-fg">Leave maximum empty for an open-ended band, such as $500,000+.</p></div>)}</div><button type="button" className="mt-4 text-sm font-semibold text-primary" onClick={() => setOffer({
-      ...offer,
-      tiers: [...offer.tiers, {
-        id: crypto.randomUUID(),
-        minAmount: 1e5,
-        maxAmount: 174999,
-        bonusPercent: .75,
-        months: terms.slice(0, 1).map(term => term.months)
-      }]
-    })}>Add amount band</button>{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save offer"}</button></section>;
+          })}>Remove</button></div><p className="mt-3 text-sm font-medium">Current terms for band {index + 1}</p><div className="mt-2 flex flex-wrap gap-3">{!terms ? <p className="text-sm text-fg">Loading certificate terms…</p> : terms.length === 0 ? <p className="text-sm text-fg">No certificate terms yet. Add one above and save the certificate.</p> : terms.map(term => <label key={term.id} className="inline-flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={tier.months.map(Number).includes(Number(term.months))} onChange={() => toggleMonth(tier, Number(term.months))} />{term.months}-month</label>)}</div><p className="mt-1 text-xs text-fg">Only the terms listed above can be used. Leave maximum empty for an open-ended band, such as $500,000+.</p></div>)}</div>{offer.tiers.length === 0 ? <p className="mt-6 text-sm text-fg">No amount bands yet. Add one, then tick the current certificate terms.</p> : null}<button type="button" className="mt-4 text-sm font-semibold text-primary" onClick={addBand}>Add amount band</button>{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save offer"}</button></section>;
 }
 function DeskLoginSettings() {
   const [email, setEmail] = useState("");
