@@ -1749,7 +1749,7 @@ function ClientsPanel({
                 openAs(row.id);
               }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>{selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onRemove={() => onRemove(selected.id)} /> : null}</section>;
 }
-const PIPELINE_STEPS = ["Promo", "Application", "Invoice", "Payment receipt", "Confirmation package", "CD active"];
+const PIPELINE_STEPS = ["Promo", "Application", "Investment", "Invoice", "Payment receipt", "Confirmation package", "CD active"];
 
 function mailBadge(status) {
   if (!status) return null;
@@ -1771,10 +1771,13 @@ function linkLeft(expiresAt) {
 
 function pipelineView(row) {
   const applied = Boolean(row.applicationStatus);
+  const created = Boolean(row.fundingStatus);
+  const signed = Boolean(row.investmentSigned);
   const invoiceApproved = row.fundingStatus === "instructions_sent" || row.fundingStatus === "payment_approved";
   const paymentIn = Boolean(row.paymentUploaded) || row.certificateActive;
   const packageSent = Boolean(row.confirmationMailStatus) || row.certificateActive;
-  const done = [true, applied, applied && invoiceApproved, applied && invoiceApproved && paymentIn, applied && invoiceApproved && paymentIn && packageSent, row.certificateActive];
+  const investmentDone = applied && (signed || invoiceApproved || row.certificateActive);
+  const done = [true, applied, investmentDone, investmentDone && invoiceApproved, investmentDone && invoiceApproved && paymentIn, investmentDone && invoiceApproved && paymentIn && packageSent, row.certificateActive];
   const current = done.findIndex(flag => !flag);
   const promo = [mailBadge(row.mailStatus) || {
     text: "Sent",
@@ -1795,6 +1798,17 @@ function pipelineView(row) {
     });else application.push({
       text: "Expired",
       tone: "warn"
+    });
+  }
+  const investment = [];
+  if (applied && (created || invoiceApproved)) {
+    investment.push({
+      text: "Created",
+      tone: "info"
+    });
+    if (signed) investment.push({
+      text: "Signed",
+      tone: "good"
     });
   }
   const invoice = [];
@@ -1836,7 +1850,7 @@ function pipelineView(row) {
   return {
     done,
     current,
-    badges: [promo, application, invoice, payment, confirmation, active]
+    badges: [promo, application, investment, invoice, payment, confirmation, active]
   };
 }
 
@@ -1868,8 +1882,8 @@ function PipelineSteps({
         const active = view.current === index;
         const expired = index === 1 && !done && row.applicationSent && row.inviteStatus !== "open";
         const badges = view.current === -1 || index <= view.current ? view.badges[index] : [];
-        return <li key={name} className={index < PIPELINE_STEPS.length - 1 ? "flex flex-1 items-start" : "w-28 shrink-0"}>
-          <div className="flex w-24 shrink-0 flex-col items-center">
+        return <li key={name} className={index < PIPELINE_STEPS.length - 1 ? "flex flex-1 items-start" : "w-24 shrink-0"}>
+          <div className="flex w-20 shrink-0 flex-col items-center">
             <span className={"flex size-8 items-center justify-center rounded-full text-xs font-semibold " + (expired ? "bg-[#b42318] text-white" : active ? "bg-step text-on-primary" : done ? "bg-step-done text-on-primary" : "bg-step-idle text-step")} aria-current={active ? "step" : undefined}>
               {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
             </span>
@@ -1890,13 +1904,38 @@ function IntroOpensPanel({
 }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState(false);
+  function load() {
+    return listIntroOpens().then(setRows);
+  }
   useEffect(() => {
-    listIntroOpens().then(setRows).catch(() => setError("Opened introductions could not be loaded."));
+    load().catch(() => setError("Opened introductions could not be loaded."));
   }, []);
+  async function sync() {
+    setPending(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await syncMailStatuses();
+      await load();
+      setNotice(`Synced ${result.updated} of ${result.checked}. ${result.opened} opened or clicked.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Mail status could not be synced.");
+    } finally {
+      setPending(false);
+    }
+  }
   return <section>
-    <h1 className="text-3xl font-semibold">Opens</h1>
-    <p className="mt-2 max-w-2xl text-fg">Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again.</p>
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 className="text-3xl font-semibold">Opens</h1>
+        <p className="mt-2 max-w-2xl text-fg">Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again.</p>
+      </div>
+      <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button>
+    </div>
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
     <ul className="mt-4 grid gap-3">
       {(rows ?? []).map(row => {
         const applied = Boolean(row.applicationStatus);

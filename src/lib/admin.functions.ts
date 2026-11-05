@@ -1648,6 +1648,7 @@ export type IntroOpen = {
   inviteStatus: string;
   inviteExpiresAt: string;
   fundingStatus: string;
+  investmentSigned: boolean;
   paymentUploaded: boolean;
   invoiceMailStatus: string;
   paymentMailStatus: string;
@@ -1677,6 +1678,7 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
     invite_status: string | null;
     invite_expires_at: string | null;
     funding_status: string | null;
+    investment_signed: boolean;
     payment_uploaded: boolean;
     invoice_mail_status: string | null;
     payment_mail_status: string | null;
@@ -1758,6 +1760,12 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
           select 1 from fundings f
           where lower(f.email) = lower(n.recipient)
             and f.status <> 'cancelled'
+            and f.signed_at is not null
+        ) as investment_signed,
+        exists (
+          select 1 from fundings f
+          where lower(f.email) = lower(n.recipient)
+            and f.status <> 'cancelled'
             and coalesce(f.payment_file_name, '') <> ''
         ) as payment_uploaded,
         (
@@ -1817,6 +1825,7 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
     inviteStatus: row.invite_status || "",
     inviteExpiresAt: row.invite_expires_at || "",
     fundingStatus: row.funding_status || "",
+    investmentSigned: Boolean(row.investment_signed),
     paymentUploaded: Boolean(row.payment_uploaded),
     invoiceMailStatus: row.invoice_mail_status || "",
     paymentMailStatus: row.payment_mail_status || "",
