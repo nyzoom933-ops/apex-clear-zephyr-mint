@@ -448,6 +448,90 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   const bytes = await doc.save();
   return Buffer.from(bytes).toString("base64");
 }
+
+export type ReceiptPdfInput = {
+  company: string;
+  clientName: string;
+  email: string;
+  amount: string;
+  term: string;
+  promoApy: string;
+  finalApy: string;
+  reference: string;
+  depositCode: string;
+  accountNumber: string;
+  fileName: string;
+  receivedOn: string;
+  phone: string;
+};
+
+export async function buildReceiptPdf(input: ReceiptPdfInput) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([612, 792]);
+  const blue = rgb(0, 0.435, 0.81);
+  const ink = rgb(0.11, 0.11, 0.11);
+  const muted = rgb(0.35, 0.35, 0.35);
+  const panel = rgb(0.953, 0.957, 0.961);
+  const hair = rgb(0.82, 0.84, 0.86);
+  const left = 40;
+  const width = 532;
+
+  page.drawRectangle({ x: 0, y: 742, width: 612, height: 50, color: blue });
+  page.drawText(fit(ascii(input.company) || "Account Holding", bold, 14, 340), { x: left, y: 762, size: 14, font: bold, color: rgb(1, 1, 1) });
+  page.drawText("PAYMENT RECEIPT", { x: 430, y: 762, size: 11, font: bold, color: rgb(1, 1, 1) });
+
+  let y = 700;
+  page.drawText("Payment confirmed", { x: left, y, size: 20, font: bold, color: ink });
+  y -= 22;
+  for (const row of linesOf("This receipt confirms the payment your advisor approved. This certificate is active.", font, 10, width)) {
+    page.drawText(row, { x: left, y, size: 10, font, color: muted });
+    y -= 14;
+  }
+
+  y -= 8;
+  page.drawRectangle({ x: left, y: y - 72, width: width, height: 88, color: panel });
+  page.drawText("AMOUNT CONFIRMED", { x: left + 16, y: y - 18, size: 8, font: bold, color: muted });
+  page.drawText(fit(ascii(input.amount) || "—", bold, 22, 280), { x: left + 16, y: y - 50, size: 22, font: bold, color: blue });
+  page.drawText("APPROVED", { x: left + width - 150, y: y - 18, size: 8, font: bold, color: muted });
+  page.drawText(fit(ascii(input.receivedOn) || "—", bold, 12, 140), { x: left + width - 150, y: y - 40, size: 12, font: bold, color: ink });
+  y -= 104;
+
+  const rows: Array<[string, string]> = [
+    ["Client", input.clientName],
+    ["Email", input.email],
+    ["Certificate", input.term],
+    ["Promo APY", input.promoApy || "—"],
+    ["Final APY", input.finalApy || "—"],
+    ["Customer reference", input.reference || "—"],
+    ["Deposit code", input.depositCode || "—"],
+    ["Account number", input.accountNumber || "—"],
+    ["Confirmation file", input.fileName || "—"],
+  ];
+  rows.forEach((row, index) => {
+    if (index % 2 === 0) page.drawRectangle({ x: left, y: y - 8, width: width, height: 26, color: panel });
+    page.drawText(row[0].toUpperCase(), { x: left + 12, y, size: 8, font: bold, color: muted });
+    page.drawText(fit(ascii(row[1]) || "—", bold, 10, 280), { x: left + 210, y, size: 10, font: bold, color: ink });
+    y -= 26;
+  });
+
+  y -= 18;
+  page.drawText("Certificate", { x: left, y, size: 12, font: bold, color: ink });
+  y -= 18;
+  for (const row of linesOf("This certificate is active. The term, rate, and maturity date are in Active CDs.", font, 10, width)) {
+    page.drawText(row, { x: left, y, size: 10, font, color: muted });
+    y -= 14;
+  }
+
+  page.drawLine({ start: { x: left, y: 48 }, end: { x: left + width, y: 48 }, thickness: 0.6, color: hair });
+  const footer = fit(`${ascii(input.company) || "Account Holding"}${input.phone ? `  ·  ${ascii(input.phone)}` : ""}`, font, 8, width);
+  page.drawText(footer, { x: left, y: 30, size: 8, font, color: muted });
+
+  const bytes = await doc.save();
+  return Buffer.from(bytes).toString("base64");
+}
+
 function inkWidth(face: Awaited<ReturnType<PDFDocument["embedFont"]>>, value: string, size: number) {
   let total = 0;
   for (const char of value) total += face.widthOfTextAtSize(char, size);

@@ -1642,6 +1642,16 @@ export type IntroOpen = {
   sentAt: string;
   mailStatus: string;
   applicationSent: boolean;
+  applicationMailStatus: string;
+  applicationStatus: string;
+  certificateActive: boolean;
+  inviteStatus: string;
+  inviteExpiresAt: string;
+  fundingStatus: string;
+  paymentUploaded: boolean;
+  invoiceMailStatus: string;
+  paymentMailStatus: string;
+  confirmationMailStatus: string;
 };
 
 export const listIntroOpens = createServerFn({ method: "GET" }).handler(async () => {
@@ -1661,6 +1671,16 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
     sent_at: string;
     mail_status: string;
     application_sent: boolean;
+    application_mail_status: string | null;
+    application_status: string | null;
+    certificate_active: boolean;
+    invite_status: string | null;
+    invite_expires_at: string | null;
+    funding_status: string | null;
+    payment_uploaded: boolean;
+    invoice_mail_status: string | null;
+    payment_mail_status: string | null;
+    confirmation_mail_status: string | null;
   }>`
     select * from (
       select distinct on (lower(n.recipient))
@@ -1680,7 +1700,96 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
             and lower(later.recipient) = lower(n.recipient)
             and later.step in ('lead_application', 'lead_promo')
             and later.delivery = 'sent'
-        ) as application_sent
+        ) as application_sent,
+        (
+          select coalesce(later.mail_status, '')
+          from notifications later
+          where later.audience = 'client'
+            and lower(later.recipient) = lower(n.recipient)
+            and later.step in ('lead_application', 'lead_promo')
+            and later.delivery = 'sent'
+          order by later.created_at desc
+          limit 1
+        ) as application_mail_status,
+        (
+          select app.status from applications app
+          where lower(app.email) = lower(n.recipient)
+          order by app.submitted_at desc
+          limit 1
+        ) as application_status,
+        exists (
+          select 1 from fundings f
+          where lower(f.email) = lower(n.recipient) and f.status = 'payment_approved'
+        ) as certificate_active,
+        (
+          select case
+            when i.used_at is not null then 'used'
+            when i.expires_at <= now() then 'expired'
+            else 'open'
+          end
+          from lead_invites i
+          where lower(i.email) = lower(n.recipient)
+            and i.kind in ('promo', 'custom')
+          order by i.created_at desc
+          limit 1
+        ) as invite_status,
+        (
+          select to_char(i.expires_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+          from lead_invites i
+          where lower(i.email) = lower(n.recipient)
+            and i.kind in ('promo', 'custom')
+          order by i.created_at desc
+          limit 1
+        ) as invite_expires_at,
+        (
+          select f.status
+          from fundings f
+          where lower(f.email) = lower(n.recipient) and f.status <> 'cancelled'
+          order by case f.status
+            when 'payment_approved' then 4
+            when 'instructions_sent' then 3
+            when 'approved_phone' then 2
+            when 'pending' then 1
+            else 0
+          end desc
+          limit 1
+        ) as funding_status,
+        exists (
+          select 1 from fundings f
+          where lower(f.email) = lower(n.recipient)
+            and f.status <> 'cancelled'
+            and coalesce(f.payment_file_name, '') <> ''
+        ) as payment_uploaded,
+        (
+          select coalesce(later.mail_status, '')
+          from notifications later
+          where later.audience = 'client'
+            and lower(later.recipient) = lower(n.recipient)
+            and later.step = 'instructions_sent'
+            and later.delivery = 'sent'
+          order by later.created_at desc
+          limit 1
+        ) as invoice_mail_status,
+        (
+          select coalesce(later.mail_status, '')
+          from notifications later
+          where later.audience = 'client'
+            and lower(later.recipient) = lower(n.recipient)
+            and later.step = 'payment_uploaded'
+            and later.delivery = 'sent'
+          order by later.created_at desc
+          limit 1
+        ) as payment_mail_status,
+        (
+          select coalesce(later.mail_status, '')
+          from notifications later
+          where later.audience = 'client'
+            and lower(later.recipient) = lower(n.recipient)
+            and later.step = 'payment_approved'
+            and later.delivery = 'sent'
+          order by later.created_at desc
+          limit 1
+        ) as confirmation_mail_status
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
@@ -1702,6 +1811,16 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
     sentAt: row.sent_at,
     mailStatus: row.mail_status,
     applicationSent: Boolean(row.application_sent),
+    applicationMailStatus: row.application_mail_status || "",
+    applicationStatus: row.application_status || "",
+    certificateActive: Boolean(row.certificate_active),
+    inviteStatus: row.invite_status || "",
+    inviteExpiresAt: row.invite_expires_at || "",
+    fundingStatus: row.funding_status || "",
+    paymentUploaded: Boolean(row.payment_uploaded),
+    invoiceMailStatus: row.invoice_mail_status || "",
+    paymentMailStatus: row.payment_mail_status || "",
+    confirmationMailStatus: row.confirmation_mail_status || "",
   }));
 });
 
@@ -2357,6 +2476,65 @@ export const updateFunding = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+async function paymentReceiptFile(sql: Sql, id: string) {
+  try {
+    const content = await paymentReceiptPdf(sql, id);
+    return content ? [{ filename: "payment-receipt.pdf", content }] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function paymentReceiptPdf(sql: Sql, id: string) {
+  const rows = await sql<{
+    email: string;
+    amount: string;
+    term_label: string;
+    reference_number: string | null;
+    deposit_code: string | null;
+    account_number: string | null;
+    payment_file_name: string;
+    promo_apy: string | null;
+    final_apy: string | null;
+    received_on: string | null;
+    applicant_name: string | null;
+  }>`
+    select f.email, f.amount, f.term_label, f.reference_number, f.deposit_code, f.account_number,
+           f.payment_file_name, f.promo_apy, f.final_apy,
+           to_char(coalesce(f.payment_approved_at, f.payment_uploaded_at, now()) at time zone 'UTC', 'YYYY-MM-DD') as received_on,
+           app.applicant_name
+    from fundings f
+    left join lateral (
+      select applicant_name from applications
+      where lower(email) = lower(f.email)
+      order by submitted_at desc nulls last
+      limit 1
+    ) app on true
+    where f.id = ${id} and f.status = 'payment_approved' and coalesce(f.payment_file_name, '') <> ''
+  `;
+  const row = rows[0];
+  if (!row) return "";
+  const rates = row.final_apy ? { promo: row.promo_apy || "—", final: row.final_apy } : ratesFor(row.term_label, row.amount, (await loadPromo(sql)).tiers);
+  const company = await readCompanyName(sql);
+  const phoneRows = await sql<{ value: string }>`select value from site_settings where key = 'company_phone'`;
+  const { buildReceiptPdf } = await import("@/lib/investment-pdf.server");
+  return buildReceiptPdf({
+    company,
+    clientName: row.applicant_name || row.email,
+    email: row.email,
+    amount: row.amount,
+    term: row.term_label,
+    promoApy: rates.promo,
+    finalApy: rates.final,
+    reference: row.reference_number ?? "",
+    depositCode: row.deposit_code ?? "",
+    accountNumber: row.account_number ?? "",
+    fileName: row.payment_file_name,
+    receivedOn: usDate(row.received_on || ""),
+    phone: phoneRows[0]?.value?.trim() || "",
+  });
+}
+
 const PAYMENT_FILE = /^data:(application\/pdf|image\/png|image\/jpeg);base64,/;
 
 export const uploadPaymentConfirmation = createServerFn({ method: "POST" })
@@ -2411,6 +2589,22 @@ export const getPaymentFile = createServerFn({ method: "POST" })
     return { fileName: file.payment_file_name, file: file.payment_file };
   });
 
+export const downloadPaymentReceipt = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const investor = getCookie("ah_investor");
+    const owned = investor
+      ? await sql<{ id: string }>`select id from fundings where id = ${data.id} and email = ${investor} and payment_file_name <> ''`
+      : [];
+    if (!owned[0]) await requireAdmin();
+    const pdf = await paymentReceiptPdf(sql, data.id);
+    if (!pdf) throw new Error("Upload the payment confirmation before a receipt can be created.");
+    return { pdf };
+  });
+
 export const approvePayment = createServerFn({ method: "POST" })
   .validator((input: { id: string }) => input)
   .handler(async ({ data }) => {
@@ -2425,12 +2619,15 @@ export const approvePayment = createServerFn({ method: "POST" })
     if (!rows[0]) throw new Error("A wire confirmation is required before approval.");
     const detail = await fundingDetail(sql, data.id);
     if (detail) {
+      const receipt = await paymentReceiptFile(sql, data.id);
       await sendStep(sql, {
         step: "payment_approved",
         clientEmail: detail.email,
         clientName: await investorName(sql, detail.email),
         detail: await detailText(sql, detail),
         relatedId: data.id,
+        attachments: receipt,
+        clientAttachments: receipt,
       });
     }
     return { ok: true };
@@ -2920,7 +3117,7 @@ function dataFile(name: string, value: string) {
   return { filename, content };
 }
 
-async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string }) {
+async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string }) {
   try {
     const { notifyStep } = await import("@/lib/mail.server");
     await notifyStep(sql, input);

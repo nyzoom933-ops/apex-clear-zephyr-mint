@@ -31,6 +31,7 @@ export async function notifyStep(
     detail: string;
     adminDetail?: string;
     attachments?: MailFile[];
+    clientAttachments?: MailFile[];
     relatedId?: string;
     skipAdmin?: boolean;
     extraHtml?: string;
@@ -66,7 +67,7 @@ export async function notifyStep(
   });
   const adminTo = (await readDeskEmail(sql)) || env("ADMIN_EMAIL") || ADMIN_EMAIL;
   const messages = [
-    { audience: "client" as const, recipient: input.clientEmail, mail: client, attachments: [] as MailFile[] },
+    { audience: "client" as const, recipient: input.clientEmail, mail: client, attachments: input.clientAttachments ?? [] },
     ...(input.skipAdmin ? [] : [{ audience: "admin" as const, recipient: adminTo, mail: admin, attachments: input.attachments ?? [] }]),
   ];
   await ensureMailColumn(sql);

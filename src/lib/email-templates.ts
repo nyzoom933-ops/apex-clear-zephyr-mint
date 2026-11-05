@@ -122,12 +122,12 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminLead: "The wire confirmation for {{name}} ({{email}}) was rejected.",
   },
   payment_approved: {
-    label: "Certificate active",
-    clientSubject: "Your certificate is active",
-    clientLead: "Your advisor confirmed the payment. This certificate is active.",
-    clientNext: "Open Active CDs in the portal to see the term, APY, maturity date, and confirmation. A $4.99 dealing fee applies to this purchase.",
-    adminSubject: "Payment approved for {{name}}",
-    adminLead: "Payment was approved for {{name}} ({{email}}). The certificate is active.",
+    label: "Payment receipt",
+    clientSubject: "Your payment receipt",
+    clientLead: "Your advisor approved the payment. This certificate is active. The payment receipt is attached.",
+    clientNext: "Open Active CDs in the portal to see the term, APY, and maturity date. Keep the receipt with your records. A $4.99 dealing fee applies to this purchase.",
+    adminSubject: "Payment receipt for {{name}}",
+    adminLead: "Payment was approved for {{name}} ({{email}}). The certificate is active and the receipt is attached.",
   },
   investment_cancelled: {
     label: "Certificate cancelled",

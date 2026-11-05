@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ChevronDown, Menu, X } from "lucide-react";
+import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import {
   adminLogin,
@@ -1749,6 +1749,142 @@ function ClientsPanel({
                 openAs(row.id);
               }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>{selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onRemove={() => onRemove(selected.id)} /> : null}</section>;
 }
+const PIPELINE_STEPS = ["Promo", "Application", "Invoice", "Payment receipt", "Confirmation package", "CD active"];
+
+function mailBadge(status) {
+  if (!status) return null;
+  const tone = status === "opened" || status === "clicked" ? "good" : status === "bounced" || status === "complained" || status === "failed" ? "warn" : "info";
+  return {
+    text: MAIL_STATUS_LABEL[status] || "Sent",
+    tone
+  };
+}
+
+function linkLeft(expiresAt) {
+  const remaining = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(remaining) || remaining <= 0) return "Expired";
+  const hours = Math.floor(remaining / 36e5);
+  const minutes = Math.floor(remaining % 36e5 / 6e4);
+  if (hours >= 1) return `${hours}h ${minutes}m left`;
+  return `${Math.max(minutes, 1)}m left`;
+}
+
+function pipelineView(row) {
+  const applied = Boolean(row.applicationStatus);
+  const invoiceApproved = row.fundingStatus === "instructions_sent" || row.fundingStatus === "payment_approved";
+  const paymentIn = Boolean(row.paymentUploaded) || row.certificateActive;
+  const packageSent = Boolean(row.confirmationMailStatus) || row.certificateActive;
+  const done = [true, applied, applied && invoiceApproved, applied && invoiceApproved && paymentIn, applied && invoiceApproved && paymentIn && packageSent, row.certificateActive];
+  const current = done.findIndex(flag => !flag);
+  const promo = [mailBadge(row.mailStatus) || {
+    text: "Sent",
+    tone: "info"
+  }];
+  const application = [];
+  if (applied) application.push({
+    text: "Applied",
+    tone: "good"
+  });else if (row.applicationSent) {
+    application.push(mailBadge(row.applicationMailStatus) || {
+      text: "Sent",
+      tone: "info"
+    });
+    if (row.inviteStatus === "open" && row.inviteExpiresAt) application.push({
+      text: linkLeft(row.inviteExpiresAt),
+      tone: linkLeft(row.inviteExpiresAt) === "Expired" ? "warn" : "info"
+    });else application.push({
+      text: "Expired",
+      tone: "warn"
+    });
+  }
+  const invoice = [];
+  if (applied) {
+    const sent = mailBadge(row.invoiceMailStatus);
+    if (sent) invoice.push(sent);else if (invoiceApproved) invoice.push({
+      text: "Sent",
+      tone: "info"
+    });
+    if (invoiceApproved) invoice.push({
+      text: "Approved",
+      tone: "good"
+    });
+  }
+  const payment = [];
+  if (invoiceApproved) {
+    const sent = mailBadge(row.paymentMailStatus);
+    if (sent) payment.push(sent);
+    if (row.paymentUploaded || row.certificateActive) payment.push({
+      text: "Uploaded",
+      tone: "good"
+    });else payment.push({
+      text: "Waiting",
+      tone: "info"
+    });
+  }
+  const confirmation = [];
+  if (paymentIn) {
+    const sent = mailBadge(row.confirmationMailStatus);
+    if (sent) confirmation.push(sent);else if (packageSent) confirmation.push({
+      text: "Sent",
+      tone: "info"
+    });
+  }
+  const active = row.certificateActive ? [{
+    text: "Active",
+    tone: "good"
+  }] : [];
+  return {
+    done,
+    current,
+    badges: [promo, application, invoice, payment, confirmation, active]
+  };
+}
+
+function statusBadgeClass(tone) {
+  if (tone === "good") return "bg-[#e7f6ee] text-[#0d6e4f]";
+  if (tone === "warn") return "bg-[#fde8e6] text-[#b42318]";
+  return "bg-[#e8f4ff] text-action";
+}
+
+function PipelineSteps({
+  row
+}) {
+  const view = pipelineView(row);
+  const stage = view.current === -1 ? PIPELINE_STEPS.length - 1 : view.current;
+  const percent = (Math.max(stage, 0) / (PIPELINE_STEPS.length - 1)) * 100;
+  return <div>
+    <div className="mb-2 flex items-baseline justify-between gap-2">
+      <p className="text-xs font-semibold text-step">Step {Math.min(stage + 1, PIPELINE_STEPS.length)} of {PIPELINE_STEPS.length}</p>
+      <p className="text-xs font-semibold text-primary">{PIPELINE_STEPS[stage]}</p>
+    </div>
+    <div className="relative h-2 overflow-hidden rounded-full bg-step-track" aria-hidden="true">
+      <div className="h-full rounded-full bg-step-fill" style={{
+        width: view.current === -1 ? "100%" : `${percent}%`
+      }} />
+    </div>
+    <ol className="mt-3 flex items-start">
+      {PIPELINE_STEPS.map((name, index) => {
+        const done = view.done[index];
+        const active = view.current === index;
+        const expired = index === 1 && !done && row.applicationSent && row.inviteStatus !== "open";
+        const badges = view.current === -1 || index <= view.current ? view.badges[index] : [];
+        return <li key={name} className={index < PIPELINE_STEPS.length - 1 ? "flex flex-1 items-start" : "w-28 shrink-0"}>
+          <div className="flex w-24 shrink-0 flex-col items-center">
+            <span className={"flex size-8 items-center justify-center rounded-full text-xs font-semibold " + (expired ? "bg-[#b42318] text-white" : active ? "bg-step text-on-primary" : done ? "bg-step-done text-on-primary" : "bg-step-idle text-step")} aria-current={active ? "step" : undefined}>
+              {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
+            </span>
+            <span className={"mt-1.5 text-center text-xs leading-tight " + (active || expired ? "font-semibold text-primary" : "text-fg")}>{name}</span>
+            <span className="mt-1 flex flex-col items-center gap-1">
+              {badges.map(badge => <span key={badge.text} className={"rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-tight " + statusBadgeClass(badge.tone)}>{badge.text}</span>)}
+            </span>
+          </div>
+          {index < PIPELINE_STEPS.length - 1 ? <span className={"mt-4 h-0.5 flex-1 rounded-full " + (done ? "bg-step-done" : "bg-step-idle")} aria-hidden="true" /> : null}
+        </li>;
+      })}
+    </ol>
+  </div>;
+}
+
 function IntroOpensPanel({
   onApplication
 }) {
@@ -1759,50 +1895,57 @@ function IntroOpensPanel({
   }, []);
   return <section>
     <h1 className="text-3xl font-semibold">Opens</h1>
-    <p className="mt-2 max-w-2xl text-fg">Leads who received the rates introduction. The next step is the application email.</p>
+    <p className="mt-2 max-w-2xl text-fg">Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again.</p>
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
-    <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
-      <table className="w-full min-w-[760px] text-left text-sm">
-        <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
-          <tr>
-            <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold">Advisor</th>
-            <th className="px-4 py-3 font-semibold">Intro sent</th>
-            <th className="px-4 py-3 font-semibold">Status</th>
-            <th className="px-4 py-3 font-semibold" />
-          </tr>
-        </thead>
-        <tbody>
-          {(rows ?? []).map(row => <tr key={row.email} className="border-b border-border last:border-0">
-            <td className="px-4 py-3">
-              <span className="block font-semibold text-primary">{row.name}</span>
-              <span className="text-fg">{row.email}</span>
-            </td>
-            <td className="px-4 py-3">{row.advisorName || "—"}</td>
-            <td className="px-4 py-3 whitespace-nowrap">{row.sentAt} UTC</td>
-            <td className="px-4 py-3">{row.applicationSent ? "Application sent" : row.mailStatus === "opened" || row.mailStatus === "clicked" ? "Opened" : row.mailStatus === "delivered" ? "Delivered" : "Sent"}</td>
-            <td className="px-4 py-3 text-right">
-              <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
-                id: row.leadId,
-                name: row.name,
-                email: row.email,
-                phone: row.phone,
-                amount: row.amount,
-                term: row.term,
-                objective: "",
-                liquidity: "",
-                source: "",
-                status: "",
-                notes: "",
-                advisorId: row.advisorId,
-                receivedAt: new Date().toISOString()
-              })}>Application email</button>
-            </td>
-          </tr>)}
-        </tbody>
-      </table>
-      {rows && rows.length === 0 ? <p className="px-4 py-6 text-sm text-fg">No rates introductions have been sent yet.</p> : null}
-    </div>
+    <ul className="mt-4 grid gap-3">
+      {(rows ?? []).map(row => {
+        const applied = Boolean(row.applicationStatus);
+        const linkExpired = !applied && row.applicationSent && row.inviteStatus !== "open";
+        return <li key={row.email} className="rounded-lg border border-border bg-surface px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-semibold text-primary">{row.name}</p>
+              <p className="text-sm text-fg">{row.email}</p>
+            </div>
+            <p className="text-sm text-fg">{row.advisorName || "No advisor"}</p>
+            <p className="text-sm whitespace-nowrap text-fg">{row.sentAt} UTC</p>
+            {linkExpired ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
+              id: row.leadId,
+              name: row.name,
+              email: row.email,
+              phone: row.phone,
+              amount: row.amount,
+              term: row.term,
+              objective: "",
+              liquidity: "",
+              source: "",
+              status: "",
+              notes: "",
+              advisorId: row.advisorId,
+              receivedAt: new Date().toISOString()
+            })}>Resend new link</button> : !row.applicationSent && !applied ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
+              id: row.leadId,
+              name: row.name,
+              email: row.email,
+              phone: row.phone,
+              amount: row.amount,
+              term: row.term,
+              objective: "",
+              liquidity: "",
+              source: "",
+              status: "",
+              notes: "",
+              advisorId: row.advisorId,
+              receivedAt: new Date().toISOString()
+            })}>Application email</button> : null}
+          </div>
+          <div className="mt-3 border-t border-border pt-3">
+            <PipelineSteps row={row} />
+          </div>
+        </li>;
+      })}
+    </ul>
+    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">No rates introductions have been sent yet.</p> : null}
   </section>;
 }
 

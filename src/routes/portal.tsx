@@ -5,7 +5,7 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
-import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
+import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, downloadPaymentReceipt, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
 import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, promoMonths, type PromoOffer } from "@/lib/promo";
 
@@ -1321,6 +1321,7 @@ function ActiveCd({ position, account }: { position: FundingPosition; account: P
             <Fact label="Signed" value={position.signerName ? `${position.signerName}${position.signedOn ? ` · ${slashDate(position.signedOn)}` : ""}` : "—"} />
           </dl>
           <TermsPdf id={position.id} compact />
+          {position.paymentFileName ? <PaymentReceipt id={position.id} /> : null}
         </div>
       ) : null}
     </article>
@@ -1529,6 +1530,81 @@ function openDataFile(file: string, name: string) {
   link.download = name;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function PaymentReceipt({ id }: { id: string }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [bytes, setBytes] = useState<Uint8Array | null>(null);
+  const [viewing, setViewing] = useState(false);
+
+  async function loadPdf() {
+    if (bytes) return bytes;
+    const { pdf } = await downloadPaymentReceipt({ data: { id } });
+    const file = Uint8Array.from(atob(pdf), (char) => char.charCodeAt(0));
+    setBytes(file);
+    return file;
+  }
+
+  async function view() {
+    setError("");
+    setPending(true);
+    try {
+      await loadPdf();
+      setViewing(true);
+    } catch {
+      setError("The receipt could not be opened.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function download() {
+    setError("");
+    setPending(true);
+    try {
+      const file = await loadPdf();
+      const url = URL.createObjectURL(new Blob([file], { type: "application/pdf" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "payment-receipt.pdf";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("The receipt could not be created.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-border bg-white px-4 py-3">
+      <p className="text-[11px] font-semibold tracking-wide text-heading uppercase">Payment receipt</p>
+      <p className="mt-1 text-sm text-fg">Emailed when your advisor approved the payment.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void view()}>
+          {pending ? "Opening…" : "View PDF"}
+        </button>
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void download()}>
+          Download PDF
+        </button>
+      </div>
+      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      {viewing && bytes ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setViewing(false)}>
+          <div role="dialog" aria-modal="true" aria-label="Payment receipt" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <h2 className="text-lg font-semibold text-primary">Payment receipt</h2>
+              <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setViewing(false)}>
+                Close
+              </button>
+            </div>
+            <PdfPages data={bytes} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function PaymentFileNote({ id, name, approved }: { id: string; name: string; approved: boolean }) {
