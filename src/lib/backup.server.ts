@@ -35,6 +35,7 @@ export async function runBackup() {
       company,
       from: mail.from || `${company} <notifications@accountholding.com>`,
       key: mail.key,
+      smtpKey: mail.smtpKey,
       filename: `database-backup-${stamp}.zip`,
       zip,
       bytes: dump.length,
@@ -99,7 +100,7 @@ async function dumpDatabase(sql: Awaited<ReturnType<(typeof import("@/lib/db"))[
     `;
     const cols = columns.map((column) => column.column_name);
     const raw = await sql.query<Record<string, unknown>>(`select * from ${quoteIdent(name)}`);
-    const hidden = new Set(["resend_api_key", "desk_password_hash", "desk_session"]);
+    const hidden = new Set(["resend_api_key", "smtp2go_api_key", "desk_password_hash", "desk_session"]);
     const rows = name === "site_settings" ? raw.filter((row) => !hidden.has(String(row.key))) : raw;
     parts.push(`-- ${name} (${rows.length})`);
     if (rows.length === 0) {
@@ -136,10 +137,29 @@ function quoteText(value: string) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-async function sendZip(input: { to: string; company: string; from: string; key: string; filename: string; zip: Buffer; bytes: number }) {
+async function sendZip(input: { to: string; company: string; from: string; key: string; smtpKey: string; filename: string; zip: Buffer; bytes: number }) {
   const subject = `${input.company} database backup`;
   const text = `The daily database backup is attached.\n\nFile: ${input.filename}\nSQL size: ${input.bytes} bytes\nGenerated: ${new Date().toISOString()}`;
-  if (!input.key) return "stored";
+  if (input.smtpKey && input.from) {
+    try {
+      const response = await fetch("https://api.smtp2go.com/v3/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": input.smtpKey, accept: "application/json" },
+        body: JSON.stringify({
+          sender: input.from,
+          to: [input.to],
+          subject,
+          text_body: text,
+          attachments: [{ filename: input.filename, fileblob: input.zip.toString("base64"), mimetype: "application/zip" }],
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number } };
+      if (response.ok && payload.data?.email_id && !payload.data.failed) return "sent";
+    } catch {
+      // Resend is the backup when SMTP2GO does not accept the message.
+    }
+  }
+  if (!input.key) return input.smtpKey ? "failed" : "stored";
   try {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",

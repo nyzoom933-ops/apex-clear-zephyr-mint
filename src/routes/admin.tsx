@@ -648,9 +648,9 @@ function SettingsPanel({
           runDatabaseBackup().then(async result => {
             setLastBackupAt(result.at);
             await brand.refresh();
-            setNotice(result.delivery === "sent" ? `Backup emailed to ${result.to}.` : `Backup prepared for ${result.to}. Add a mail key to deliver the zip.`);
+            setNotice(result.delivery === "sent" ? `Backup emailed to ${result.to}.` : `Backup prepared for ${result.to}. Add the SMTP2GO key and a verified from address to deliver the zip.`);
           }).catch(() => setError("The backup could not be sent.")).finally(() => setBackupPending(false));
-        }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Used for desk notices and the daily backup. Advisor letters use SMTP2GO below. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">From address</span><input className={controlClass} value={mailFrom} placeholder="Account Holding <onboarding@resend.dev>" onChange={event => setMailFrom(event.target.value)} /></label><p className="mt-2 text-sm text-fg">Until your domain is verified, use onboarding@resend.dev and send only to the inbox on your Resend account.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+        }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Backup only. Desk notices, invoices, receipts, and the daily backup go through SMTP2GO first. Resend is used if SMTP2GO is not set or does not accept the message. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setMailPending(true);
@@ -665,7 +665,7 @@ function SettingsPanel({
               setMailFrom(setup.mailFrom);
               setKeyHint(setup.keyHint);
               setHasKey(setup.hasKey);
-              setNotice(setup.hasKey ? "Resend settings saved." : "From address saved. Add an API key to send mail.");
+              setNotice(setup.hasKey ? "Resend settings saved." : "Resend key cleared. Add an API key only if you still want a backup sender.");
             }).catch(() => setError("Could not save Resend settings. Check the key and from address.")).finally(() => setMailPending(false));
           }}>{mailPending ? "Saving…" : "Save Resend"}</button>{hasKey ? <button type="button" disabled={mailPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
             setError("");
@@ -683,20 +683,22 @@ function SettingsPanel({
               setHasKey(setup.hasKey);
               setNotice("Resend API key removed.");
             }).catch(() => setError("Could not remove the Resend key.")).finally(() => setMailPending(false));
-          }}>Remove key</button> : null}</div></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">SMTP2GO</h2><p className="mt-1 text-sm text-fg">API key for advisor letters. Each advisor’s verified mailbox is set on the Advisors tab. Turn on open tracking for this key in SMTP2GO.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={smtpKey} placeholder={hasSmtpKey ? `Saved ${smtpHint}` : "api-..."} onChange={event => setSmtpKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={smtpPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+          }}>Remove key</button> : null}</div></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">SMTP2GO</h2><p className="mt-1 text-sm text-fg">Sends advisor letters from each advisor’s verified mailbox, and transactional mail from the company address below. That address must be a verified sender in SMTP2GO. Open tracking uses the same API key.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={smtpKey} placeholder={hasSmtpKey ? `Saved ${smtpHint}` : "api-..."} onChange={event => setSmtpKey(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Transactional from address</span><input className={controlClass} value={mailFrom} placeholder="Account Holding <notifications@yourdomain.com>" onChange={event => setMailFrom(event.target.value)} /></label><p className="mt-2 text-sm text-fg">Used for application updates, invoices, payment receipts, desk copies, and the daily backup.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={smtpPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setSmtpPending(true);
             saveSmtpSetup({
               data: {
                 apiKey: smtpKey,
+                mailFrom,
                 clearKey: false
               }
             }).then(setup => {
               setSmtpKey("");
+              setMailFrom(setup.mailFrom);
               setSmtpHint(setup.smtpKeyHint);
               setHasSmtpKey(setup.hasSmtpKey);
-              setNotice(setup.hasSmtpKey ? "SMTP2GO API key saved." : "No API key was saved.");
+              setNotice(setup.hasSmtpKey ? "SMTP2GO settings saved." : "From address saved. Add the API key to send mail.");
             }).catch(() => setError("Could not save the SMTP2GO API key.")).finally(() => setSmtpPending(false));
           }}>{smtpPending ? "Saving…" : "Save SMTP2GO"}</button>{hasSmtpKey ? <button type="button" disabled={smtpPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
             setError("");
@@ -705,6 +707,7 @@ function SettingsPanel({
             saveSmtpSetup({
               data: {
                 apiKey: "",
+                mailFrom,
                 clearKey: true
               }
             }).then(setup => {

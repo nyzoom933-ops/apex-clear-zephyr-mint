@@ -649,9 +649,8 @@ export const saveMailSetup = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }) => {
     await requireAdmin();
-    const { cleanMailFrom, cleanResendKey } = await import("@/lib/mail.server");
+    const { cleanResendKey } = await import("@/lib/mail.server");
     const apiKey = cleanResendKey(data.apiKey);
-    const mailFrom = cleanMailFrom(data.mailFrom);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     if (data.clearKey) {
@@ -662,27 +661,21 @@ export const saveMailSetup = createServerFn({ method: "POST" })
         on conflict (key) do update set value = excluded.value
       `;
     }
-    if (!mailFrom) {
-      await sql`delete from site_settings where key = 'mail_from'`;
-    } else {
-      await sql`
-        insert into site_settings (key, value) values ('mail_from', ${mailFrom})
-        on conflict (key) do update set value = excluded.value
-      `;
-    }
     const { mailSetupView } = await import("@/lib/mail.server");
     return mailSetupView(sql);
   });
 
 export const saveSmtpSetup = createServerFn({ method: "POST" })
-  .validator((input: { apiKey: string; clearKey: boolean }) => ({
+  .validator((input: { apiKey: string; mailFrom: string; clearKey: boolean }) => ({
     apiKey: input.apiKey || "",
+    mailFrom: input.mailFrom || "",
     clearKey: Boolean(input.clearKey),
   }))
   .handler(async ({ data }) => {
     await requireAdmin();
-    const { cleanSmtpKey } = await import("@/lib/mail.server");
+    const { cleanMailFrom, cleanSmtpKey } = await import("@/lib/mail.server");
     const apiKey = cleanSmtpKey(data.apiKey);
+    const mailFrom = cleanMailFrom(data.mailFrom);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     if (data.clearKey) {
@@ -692,6 +685,16 @@ export const saveSmtpSetup = createServerFn({ method: "POST" })
         insert into site_settings (key, value) values ('smtp2go_api_key', ${apiKey})
         on conflict (key) do update set value = excluded.value
       `;
+    }
+    if (!data.clearKey) {
+      if (!mailFrom) {
+        await sql`delete from site_settings where key = 'mail_from'`;
+      } else {
+        await sql`
+          insert into site_settings (key, value) values ('mail_from', ${mailFrom})
+          on conflict (key) do update set value = excluded.value
+        `;
+      }
     }
     const { mailSetupView } = await import("@/lib/mail.server");
     return mailSetupView(sql);

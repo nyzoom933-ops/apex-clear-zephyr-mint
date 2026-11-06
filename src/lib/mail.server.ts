@@ -195,7 +195,11 @@ function senderAddress(from: string, name: string) {
 async function deliver(to: string, subject: string, text: string, html: string, companyName: string, sql: Sql, attachments: MailFile[] = [], replyTo = "", replyName = "", fromAddress = "") {
   const mail = await readMailConfig(sql);
   if (replyTo) return deliverSmtp2go(to, subject, text, html, mail.smtpKey, fromAddress, replyTo, replyName, attachments);
-  if (!mail.key) return { delivery: "stored", messageId: "", provider: "" };
+  if (mail.smtpKey && mail.from) {
+    const sent = await deliverSmtp2go(to, subject, text, html, mail.smtpKey, mail.from, "", companyName, attachments);
+    if (sent.delivery === "sent") return sent;
+  }
+  if (!mail.key) return { delivery: mail.smtpKey ? "failed" : "stored", messageId: "", provider: mail.smtpKey ? "smtp2go" : "" };
   try {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -230,7 +234,7 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
         subject,
         html_body: html,
         text_body: text,
-        custom_headers: [{ header: "Reply-To", value: replyTo }],
+        ...(replyTo ? { custom_headers: [{ header: "Reply-To", value: replyTo }] } : {}),
         ...(attachments.length ? { attachments: attachments.map((file) => ({ filename: file.filename, fileblob: file.content, mimetype: "application/octet-stream" })) } : {}),
       }),
     });
