@@ -17,6 +17,11 @@ import {
   listApplications,
   listCrmLeads,
   listIntroOpens,
+  listInboxMessages,
+  syncInboxNow,
+  markInboxMessageRead,
+  previewAdvisorInboxMail,
+  sendAdvisorInboxMail,
   listFundings,
   listNotifications,
   syncMailStatuses,
@@ -35,9 +40,13 @@ import {
   runDatabaseBackup,
   saveMailSetup,
   saveSmtpSetup,
+  saveTelegramSetup,
+  setDeskSwitch,
+  sendTelegramTest,
   saveDeskLogin,
   sendLeadIntro,
   sendLeadExtension,
+  sendLeadHtr,
   sendLeadApplication,
   updateFunding,
   downloadInvoicePdf,
@@ -49,7 +58,7 @@ import {
   DEFAULT_THEME,
 } from "@/lib/admin.functions";
 import { formatBonus, matchTier, parseApy, promoMonths } from "@/lib/promo";
-import { applicationLetter, defaultApplicationCopy, defaultExtensionCopy, defaultLeadCopy, extensionLetter, leadLetter, renderStep, templateCatalog } from "@/lib/email-templates";
+import { applicationLetter, defaultApplicationCopy, defaultExtensionCopy, defaultHtrCopy, defaultLeadCopy, extensionLetter, htrLetter, leadLetter, renderStep, templateCatalog } from "@/lib/email-templates";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Operations · Account Holding" }] }),
@@ -197,7 +206,65 @@ function Cabinet({
               kind: "custom"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+}
+function LetterPreview({
+  html,
+  title,
+  height = "h-[640px]",
+  meta
+}) {
+  const frame = useRef(null);
+  const [status, setStatus] = useState("");
+  return <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm">
+    <div className="border-b border-border bg-white px-5 py-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p>
+        <button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(frame.current, setStatus)}>Copy screenshot</button>
+      </div>
+      {status ? <p className="mt-2 text-sm text-fg">{status}</p> : null}
+      {meta}
+    </div>
+    <iframe ref={frame} title={title || "Letter preview"} sandbox="allow-same-origin" className={height + " w-full bg-[#f2f5f8]"} srcDoc={html} />
+  </div>;
+}
+async function copyLetterImage(frame, setStatus) {
+  setStatus("Copying…");
+  try {
+    const doc = frame?.contentDocument;
+    const root = doc?.body;
+    if (!root) throw new Error("The preview is not ready.");
+    const width = Math.max(root.scrollWidth, doc.documentElement.scrollWidth, 640);
+    const host = document.createElement("div");
+    host.style.cssText = `position:fixed;left:0;top:0;width:${width}px;z-index:-1;pointer-events:none;background:#f2f5f8;`;
+    const style = doc.querySelector("style");
+    if (style) host.appendChild(style.cloneNode(true));
+    const inner = document.createElement("div");
+    inner.innerHTML = root.innerHTML;
+    host.appendChild(inner);
+    document.body.appendChild(host);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const canvas = await html2canvas(host, {
+        backgroundColor: "#f2f5f8",
+        scale: 2,
+        width,
+        windowWidth: width,
+        useCORS: true
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("Could not make the image.");
+      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("Copy the image from an HTTPS address. This page is not a secure page.");
+      await navigator.clipboard.write([new ClipboardItem({
+        "image/png": blob
+      })]);
+      setStatus("Screenshot copied.");
+    } finally {
+      host.remove();
+    }
+  } catch (caught) {
+    setStatus(caught instanceof Error && caught.message ? caught.message : "Could not copy the screenshot.");
+  }
 }
 function EmailsPanel() {
   const [rows, setRows] = useState(null);
@@ -220,7 +287,7 @@ function EmailsPanel() {
     }).catch(() => void 0);
   }, []);
   const visible = (rows ?? []).filter(row => audience === "all" || row.audience === audience);
-  return <section><h1 className="text-3xl font-semibold">Email templates</h1><p className="mt-2 max-w-2xl text-fg">Each step has a client template and a desk template. Lead letters sign off with the advisor you select.</p><label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Signature</span><select className={`${controlClass} mt-1`} value={signature?.id ?? ""} onChange={event => setSignatureId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><div className="mt-4 flex flex-wrap gap-2">{["all", "client", "admin"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (audience === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setAudience(key)}>{key === "all" ? "All" : key === "client" ? "Client" : "Admin"}</button>)}</div><ul className="mt-4 grid gap-4">{templates.map(item => <li key={`${item.step}-${item.audience}`} className="rounded-md border border-border bg-surface px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-action">{item.audience === "admin" ? "Desk" : "Client"} · {item.label}</p><p className="mt-1 font-semibold text-primary">{item.subject}</p><iframe title={item.subject} srcDoc={item.html} className="mt-3 h-[640px] w-full rounded-md border border-border bg-white" /></li>)}</ul><h2 className="mt-8 text-lg font-semibold text-primary">Sent</h2>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{rows && visible.length === 0 ? <p className="mt-4 text-sm text-fg">No emails yet. They appear as applications and certificates move forward.</p> : null}<ul className="mt-4 grid gap-3">{visible.map(row => <li key={row.id} className="rounded-md border border-border bg-surface px-4 py-3"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.subject}</p><p className="text-xs text-fg">{row.createdAt} UTC · {row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Not delivered" : "Logged"}</p></div><p className="mt-1 text-sm text-fg">{row.audience === "admin" ? "Admin" : "Client"} · {row.recipient}</p>{row.html ? <iframe title={row.subject} srcDoc={row.html} className="mt-3 h-72 w-full rounded-md border border-border bg-white" /> : <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{row.body}</p>}</li>)}</ul></section>;
+  return <section><h1 className="text-3xl font-semibold">Email templates</h1><p className="mt-2 max-w-2xl text-fg">Client letters are email. Desk copies of those steps are sent to Telegram. Lead letters sign off with the advisor you select.</p><label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Signature</span><select className={`${controlClass} mt-1`} value={signature?.id ?? ""} onChange={event => setSignatureId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><div className="mt-4 flex flex-wrap gap-2">{["all", "client", "admin"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (audience === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setAudience(key)}>{key === "all" ? "All" : key === "client" ? "Client" : "Admin"}</button>)}</div><ul className="mt-4 grid gap-4">{templates.map(item => <li key={`${item.step}-${item.audience}`} className="rounded-md border border-border bg-surface px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-action">{item.audience === "admin" ? "Desk" : "Client"} · {item.label}</p><p className="mt-1 font-semibold text-primary">{item.subject}</p><LetterPreview html={item.html} title={item.subject} height="h-[640px]" /></li>)}</ul><h2 className="mt-8 text-lg font-semibold text-primary">Sent</h2>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{rows && visible.length === 0 ? <p className="mt-4 text-sm text-fg">No emails yet. They appear as applications and certificates move forward.</p> : null}<ul className="mt-4 grid gap-3">{visible.map(row => <li key={row.id} className="rounded-md border border-border bg-surface px-4 py-3"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.subject}</p><p className="text-xs text-fg">{row.createdAt} UTC · {row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Not delivered" : "Logged"}</p></div><p className="mt-1 text-sm text-fg">{row.audience === "admin" ? "Admin" : "Client"} · {row.recipient}</p>{row.html ? <LetterPreview html={row.html} title={row.subject} height="h-72" /> : <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{row.body}</p>}</li>)}</ul></section>;
 }
 var MAIL_STATUS_LABEL = {
   opened: "Opened",
@@ -269,7 +336,7 @@ function MailStatusPanel() {
   return <section><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Email status</h1><p className="mt-2 max-w-2xl text-fg">Advisor letters are sent through SMTP2GO, which records when they are opened. Other desk mail still uses Resend. Sync after the recipient has had time to open the letter.</p></div><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button></div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[980px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">When</th><th className="px-4 py-3 font-semibold">To</th><th className="px-4 py-3 font-semibold">Subject</th><th className="px-4 py-3 font-semibold">Sent</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Opened</th><th className="px-4 py-3 font-semibold">Link</th><th className="px-4 py-3 font-semibold">Expires</th></tr></thead><tbody>{(rows ?? []).map(row => {
             const opened = row.mailStatus === "opened" || row.mailStatus === "clicked";
             const expiry = inviteExpiry(row.expiresAt, row.usedAt);
-            return <tr key={row.id} className="border-b border-border last:border-0"><td className="px-4 py-3 whitespace-nowrap">{row.createdAt} UTC</td><td className="px-4 py-3"><span className="block">{row.recipient}</span><span className="text-xs text-[#8c8c8c]">{row.audience === "admin" ? "Desk" : "Client"}</span></td><td className="px-4 py-3">{row.subject}</td><td className="px-4 py-3">{row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"}</td><td className="px-4 py-3">{MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")}</td><td className="px-4 py-3">{opened ? <span className="font-semibold text-[#0d6e4f]">Opened</span> : "—"}</td><td className="px-4 py-3">{row.link ? <a className="block max-w-[220px] truncate font-semibold text-action" href={row.link} title={row.link} target="_blank" rel="noreferrer">{row.link.replace(/^https?:\/\/[^/]+/, "")}</a> : "—"}</td><td className={"px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : "")}>{expiry}</td></tr>;
+            return <tr key={row.id} className="border-b border-border last:border-0"><td className="px-4 py-3 whitespace-nowrap">{row.createdAt} UTC</td><td className="px-4 py-3"><span className="block">{row.recipient}</span><span className="text-xs text-[#8c8c8c]">{row.mailProvider === "telegram" ? "Telegram" : row.audience === "admin" ? "Desk" : "Client"}</span></td><td className="px-4 py-3">{row.subject}</td><td className="px-4 py-3">{row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"}</td><td className="px-4 py-3">{MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")}</td><td className="px-4 py-3">{opened ? <span className="font-semibold text-[#0d6e4f]">Opened</span> : "—"}</td><td className="px-4 py-3">{row.link ? <a className="block max-w-[220px] truncate font-semibold text-action" href={row.link} title={row.link} target="_blank" rel="noreferrer">{row.link.replace(/^https?:\/\/[^/]+/, "")}</a> : "—"}</td><td className={"px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : "")}>{expiry}</td></tr>;
           })}</tbody></table>{rows && rows.length === 0 ? <p className="px-4 py-6 text-sm text-fg">No emails yet.</p> : null}</div></section>;
 }
 function newRowId() {
@@ -538,6 +605,13 @@ function SettingsPanel({
   const [smtpHint, setSmtpHint] = useState("");
   const [hasSmtpKey, setHasSmtpKey] = useState(false);
   const [smtpPending, setSmtpPending] = useState(false);
+  const [telegramToken, setTelegramToken] = useState("");
+  const [telegramChat, setTelegramChat] = useState("");
+  const [telegramHint, setTelegramHint] = useState("");
+  const [hasTelegram, setHasTelegram] = useState(false);
+  const [telegramEnabled, setTelegramEnabled] = useState(true);
+  const [backupSchedule, setBackupSchedule] = useState(true);
+  const [telegramPending, setTelegramPending] = useState(false);
   const [mailPending, setMailPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -572,6 +646,11 @@ function SettingsPanel({
       setHasKey(setup.hasKey);
       setSmtpHint(setup.smtpKeyHint);
       setHasSmtpKey(setup.hasSmtpKey);
+      setTelegramHint(setup.telegramHint);
+      setTelegramChat(setup.telegramChat);
+      setHasTelegram(setup.hasTelegram);
+      setTelegramEnabled(setup.telegramEnabled);
+      setBackupSchedule(setup.backupSchedule);
     }).catch(() => void 0);
   }, []);
   async function onFile(file, kind) {
@@ -641,16 +720,28 @@ function SettingsPanel({
           setNotice("");
           setPending(true);
           clearDatabase().then(() => setNotice("Database cleared. Settings and the desk login were kept.")).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The database could not be cleared.")).finally(() => setPending(false));
-        }}>{pending ? "Clearing…" : "Clear database"}</button></div></Fragment> : null}{section === "misc" ? <Fragment><p className="mt-2 text-fg">Mail delivery, the daily database backup, and site analytics.</p><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><label className="block"><span className="mb-1.5 block text-sm font-medium">Database backup email</span><input type="email" className={controlClass} value={backupEmail} placeholder="admin@accountholding.com" onChange={event => setBackupEmail(event.target.value)} /></label><p className="mt-2 text-sm text-fg">A zip of the database is emailed here every day at 12:00 UTC on the published server.{lastBackupAt ? ` Last backup: ${lastBackupAt.replace("T", " ").slice(0, 16)} UTC.` : " No backup has been sent yet."} Set CRON_SECRET on the host so only that job can run the backup.</p><button type="button" disabled={backupPending} className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
+        }}>{pending ? "Clearing…" : "Clear database"}</button></div></Fragment> : null}{section === "misc" ? <Fragment><p className="mt-2 text-fg">Mail delivery, the daily database backup, and site analytics.</p><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Database backup</h2><p className="mt-2 text-sm text-fg">The zip is sent only to the Telegram chat{backupSchedule ? " every day at 12:00 UTC on the published server" : ""}. It is not emailed. If it is too large for one message, it is sent in numbered parts. Restore the parts in order.{lastBackupAt ? ` Last backup: ${lastBackupAt.replace("T", " ").slice(0, 16)} UTC.` : " No backup has been sent yet."}</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={backupSchedule} onChange={event => {
+            const enabled = event.target.checked;
+            setBackupSchedule(enabled);
+            setDeskSwitch({
+              data: {
+                key: "backup",
+                enabled
+              }
+            }).catch(() => {
+              setBackupSchedule(!enabled);
+              setError("Could not save the backup switch.");
+            });
+          }} />Send a backup every day</label><button type="button" disabled={backupPending} className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
           setError("");
           setNotice("");
           setBackupPending(true);
           runDatabaseBackup().then(async result => {
             setLastBackupAt(result.at);
             await brand.refresh();
-            setNotice(result.delivery === "sent" ? `Backup emailed to ${result.to}.` : `Backup prepared for ${result.to}. Add the SMTP2GO key and a verified from address to deliver the zip.`);
+            setNotice(result.telegram === "sent" ? `Backup sent to Telegram${result.parts > 1 ? ` in ${result.parts} parts` : ""}.` : result.telegram === "failed" ? "Telegram did not accept the backup." : "Save the Telegram bot token and chat id before sending a backup.");
           }).catch(() => setError("The backup could not be sent.")).finally(() => setBackupPending(false));
-        }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Backup only. Desk notices, invoices, receipts, and the daily backup go through SMTP2GO first. Resend is used if SMTP2GO is not set or does not accept the message. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+        }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Backup only. Client mail goes through SMTP2GO first. Resend is used if SMTP2GO is not set or does not accept the message. Desk notices and database backups go to Telegram, not email. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setMailPending(true);
@@ -716,7 +807,57 @@ function SettingsPanel({
               setHasSmtpKey(setup.hasSmtpKey);
               setNotice("SMTP2GO API key removed.");
             }).catch(() => setError("Could not remove the SMTP2GO key.")).finally(() => setSmtpPending(false));
-          }}>Remove key</button> : null}</div></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Cloudflare code</span><textarea className={controlClass + " min-h-28 font-mono text-sm"} value={cloudflareCode} placeholder="Paste the Cloudflare Web Analytics snippet or token" onChange={event => setCloudflareCode(event.target.value)} /></label></Fragment> : null}{section === "appearance" ? <Fragment><p className="mt-2 max-w-2xl text-fg">These colors are used for buttons, headings, text, labels, borders, and the page behind the background picture.</p><div className="mt-6 grid max-w-3xl gap-4 sm:grid-cols-2"><ColorSetting label="Button" value={colorAction} onChange={setColorAction} /><ColorSetting label="Headings" value={colorHeading} onChange={setColorHeading} /><ColorSetting label="Text" value={colorText} onChange={setColorText} /><ColorSetting label="Labels" value={colorLabel} onChange={setColorLabel} /><ColorSetting label="Borders" value={colorBorder} onChange={setColorBorder} /><ColorSetting label="Page background" value={colorBackground} onChange={setColorBackground} /></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><p className="text-sm font-semibold text-primary">Background picture</p><div className="mt-3 flex flex-wrap gap-2">{[["pattern", "Built-in pattern"], ["none", "No background"], ["image", "Custom picture"]].map(([id, label]) => {
+          }}>Remove key</button> : null}</div></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Telegram</h2><p className="mt-1 text-sm text-fg">Desk notices go here instead of email, including a message when an advisor mailbox receives a new email. Database backups are sent here and are not emailed. Create a bot with BotFather, then send the bot a message in the chat that should receive them. The chat id is the number Telegram shows for that chat. Files from an application, a receipt, or a backup are sent with the message.</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={telegramEnabled} onChange={event => {
+            const enabled = event.target.checked;
+            setTelegramEnabled(enabled);
+            setDeskSwitch({
+              data: {
+                key: "telegram",
+                enabled
+              }
+            }).catch(() => {
+              setTelegramEnabled(!enabled);
+              setError("Could not save the Telegram switch.");
+            });
+          }} />Send desk notices</label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Bot token</span><input type="password" autoComplete="off" className={controlClass} value={telegramToken} placeholder={hasTelegram ? `Saved ${telegramHint}` : "123456:ABC…"} onChange={event => setTelegramToken(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Chat id</span><input className={controlClass} value={telegramChat} placeholder="-1001234567890" onChange={event => setTelegramChat(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={telegramPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setTelegramPending(true);
+            saveTelegramSetup({
+              data: {
+                token: telegramToken,
+                chatId: telegramChat,
+                clear: false
+              }
+            }).then(setup => {
+              setTelegramToken("");
+              setTelegramHint(setup.telegramHint);
+              setTelegramChat(setup.telegramChat);
+              setHasTelegram(setup.hasTelegram);
+              setNotice(setup.hasTelegram ? "Telegram settings saved." : "Chat id saved. Add the bot token to send notices.");
+            }).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "Could not save Telegram.")).finally(() => setTelegramPending(false));
+          }}>{telegramPending ? "Saving…" : "Save Telegram"}</button><button type="button" disabled={telegramPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setTelegramPending(true);
+            sendTelegramTest().then(() => setNotice("Test message sent to Telegram.")).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The test message could not be sent.")).finally(() => setTelegramPending(false));
+          }}>Send test</button>{hasTelegram ? <button type="button" disabled={telegramPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setTelegramPending(true);
+            saveTelegramSetup({
+              data: {
+                token: "",
+                chatId: telegramChat,
+                clear: true
+              }
+            }).then(setup => {
+              setTelegramToken("");
+              setTelegramHint(setup.telegramHint);
+              setHasTelegram(setup.hasTelegram);
+              setNotice("Telegram bot token removed.");
+            }).catch(() => setError("Could not remove the Telegram token.")).finally(() => setTelegramPending(false));
+          }}>Remove token</button> : null}</div></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Cloudflare code</span><textarea className={controlClass + " min-h-28 font-mono text-sm"} value={cloudflareCode} placeholder="Paste the Cloudflare Web Analytics snippet or token" onChange={event => setCloudflareCode(event.target.value)} /></label></Fragment> : null}{section === "appearance" ? <Fragment><p className="mt-2 max-w-2xl text-fg">These colors are used for buttons, headings, text, labels, borders, and the page behind the background picture.</p><div className="mt-6 grid max-w-3xl gap-4 sm:grid-cols-2"><ColorSetting label="Button" value={colorAction} onChange={setColorAction} /><ColorSetting label="Headings" value={colorHeading} onChange={setColorHeading} /><ColorSetting label="Text" value={colorText} onChange={setColorText} /><ColorSetting label="Labels" value={colorLabel} onChange={setColorLabel} /><ColorSetting label="Borders" value={colorBorder} onChange={setColorBorder} /><ColorSetting label="Page background" value={colorBackground} onChange={setColorBackground} /></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><p className="text-sm font-semibold text-primary">Background picture</p><div className="mt-3 flex flex-wrap gap-2">{[["pattern", "Built-in pattern"], ["none", "No background"], ["image", "Custom picture"]].map(([id, label]) => {
             const mode = pageBackground === "none" ? "none" : pageBackground?.startsWith("data:image/") || wantImage ? "image" : "pattern";
             return <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (mode === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
               if (id === "none") {
@@ -1130,6 +1271,8 @@ function LeadsPanel({
   const [leadOptions, setLeadOptions] = useState([]);
   const [pickedLeads, setPickedLeads] = useState([]);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const previewFrame = useRef(null);
+  const [shotStatus, setShotStatus] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
@@ -1139,6 +1282,7 @@ function LeadsPanel({
   const [termMonths, setTermMonths] = useState("");
   const [appCopy, setAppCopy] = useState(null);
   const [extCopy, setExtCopy] = useState(null);
+  const [htrCopy, setHtrCopy] = useState(null);
   const [promoCode] = useState(() => {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const bytes = crypto.getRandomValues(new Uint8Array(6));
@@ -1180,7 +1324,7 @@ function LeadsPanel({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [leadQuery]);
-  const bulk = kind === "rates" || kind === "extension";
+  const bulk = kind === "rates" || kind === "extension" || kind === "htr";
   const previewAt = pickedLeads.length ? Math.min(previewIndex, pickedLeads.length - 1) : 0;
   const previewLead = pickedLeads[previewAt] || null;
   const activeName = bulk ? previewLead?.name || "" : name;
@@ -1255,8 +1399,19 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: extensionCopy
   });
-  const letter = kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : "lead_intro", "client", {
+  const htrStandard = defaultHtrCopy();
+  const htrText = htrCopy ?? htrStandard;
+  const htrMail = htrLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    copy: htrText
+  });
+  const letter = kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -1265,20 +1420,27 @@ function LeadsPanel({
     portalUrl: brand.publicDomain,
     extraHtml: letter.html
   }) : null;
-  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : applicationCopy.subject;
+  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "htr" ? htrText.subject : applicationCopy.subject;
   async function send(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     setPending(true);
     try {
-      if (kind === "extension" || kind === "rates") {
+      if (kind === "extension" || kind === "rates" || kind === "htr") {
         if (!pickedLeads.length) throw new Error("Choose at least one lead.");
         let sent = 0;
         const failed = [];
         for (const lead of pickedLeads) {
           try {
-            if (kind === "extension") await sendLeadExtension({
+            if (kind === "htr") await sendLeadHtr({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
+                copy: htrCopy
+              }
+            });else if (kind === "extension") await sendLeadExtension({
               data: {
                 advisorId,
                 name: lead.name,
@@ -1302,7 +1464,7 @@ function LeadsPanel({
         setNotice(sent === 1 ? `Sent to ${pickedLeads[0]?.email || "the lead"}.` : `Sent to ${sent} leads.`);
         setPickedLeads([]);
         setPreviewIndex(0);
-        if (kind === "extension") setExtCopy(null);else setCopy(null);
+        if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
       } else if (kind !== "rates") {
         if (!selectedTerm) throw new Error(kind === "promo" ? "Choose a promotional term." : "Choose a term that is not on promotion.");
         await sendLeadApplication({
@@ -1338,11 +1500,12 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, a custom-term application, or a promotional application. Application links expire after 24 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, an HTR follow-up, a custom-term application, or a promotional application. Application links expire after 24 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["htr", "HTR"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
         setExtCopy(null);
+        setHtrCopy(null);
         setTermMonths("");
       }}>{label}</button>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<form className="mt-6 grid max-w-3xl gap-3" onSubmit={event => void send(event)}><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => {
           setAdvisorId(event.target.value);
@@ -1359,8 +1522,8 @@ function LeadsPanel({
               }}>×</span></button></li>)}</ul> : <span className="mt-1 block text-fg">Search the pipeline and add every lead who should get this letter.</span>}</label> : <><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "custom" || kind === "promo" ? <label className="block text-sm"><span className="font-semibold text-primary">{kind === "promo" ? "Promotional term" : "Custom term"}</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
-        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
-              if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
+        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
+              if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
             }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
             ...letterCopy,
@@ -1410,7 +1573,22 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Closing" value={extensionCopy.closing} onChange={closing => setExtCopy({
             ...extensionCopy,
             closing
-          })} rows={2} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExtCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
+          })} rows={2} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExtCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "htr" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={htrText.subject} onChange={next => setHtrCopy({
+            ...htrText,
+            subject: next
+          })} /><LetterField label="Opening" value={htrText.opening} onChange={opening => setHtrCopy({
+            ...htrText,
+            opening
+          })} rows={4} /><LetterField label="Still interested" value={htrText.offer} onChange={offer => setHtrCopy({
+            ...htrText,
+            offer
+          })} rows={4} /><LetterField label="No longer interested" value={htrText.decline} onChange={decline => setHtrCopy({
+            ...htrText,
+            decline
+          })} rows={4} /><LetterField label="Closing" value={htrText.closing} onChange={closing => setHtrCopy({
+            ...htrText,
+            closing
+          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "htr" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
             ...applicationCopy,
             subject: next
           })} /><LetterField label="Headline" value={applicationCopy.headline} onChange={headline => setAppCopy({
@@ -1437,7 +1615,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe title="Letter preview" sandbox="" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -1455,7 +1633,13 @@ function AdvisorsPanel() {
     phone: "",
     email: "",
     mailbox: "",
-    role: ""
+    role: "",
+    personalPhone: "",
+    imapHost: "",
+    imapPort: 993,
+    imapUser: "",
+    imapPassword: "",
+    imapSecure: true
   });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1479,7 +1663,13 @@ function AdvisorsPanel() {
         phone: "",
         email: "",
         mailbox: "",
-        role: ""
+        role: "",
+        personalPhone: "",
+        imapHost: "",
+        imapPort: 993,
+        imapUser: "",
+        imapPassword: "",
+        imapSecure: true
       });
       await load();
       setNotice("Advisor saved.");
@@ -1515,7 +1705,22 @@ function AdvisorsPanel() {
       })} /><label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-medium">Verified mailbox</span><input className={controlClass} value={draft.mailbox} placeholder="advisor@yourdomain.com" onChange={event => setDraft({
           ...draft,
           mailbox: event.target.value
-        })} /><span className="mt-1 block text-sm text-fg">SMTP2GO address this advisor’s letters are sent from. It must already be verified there.</span></label><div className="flex items-end"><button type="submit" className="min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary">Save advisor</button></div></form></section>;
+        })} /><span className="mt-1 block text-sm text-fg">SMTP2GO address this advisor’s letters are sent from. It must already be verified there.</span></label><label className="block"><span className="mb-1.5 block text-sm font-medium">IMAP host</span><input className={controlClass} value={draft.imapHost || ""} placeholder="mail.yourdomain.com" onChange={event => setDraft({
+          ...draft,
+          imapHost: event.target.value
+        })} /></label><label className="block"><span className="mb-1.5 block text-sm font-medium">IMAP port</span><input className={controlClass} inputMode="numeric" value={draft.imapPort || 993} onChange={event => setDraft({
+          ...draft,
+          imapPort: Number(event.target.value) || 993
+        })} /></label><label className="block"><span className="mb-1.5 block text-sm font-medium">IMAP username</span><input className={controlClass} value={draft.imapUser || ""} placeholder="advisor@yourdomain.com" onChange={event => setDraft({
+          ...draft,
+          imapUser: event.target.value
+        })} /></label><label className="block"><span className="mb-1.5 block text-sm font-medium">IMAP password</span><input type="password" autoComplete="new-password" className={controlClass} value={draft.imapPassword || ""} placeholder={draft.hasImapPassword ? "Saved. Enter a new password to replace it." : "Mailbox password"} onChange={event => setDraft({
+          ...draft,
+          imapPassword: event.target.value
+        })} /></label><label className="flex min-h-11 items-center gap-2 text-sm font-medium sm:col-span-2"><input type="checkbox" checked={draft.imapSecure !== false} onChange={event => setDraft({
+          ...draft,
+          imapSecure: event.target.checked
+        })} />Use a secure IMAP connection (port 993)</label><div className="flex items-end"><button type="submit" className="min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary">Save advisor</button></div></form></section>;
 }
 function emptyLead() {
   const now = new Date();
@@ -1991,6 +2196,248 @@ function IntroOpensPanel({
   </section>;
 }
 
+function InboxPanel() {
+  const [rows, setRows] = useState(null);
+  const [advisors, setAdvisors] = useState([]);
+  const [advisorId, setAdvisorId] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [compose, setCompose] = useState({
+    advisorId: "",
+    leadId: "",
+    subject: "",
+    message: ""
+  });
+  const [leadQuery, setLeadQuery] = useState("");
+  const [leads, setLeads] = useState([]);
+  const selected = (rows ?? []).find(row => row.id === selectedId) || null;
+  const pickedLead = leads.find(lead => lead.id === compose.leadId);
+  const [composePreview, setComposePreview] = useState(null);
+  const [replyPreview, setReplyPreview] = useState(null);
+  useEffect(() => {
+    if (!compose.advisorId) {
+      setComposePreview(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      previewAdvisorInboxMail({
+        data: {
+          advisorId: compose.advisorId,
+          toName: pickedLead?.name || "",
+          toEmail: pickedLead?.email || "",
+          subject: compose.subject,
+          message: compose.message
+        }
+      }).then(setComposePreview).catch(() => setComposePreview(null));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [compose.advisorId, compose.subject, compose.message, pickedLead?.name, pickedLead?.email]);
+  useEffect(() => {
+    if (!replyOpen || !selected || selected.direction !== "in") {
+      setReplyPreview(null);
+      return;
+    }
+    const subject = /^re:/i.test(selected.subject) ? selected.subject : `Re: ${selected.subject}`;
+    const timer = setTimeout(() => {
+      previewAdvisorInboxMail({
+        data: {
+          advisorId: selected.advisorId,
+          toName: selected.fromName,
+          toEmail: selected.fromEmail,
+          subject,
+          message: replyBody,
+          quote: selected.body.slice(0, 1200)
+        }
+      }).then(setReplyPreview).catch(() => setReplyPreview(null));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [replyOpen, replyBody, selectedId]);
+  async function load(nextAdvisor = advisorId) {
+    const result = await listInboxMessages({
+      data: {
+        advisorId: nextAdvisor
+      }
+    });
+    setRows(result.rows);
+  }
+  async function sync(nextAdvisor = advisorId) {
+    setPending(true);
+    setError("");
+    try {
+      const result = await syncInboxNow();
+      await load(nextAdvisor);
+      const problem = result.errors?.[0];
+      if (problem) setError(problem);
+      setNotice(result.added ? `Synced ${result.added} new message${result.added === 1 ? "" : "s"}.` : result.checked ? "Inbox is up to date." : "No advisor has IMAP settings yet.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Inbox could not be synced.");
+    } finally {
+      setPending(false);
+    }
+  }
+  useEffect(() => {
+    listAdvisors().then(setAdvisors).catch(() => setError("Advisors could not be loaded."));
+    sync().catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      syncInboxNow().then(() => load(advisorId)).catch(() => undefined);
+    }, 120000);
+    return () => clearInterval(timer);
+  }, [advisorId]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      listCrmLeads({
+        data: {
+          query: leadQuery,
+          withEmail: true,
+          page: 1
+        }
+      }).then(page => setLeads(page.rows)).catch(() => undefined);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [leadQuery]);
+  async function openMessage(row) {
+    setSelectedId(row.id);
+    setReplyOpen(false);
+    setReplyBody("");
+    if (!row.seen && row.direction === "in") {
+      await markInboxMessageRead({
+        data: {
+          id: row.id
+        }
+      }).catch(() => undefined);
+      setRows(current => (current ?? []).map(item => item.id === row.id ? {
+        ...item,
+        seen: true
+      } : item));
+    }
+  }
+  async function sendReply(event) {
+    event.preventDefault();
+    if (!selected) return;
+    setPending(true);
+    setError("");
+    setNotice("");
+    try {
+      const subject = /^re:/i.test(selected.subject) ? selected.subject : `Re: ${selected.subject}`;
+      await sendAdvisorInboxMail({
+        data: {
+          advisorId: selected.advisorId,
+          toEmail: selected.direction === "in" ? selected.fromEmail : selected.toEmail,
+          toName: selected.direction === "in" ? selected.fromName : selected.toName,
+          subject,
+          message: replyBody,
+          quote: selected.body.slice(0, 1200),
+          leadId: selected.leadId
+        }
+      });
+      setReplyOpen(false);
+      setReplyBody("");
+      await load();
+      setNotice("Reply sent with the advisor letter.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The reply could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  async function sendNew(event) {
+    event.preventDefault();
+    setPending(true);
+    setError("");
+    setNotice("");
+    try {
+      if (!pickedLead?.email) throw new Error("Select a lead with an email address.");
+      await sendAdvisorInboxMail({
+        data: {
+          advisorId: compose.advisorId,
+          toEmail: pickedLead.email,
+          toName: pickedLead.name,
+          subject: compose.subject,
+          message: compose.message,
+          leadId: pickedLead.id
+        }
+      });
+      setCompose({
+        advisorId: compose.advisorId,
+        leadId: "",
+        subject: "",
+        message: ""
+      });
+      await load();
+      setNotice(`Sent to ${pickedLead.name}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The message could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return <section>
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 className="text-3xl font-semibold">Inbox</h1>
+        <p className="mt-2 max-w-2xl text-fg">Mail received by advisor mailboxes. The desk checks IMAP every few minutes. Replies and new letters use the advisor template and are sent from the verified mailbox.</p>
+      </div>
+      <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync inbox"}</button>
+    </div>
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+    <form className="mt-4 grid gap-3 rounded-lg border border-border bg-surface p-4" onSubmit={event => void sendNew(event)}>
+      <h2 className="text-lg font-semibold text-primary">New email</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={compose.advisorId} onChange={event => setCompose({
+            ...compose,
+            advisorId: event.target.value
+          })} required={true}><option value="">Select an advisor</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}{advisor.mailbox ? ` · ${advisor.mailbox}` : ""}</option>)}</select></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Lead</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value={compose.leadId} onChange={event => setCompose({
+            ...compose,
+            leadId: event.target.value
+          })} required={true}><option value="">Select a lead</option>{leads.map(lead => <option key={lead.id} value={lead.id}>{lead.name} · {lead.email}</option>)}</select></label>
+      </div>
+      <label className="block text-sm"><span className="font-semibold text-primary">Subject</span><input className={`${controlClass} mt-1`} value={compose.subject} onChange={event => setCompose({
+          ...compose,
+          subject: event.target.value
+        })} required={true} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-28`} value={compose.message} onChange={event => setCompose({
+          ...compose,
+          message: event.target.value
+        })} required={true} /></label>
+      {composePreview ? <LetterPreview html={composePreview.html} title={composePreview.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{composePreview.from}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{composePreview.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{composePreview.subject}</p></div>} /> : null}
+      <button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>Send email</button>
+    </form>
+    <label className="mt-4 block max-w-xs text-sm"><span className="font-semibold text-primary">Mailbox</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => {
+        setAdvisorId(event.target.value);
+        setSelectedId("");
+        void load(event.target.value);
+      }}><option value="">All advisors</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label>
+    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,280px)_1fr]">
+      <ul className="grid content-start gap-2">
+        {(rows ?? []).map(row => <li key={row.id}><button type="button" className={"w-full rounded-md border px-3 py-2 text-left " + (row.id === selectedId ? "border-action bg-surface" : "border-border bg-surface")} onClick={() => void openMessage(row)}><span className="flex items-center gap-2"><span className={"size-2 shrink-0 rounded-full " + (row.direction === "in" && !row.seen ? "bg-[#b42318]" : "bg-transparent")} aria-hidden="true" /><span className="truncate text-sm font-semibold text-primary">{row.direction === "out" ? `To ${row.toName || row.toEmail}` : row.fromName || row.fromEmail}</span></span><span className="mt-1 block truncate text-sm text-fg">{row.subject}</span><span className="mt-1 block text-xs text-fg">{row.receivedAt} UTC{row.leadName ? ` · ${row.leadName}` : ""}</span></button></li>)}
+        {rows && rows.length === 0 ? <li className="text-sm text-fg">No messages yet.</li> : null}
+      </ul>
+      {selected ? <article className="rounded-lg border border-border bg-surface p-4">
+        <p className="text-xs font-semibold tracking-wide text-primary uppercase">{selected.direction === "out" ? "Sent" : "Received"}</p>
+        <h2 className="mt-1 text-xl font-semibold text-primary">{selected.subject}</h2>
+        <p className="mt-1 text-sm text-fg">{selected.direction === "out" ? `To ${selected.toName || selected.toEmail}` : `From ${selected.fromName || selected.fromEmail}`} · {selected.advisorName} · {selected.receivedAt} UTC</p>
+        {selected.leadName ? <p className="mt-1 text-sm text-fg">Lead: {selected.leadName}</p> : null}
+        <p className="mt-4 whitespace-pre-wrap text-sm text-fg">{selected.body || "This message has no text."}</p>
+        {selected.direction === "in" ? <button type="button" className="mt-4 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary" onClick={() => setReplyOpen(true)}>Reply</button> : null}
+        {replyOpen ? <form className="mt-4 grid gap-3 border-t border-border pt-4" onSubmit={event => void sendReply(event)}>
+          <p className="text-sm text-fg">The reply is sent as the advisor letter, with the signature and the help bar, from {selected.advisorName}.</p>
+          <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-28`} value={replyBody} onChange={event => setReplyBody(event.target.value)} required={true} /></label>
+          {replyPreview ? <LetterPreview html={replyPreview.html} title={replyPreview.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{replyPreview.from}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{replyPreview.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{replyPreview.subject}</p></div>} /> : null}
+          <button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : "Send reply"}</button>
+        </form> : null}
+      </article> : <p className="text-sm text-fg">Select a message.</p>}
+    </div>
+  </section>;
+}
+
 var DESK_MENU = [{
   label: "Pipeline",
   items: [{
@@ -2026,6 +2473,9 @@ var DESK_MENU = [{
   }, {
     id: "advisors",
     label: "Advisors"
+  }, {
+    id: "inbox",
+    label: "Inbox"
   }, {
     id: "leads",
     label: "Lead emails"

@@ -700,6 +700,64 @@ export const saveSmtpSetup = createServerFn({ method: "POST" })
     return mailSetupView(sql);
   });
 
+export const saveTelegramSetup = createServerFn({ method: "POST" })
+  .validator((input: { token: string; chatId: string; clear: boolean }) => ({
+    token: input.token || "",
+    chatId: input.chatId || "",
+    clear: Boolean(input.clear),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { cleanTelegramChat, cleanTelegramToken } = await import("@/lib/mail.server");
+    const token = cleanTelegramToken(data.token);
+    const chatId = cleanTelegramChat(data.chatId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    if (data.clear) {
+      await sql`delete from site_settings where key = 'telegram_bot_token'`;
+    } else if (token) {
+      await sql`
+        insert into site_settings (key, value) values ('telegram_bot_token', ${token})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    if (!data.clear) {
+      if (!chatId) await sql`delete from site_settings where key = 'telegram_chat_id'`;
+      else {
+        await sql`
+          insert into site_settings (key, value) values ('telegram_chat_id', ${chatId})
+          on conflict (key) do update set value = excluded.value
+        `;
+      }
+    }
+    const { mailSetupView } = await import("@/lib/mail.server");
+    return mailSetupView(sql);
+  });
+
+export const setDeskSwitch = createServerFn({ method: "POST" })
+  .validator((input: { key: "telegram" | "backup"; enabled: boolean }) => ({
+    key: input.key === "backup" ? "backup" as const : "telegram" as const,
+    enabled: Boolean(input.enabled),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const setting = data.key === "backup" ? "backup_schedule" : "telegram_enabled";
+    await sql`
+      insert into site_settings (key, value) values (${setting}, ${data.enabled ? "1" : "0"})
+      on conflict (key) do update set value = excluded.value
+    `;
+    return { enabled: data.enabled };
+  });
+
+export const sendTelegramTest = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { sendTelegramTest: send } = await import("@/lib/mail.server");
+  return send(await getSql());
+});
+
 export type InvestorSession = {
   email: string;
   name: string;
@@ -1160,7 +1218,7 @@ export const cancelFunding = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export type Advisor = { id: string; name: string; phone: string; email: string; mailbox: string; role: string; personalPhone: string };
+export type Advisor = { id: string; name: string; phone: string; email: string; mailbox: string; role: string; personalPhone: string; imapHost?: string; imapPort?: number; imapUser?: string; imapPassword?: string; imapSecure?: boolean };
 
 export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling; contactPhone: string; contactBy: string };
 
@@ -1279,6 +1337,63 @@ export const sendLeadExtension = createServerFn({ method: "POST" })
     });
     await sendStep(sql, {
       step: "lead_extension",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    return { ok: true as const };
+  });
+
+export const sendLeadHtr = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").HtrCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 160),
+          opening: clip(input.copy.opening, 900),
+          offer: clip(input.copy.offer, 900),
+          decline: clip(input.copy.decline, 900),
+          closing: clip(input.copy.closing, 400),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { htrLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const letter = htrLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      copy: data.copy,
+    });
+    await sendStep(sql, {
+      step: "lead_htr",
       clientEmail: data.email,
       clientName: data.name,
       detail: letter.text,
@@ -1560,7 +1675,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
   .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
     const from = (input.from || "").slice(0, 10);
     const to = (input.to || "").slice(0, 10);
-    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension"];
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr"];
     const step = allowed.includes(input.step || "") ? input.step || "" : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
     return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
@@ -1605,7 +1720,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join lead_invites i on i.token = n.related_id
       where n.audience = 'client'
-        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension')
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr')
         and n.created_at >= ${start}
         and n.created_at < ${endDate.toISOString()}
       order by n.created_at desc
@@ -2182,8 +2297,30 @@ export const listAdvisors = createServerFn({ method: "GET" }).handler(async () =
   const sql = await getSql();
   await sql`alter table advisors add column if not exists role text not null default ''`;
   await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
-  const rows = await sql<{ id: string; name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors order by name`;
-  return rows.map((row) => ({ ...row, personalPhone: row.personal_phone }));
+  await sql`alter table advisors add column if not exists imap_host text not null default ''`;
+  await sql`alter table advisors add column if not exists imap_port integer not null default 993`;
+  await sql`alter table advisors add column if not exists imap_user text not null default ''`;
+  await sql`alter table advisors add column if not exists imap_password text not null default ''`;
+  await sql`alter table advisors add column if not exists imap_secure boolean not null default true`;
+  const rows = await sql<{ id: string; name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string; imap_host: string; imap_port: number; imap_user: string; imap_password: string; imap_secure: boolean }>`
+    select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone,
+      coalesce(imap_host, '') as imap_host, coalesce(imap_port, 993) as imap_port, coalesce(imap_user, '') as imap_user, coalesce(imap_password, '') as imap_password, coalesce(imap_secure, true) as imap_secure
+    from advisors order by name
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    email: row.email,
+    mailbox: row.mailbox,
+    role: row.role,
+    personalPhone: row.personal_phone,
+    imapHost: row.imap_host,
+    imapPort: Number(row.imap_port) || 993,
+    imapUser: row.imap_user,
+    imapSecure: row.imap_secure !== false,
+    hasImapPassword: Boolean(row.imap_password),
+  }));
 });
 
 export const listSmtpUsers = createServerFn({ method: "GET" }).handler(async () => {
@@ -2264,17 +2401,101 @@ export const saveAdvisor = createServerFn({ method: "POST" })
     const mailbox = !rawMailbox ? "" : /@/.test(rawMailbox) ? cleanMailFrom(rawMailbox) : rawMailbox.slice(0, 160);
     const role = (data.role || "").trim().slice(0, 80);
     const personalPhone = (data.personalPhone || "").trim().slice(0, 40);
+    const imapHost = (data.imapHost || "").trim().slice(0, 200);
+    const imapPort = Math.min(65535, Math.max(1, Math.floor(Number(data.imapPort) || 993)));
+    const imapUser = (data.imapUser || "").trim().slice(0, 160);
+    const imapPassword = (data.imapPassword || "").slice(0, 200);
+    const imapSecure = data.imapSecure !== false;
+    if (imapHost && /\s/.test(imapHost)) throw new Error("The IMAP host cannot contain spaces.");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await sql`alter table advisors add column if not exists role text not null default ''`;
     await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    await sql`alter table advisors add column if not exists imap_host text not null default ''`;
+    await sql`alter table advisors add column if not exists imap_port integer not null default 993`;
+    await sql`alter table advisors add column if not exists imap_user text not null default ''`;
+    await sql`alter table advisors add column if not exists imap_password text not null default ''`;
+    await sql`alter table advisors add column if not exists imap_secure boolean not null default true`;
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into advisors (id, name, phone, email, mailbox, role, personal_phone)
-      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()}, ${mailbox}, ${role}, ${personalPhone})
-      on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email, mailbox = excluded.mailbox, role = excluded.role, personal_phone = excluded.personal_phone
+      insert into advisors (id, name, phone, email, mailbox, role, personal_phone, imap_host, imap_port, imap_user, imap_password, imap_secure)
+      values (${id}, ${data.name.trim()}, ${data.phone.trim()}, ${data.email.trim()}, ${mailbox}, ${role}, ${personalPhone}, ${imapHost}, ${imapPort}, ${imapUser}, ${imapPassword}, ${imapSecure})
+      on conflict (id) do update set
+        name = excluded.name,
+        phone = excluded.phone,
+        email = excluded.email,
+        mailbox = excluded.mailbox,
+        role = excluded.role,
+        personal_phone = excluded.personal_phone,
+        imap_host = excluded.imap_host,
+        imap_port = excluded.imap_port,
+        imap_user = excluded.imap_user,
+        imap_password = case when excluded.imap_password = '' then advisors.imap_password else excluded.imap_password end,
+        imap_secure = excluded.imap_secure
     `;
     return { id };
+  });
+
+export const listInboxMessages = createServerFn({ method: "GET" })
+  .validator((input: { advisorId?: string } | undefined) => ({ advisorId: (input?.advisorId || "").slice(0, 80) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { listInbox, syncInboxes } = await import("@/lib/inbox.server");
+    const sql = await getSql();
+    const rows = await listInbox(sql, data.advisorId);
+    return { rows };
+  });
+
+export const syncInboxNow = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { syncInboxes } = await import("@/lib/inbox.server");
+  return syncInboxes(await getSql());
+});
+
+export const markInboxMessageRead = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => ({ id: (input.id || "").slice(0, 80) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { markInboxRead } = await import("@/lib/inbox.server");
+    await markInboxRead(await getSql(), data.id);
+    return { ok: true as const };
+  });
+
+export const previewAdvisorInboxMail = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; toEmail?: string; toName?: string; subject?: string; message?: string; quote?: string }) => ({
+    advisorId: (input.advisorId || "").slice(0, 80),
+    toEmail: (input.toEmail || "").trim().slice(0, 160),
+    toName: (input.toName || "").trim().slice(0, 160),
+    subject: (input.subject || "").trim().slice(0, 300),
+    message: (input.message || "").slice(0, 8000),
+    quote: (input.quote || "").slice(0, 2000),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { previewInboxLetter } = await import("@/lib/inbox.server");
+    return previewInboxLetter(await getSql(), data);
+  });
+
+export const sendAdvisorInboxMail = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; toEmail: string; toName: string; subject: string; message: string; quote?: string; leadId?: string }) => ({
+    advisorId: (input.advisorId || "").slice(0, 80),
+    toEmail: (input.toEmail || "").trim().slice(0, 160),
+    toName: (input.toName || "").trim().slice(0, 160),
+    subject: (input.subject || "").trim().slice(0, 300),
+    message: (input.message || "").trim().slice(0, 8000),
+    quote: (input.quote || "").slice(0, 2000),
+    leadId: (input.leadId || "").slice(0, 80),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { sendInboxMail } = await import("@/lib/inbox.server");
+    await sendInboxMail(await getSql(), data);
+    return { ok: true as const };
   });
 
 export const deleteAdvisor = createServerFn({ method: "POST" })

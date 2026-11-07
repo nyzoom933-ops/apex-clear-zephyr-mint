@@ -243,6 +243,7 @@ if (typeof window === "undefined" && dbSource === "pglite") {
 } else if (typeof window === "undefined") {
   startBackupSchedule();
   startInviteReminders();
+  startInboxSchedule();
 }
 
 function startInviteReminders() {
@@ -254,6 +255,18 @@ function startInviteReminders() {
     .catch((err) => {
       boot.__inviteBoot = false;
       console.error("[db] Invite reminder schedule failed:", err);
+    });
+}
+
+function startInboxSchedule() {
+  const boot = globalThis as typeof globalThis & { __inboxBoot?: boolean };
+  if (boot.__inboxBoot) return;
+  boot.__inboxBoot = true;
+  void import("@/lib/inbox.server")
+    .then((mod) => mod.ensureInboxSchedule())
+    .catch((err) => {
+      boot.__inboxBoot = false;
+      console.error("[db] Inbox schedule failed:", err);
     });
 }
 

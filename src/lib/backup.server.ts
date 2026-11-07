@@ -1,10 +1,10 @@
+import { deflateRawSync } from "node:zlib";
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
-import { env } from "@/lib/env.server";
-import { readMailConfig } from "@/lib/mail.server";
+import { sendTelegramBackup } from "@/lib/mail.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-const ADMIN_EMAIL = "admin@accountholding.com";
+const MAX_PART = 4 * 1024 * 1024;
 
 const globalRef = globalThis as typeof globalThis & {
   __backupTimer?: ReturnType<typeof setInterval>;
@@ -17,29 +17,27 @@ export function ensureBackupSchedule() {
   globalRef.__backupTimer = setInterval(() => void runIfDue(), HOUR_MS);
 }
 
-export async function runBackup() {
+export async function runBackup(options?: { scheduled?: boolean }) {
   if (globalRef.__backupRunning) return { ok: false as const, error: "A backup is already running." };
   globalRef.__backupRunning = true;
   try {
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const desk = await sql<{ value: string }>`select value from site_settings where key = 'desk_email'`;
-    const to = (await readSetting(sql, "backup_email")) || desk[0]?.value?.trim() || env("BACKUP_EMAIL") || env("ADMIN_EMAIL") || ADMIN_EMAIL;
+    const { readMailConfig } = await import("@/lib/mail.server");
+    const mail = await readMailConfig(sql);
+    if (options?.scheduled && !mail.backupSchedule) return { ok: true as const, skipped: true as const, to: "Telegram", at: "", delivery: "stored", bytes: 0, parts: 0, telegram: "skipped" as const };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
     const dump = await dumpDatabase(sql);
-    const zip = zipStore(`database-${stamp}.sql`, Buffer.from(dump, "utf8"));
+    const parts = packBackup(dump, stamp);
     const company = (await readSetting(sql, "company_name")) || DEFAULT_COMPANY_NAME;
-    const mail = await readMailConfig(sql);
-    const delivery = await sendZip({
-      to,
-      company,
-      from: mail.from || `${company} <notifications@accountholding.com>`,
-      key: mail.key,
-      smtpKey: mail.smtpKey,
-      filename: `database-backup-${stamp}.zip`,
-      zip,
-      bytes: dump.length,
-    });
+    const filenames = parts.map((_, index) => parts.length === 1 ? `database-backup-${stamp}.zip` : `database-backup-${stamp}-part-${index + 1}-of-${parts.length}.zip`);
+    const telegram = await sendTelegramBackup(
+      sql,
+      `${company} database backup`,
+      parts.length === 1 ? "The database backup is attached." : `The database backup is attached in ${parts.length} parts. Restore them in order.`,
+      parts.map((zip, index) => ({ filename: filenames[index], content: zip.toString("base64") })),
+    );
+    const delivery = telegram === "sent" ? "sent" : telegram === "failed" ? "failed" : "stored";
     const at = new Date().toISOString();
     await sql`
       insert into site_settings (key, value) values ('backup_at', ${at})
@@ -49,7 +47,7 @@ export async function runBackup() {
       insert into site_settings (key, value) values ('backup_status', ${delivery})
       on conflict (key) do update set value = excluded.value
     `;
-    return { ok: true as const, to, at, delivery, bytes: zip.length };
+    return { ok: true as const, skipped: false as const, to: "Telegram", at, delivery, bytes: parts.reduce((sum, part) => sum + part.length, 0), parts: parts.length, telegram };
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : "Backup failed." };
   } finally {
@@ -73,7 +71,7 @@ async function runIfDue() {
       return;
     }
     if (!last && anchor && Date.now() - Date.parse(anchor) < DAY_MS) return;
-    await runBackup();
+    await runBackup({ scheduled: true });
   } catch {
     // The next hourly check retries a missed backup.
   }
@@ -90,7 +88,7 @@ async function dumpDatabase(sql: Awaited<ReturnType<(typeof import("@/lib/db"))[
     where table_schema = 'public' and table_type = 'BASE TABLE'
     order by table_name
   `;
-  const parts = ["-- Database backup", `-- ${new Date().toISOString()}`, "begin;", ""];
+  const parts = ["-- Database backup", `-- ${new Date().toISOString()}`, ""];
   for (const table of tables) {
     const name = table.table_name;
     const columns = await sql<{ column_name: string }>`
@@ -100,7 +98,7 @@ async function dumpDatabase(sql: Awaited<ReturnType<(typeof import("@/lib/db"))[
     `;
     const cols = columns.map((column) => column.column_name);
     const raw = await sql.query<Record<string, unknown>>(`select * from ${quoteIdent(name)}`);
-    const hidden = new Set(["resend_api_key", "smtp2go_api_key", "desk_password_hash", "desk_session"]);
+    const hidden = new Set(["resend_api_key", "smtp2go_api_key", "telegram_bot_token", "desk_password_hash", "desk_session"]);
     const rows = name === "site_settings" ? raw.filter((row) => !hidden.has(String(row.key))) : raw;
     parts.push(`-- ${name} (${rows.length})`);
     if (rows.length === 0) {
@@ -109,12 +107,12 @@ async function dumpDatabase(sql: Awaited<ReturnType<(typeof import("@/lib/db"))[
     }
     const header = `insert into ${quoteIdent(name)} (${cols.map(quoteIdent).join(", ")}) values`;
     for (const row of rows) {
-      const values = cols.map((column) => sqlLiteral(row[column]));
+      const values = cols.map((column) => name === "advisors" && column === "imap_password" ? "''" : sqlLiteral(row[column]));
       parts.push(`${header} (${values.join(", ")});`);
     }
     parts.push("");
   }
-  parts.push("commit;", "");
+  parts.push("");
   return parts.join("\n");
 }
 
@@ -137,59 +135,40 @@ function quoteText(value: string) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-async function sendZip(input: { to: string; company: string; from: string; key: string; smtpKey: string; filename: string; zip: Buffer; bytes: number }) {
-  const subject = `${input.company} database backup`;
-  const text = `The daily database backup is attached.\n\nFile: ${input.filename}\nSQL size: ${input.bytes} bytes\nGenerated: ${new Date().toISOString()}`;
-  if (input.smtpKey && input.from) {
-    try {
-      const response = await fetch("https://api.smtp2go.com/v3/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": input.smtpKey, accept: "application/json" },
-        body: JSON.stringify({
-          sender: input.from,
-          to: [input.to],
-          subject,
-          text_body: text,
-          attachments: [{ filename: input.filename, fileblob: input.zip.toString("base64"), mimetype: "application/zip" }],
-        }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number } };
-      if (response.ok && payload.data?.email_id && !payload.data.failed) return "sent";
-    } catch {
-      // Resend is the backup when SMTP2GO does not accept the message.
-    }
-  }
-  if (!input.key) return input.smtpKey ? "failed" : "stored";
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${input.key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: input.from,
-        to: [input.to],
-        subject,
-        text,
-        attachments: [{ filename: input.filename, content: input.zip.toString("base64") }],
-      }),
-    });
-    return response.ok ? "sent" : "failed";
-  } catch {
-    return "failed";
-  }
+function packBackup(sqlText: string, stamp: string) {
+  const pieces = splitSql(sqlText);
+  return pieces.map((text, index) => {
+    const name = pieces.length === 1 ? `database-${stamp}.sql` : `database-${stamp}-part-${index + 1}-of-${pieces.length}.sql`;
+    return zipDeflate(name, Buffer.from(script(text)));
+  });
 }
 
-function zipStore(filename: string, data: Buffer) {
+function script(body: string) {
+  return `-- Database backup ${new Date().toISOString()}\nbegin;\n${body.trim()}\ncommit;\n`;
+}
+
+function splitSql(sqlText: string): string[] {
+  const zipped = zipDeflate("database.sql", Buffer.from(script(sqlText)));
+  if (zipped.length <= MAX_PART) return [sqlText];
+  const lines = sqlText.split("\n").filter((line) => line.length > 0);
+  if (lines.length <= 1) return [sqlText];
+  const mid = Math.ceil(lines.length / 2);
+  return [...splitSql(lines.slice(0, mid).join("\n")), ...splitSql(lines.slice(mid).join("\n"))];
+}
+
+function zipDeflate(filename: string, data: Buffer) {
   const name = Buffer.from(filename);
+  const compressed = deflateRawSync(data);
   const crc = crc32(data);
   const local = Buffer.alloc(30);
   local.writeUInt32LE(0x04034b50, 0);
   local.writeUInt16LE(20, 4);
   local.writeUInt16LE(0, 6);
-  local.writeUInt16LE(0, 8);
+  local.writeUInt16LE(8, 8);
   local.writeUInt16LE(0, 10);
   local.writeUInt16LE(0, 12);
   local.writeUInt32LE(crc, 14);
-  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(compressed.length, 18);
   local.writeUInt32LE(data.length, 22);
   local.writeUInt16LE(name.length, 26);
   local.writeUInt16LE(0, 28);
@@ -198,11 +177,11 @@ function zipStore(filename: string, data: Buffer) {
   central.writeUInt16LE(20, 4);
   central.writeUInt16LE(20, 6);
   central.writeUInt16LE(0, 8);
-  central.writeUInt16LE(0, 10);
+  central.writeUInt16LE(8, 10);
   central.writeUInt16LE(0, 12);
   central.writeUInt16LE(0, 14);
   central.writeUInt32LE(crc, 16);
-  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(compressed.length, 20);
   central.writeUInt32LE(data.length, 24);
   central.writeUInt16LE(name.length, 28);
   central.writeUInt16LE(0, 30);
@@ -210,7 +189,7 @@ function zipStore(filename: string, data: Buffer) {
   central.writeUInt16LE(0, 34);
   central.writeUInt16LE(0, 36);
   central.writeUInt32LE(0, 38);
-  central.writeUInt32LE(local.length + name.length + data.length, 42);
+  central.writeUInt32LE(local.length + name.length + compressed.length, 42);
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
   end.writeUInt16LE(0, 4);
@@ -218,9 +197,9 @@ function zipStore(filename: string, data: Buffer) {
   end.writeUInt16LE(1, 8);
   end.writeUInt16LE(1, 10);
   end.writeUInt32LE(central.length + name.length, 12);
-  end.writeUInt32LE(local.length + name.length + data.length, 16);
+  end.writeUInt32LE(local.length + name.length + compressed.length, 16);
   end.writeUInt16LE(0, 20);
-  return Buffer.concat([local, name, data, central, name, end]);
+  return Buffer.concat([local, name, compressed, central, name, end]);
 }
 
 const CRC_TABLE = (() => {

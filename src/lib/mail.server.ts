@@ -5,8 +5,6 @@ import { env } from "@/lib/env.server";
 
 export type { MailStep };
 
-const ADMIN_EMAIL = "admin@accountholding.com";
-
 export async function ensureMailColumn(sql: Sql) {
   await sql`alter table notifications add column if not exists html text not null default ''`;
   await sql`alter table notifications add column if not exists read_at timestamptz`;
@@ -15,11 +13,6 @@ export async function ensureMailColumn(sql: Sql) {
   await sql`alter table notifications add column if not exists status_at timestamptz`;
   await sql`alter table notifications add column if not exists mail_provider text not null default ''`;
   await sql`alter table notifications add column if not exists advisor_id text not null default ''`;
-}
-
-async function readDeskEmail(sql: Sql) {
-  const rows = await sql<{ value: string }>`select value from site_settings where key = 'desk_email'`;
-  return rows[0]?.value?.trim().toLowerCase() || "";
 }
 
 export async function notifyStep(
@@ -65,7 +58,7 @@ export async function notifyStep(
     emailLogo,
     extraHtml: input.extraHtml,
   });
-  const adminTo = (await readDeskEmail(sql)) || env("ADMIN_EMAIL") || ADMIN_EMAIL;
+  const adminTo = (await readTelegram(sql)).chatId || "telegram";
   const messages = [
     { audience: "client" as const, recipient: input.clientEmail, mail: client, attachments: input.clientAttachments ?? [] },
     ...(input.skipAdmin ? [] : [{ audience: "admin" as const, recipient: adminTo, mail: admin, attachments: input.attachments ?? [] }]),
@@ -74,7 +67,9 @@ export async function notifyStep(
   for (const message of messages) {
     const subject = message.audience === "client" && input.subject?.trim() ? input.subject.trim() : message.mail.subject;
     const advisorMail = message.audience === "client" && Boolean(input.replyTo);
-    const result = await deliver(message.recipient, subject, message.mail.text, message.mail.html, companyName, sql, message.attachments, advisorMail ? input.replyTo || "" : "", advisorMail ? input.replyName || "" : "", advisorMail ? input.fromAddress || "" : "");
+    const result = message.audience === "admin"
+      ? await deliverTelegram(sql, subject, message.mail.text, message.attachments)
+      : await deliver(message.recipient, subject, message.mail.text, message.mail.html, companyName, sql, message.attachments, advisorMail ? input.replyTo || "" : "", advisorMail ? input.replyName || "" : "", advisorMail ? input.fromAddress || "" : "");
     await sql`
       insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
       values (
@@ -136,17 +131,30 @@ async function readEmailLogo(sql: Sql) {
 
 export async function readMailConfig(sql: Sql) {
   const rows = await sql<{ key: string; value: string }>`
-    select key, value from site_settings where key in ('resend_api_key', 'mail_from', 'smtp2go_api_key')
+    select key, value from site_settings where key in ('resend_api_key', 'mail_from', 'smtp2go_api_key', 'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled', 'backup_schedule')
   `;
   let key = env("RESEND_API_KEY") || "";
   let from = env("MAIL_FROM") || "";
   let smtpKey = env("SMTP2GO_API_KEY") || "";
+  let telegramToken = env("TELEGRAM_BOT_TOKEN") || "";
+  let telegramChat = env("TELEGRAM_CHAT_ID") || "";
+  let telegramEnabled = true;
+  let backupSchedule = true;
   for (const row of rows) {
     if (row.key === "resend_api_key" && row.value.trim()) key = row.value.trim();
     if (row.key === "mail_from" && row.value.trim()) from = row.value.trim();
     if (row.key === "smtp2go_api_key" && row.value.trim()) smtpKey = row.value.trim();
+    if (row.key === "telegram_bot_token" && row.value.trim()) telegramToken = row.value.trim();
+    if (row.key === "telegram_chat_id" && row.value.trim()) telegramChat = row.value.trim();
+    if (row.key === "telegram_enabled") telegramEnabled = row.value !== "0";
+    if (row.key === "backup_schedule") backupSchedule = row.value !== "0";
   }
-  return { key, from, smtpKey };
+  return { key, from, smtpKey, telegramToken, telegramChat, telegramEnabled, backupSchedule };
+}
+
+async function readTelegram(sql: Sql) {
+  const mail = await readMailConfig(sql);
+  return { token: mail.telegramToken, chatId: mail.telegramChat, enabled: mail.telegramEnabled };
 }
 
 export async function mailSetupView(sql: Sql) {
@@ -157,7 +165,101 @@ export async function mailSetupView(sql: Sql) {
     mailFrom: mail.from,
     hasSmtpKey: Boolean(mail.smtpKey),
     smtpKeyHint: mail.smtpKey ? `…${mail.smtpKey.slice(-4)}` : "",
+    hasTelegram: Boolean(mail.telegramToken && mail.telegramChat),
+    telegramHint: mail.telegramToken ? `…${mail.telegramToken.slice(-4)}` : "",
+    telegramChat: mail.telegramChat,
+    telegramEnabled: mail.telegramEnabled,
+    backupSchedule: mail.backupSchedule,
   };
+}
+
+export function cleanTelegramToken(value: string) {
+  const token = value.trim();
+  if (!token) return "";
+  if (!/^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(token) || token.length > 120) throw new Error("Paste the bot token from BotFather. It looks like 123456:ABC…");
+  return token;
+}
+
+export function cleanTelegramChat(value: string) {
+  const chat = value.trim();
+  if (!chat) return "";
+  if (!/^-?\d{1,20}$/.test(chat)) throw new Error("The chat id is a number. For a group it usually starts with -100.");
+  return chat;
+}
+
+function escapeTelegram(value: string) {
+  return value.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">");
+}
+
+async function deliverTelegram(sql: Sql, subject: string, text: string, attachments: MailFile[]) {
+  const telegram = await readTelegram(sql);
+  if (!telegram.enabled || !telegram.token || !telegram.chatId) return { delivery: "stored", messageId: "", provider: "telegram" };
+  const sent = await postTelegram(telegram.token, telegram.chatId, subject, text, attachments);
+  return { delivery: sent.ok ? "sent" : "failed", messageId: sent.id, provider: "telegram" };
+}
+
+export async function sendTelegramNotice(sql: Sql, subject: string, text: string) {
+  const sent = await deliverTelegram(sql, subject, text, []);
+  return sent.delivery;
+}
+
+export async function sendTelegramBackup(sql: Sql, subject: string, text: string, files: MailFile[]) {
+  const telegram = await readTelegram(sql);
+  if (!telegram.token || !telegram.chatId) return "skipped" as const;
+  const sent = await postTelegram(telegram.token, telegram.chatId, subject, text, files);
+  return sent.ok ? "sent" as const : "failed" as const;
+}
+
+export async function sendTelegramTest(sql: Sql) {
+  const telegram = await readTelegram(sql);
+  if (!telegram.token || !telegram.chatId) throw new Error("Save the bot token and chat id first.");
+  const sent = await postTelegram(telegram.token, telegram.chatId, "Desk notices", "This chat will receive desk notices instead of email.", []);
+  if (!sent.ok) throw new Error(sent.error || "Telegram did not accept the test message.");
+  return { ok: true as const };
+}
+
+async function postTelegram(token: string, chatId: string, subject: string, text: string, attachments: MailFile[]) {
+  const chunks = telegramChunks(`<b>${escapeTelegram(subject)}</b>\n\n${escapeTelegram(text.trim())}`);
+  let id = "";
+  for (const chunk of chunks) {
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: "HTML", disable_web_page_preview: true }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+    if (!response.ok || !payload.ok) return { ok: false, id, error: payload.description || "Telegram rejected the message." };
+    if (payload.result?.message_id) id = String(payload.result.message_id);
+  }
+  for (const file of attachments) {
+    const form = new FormData();
+    form.set("chat_id", chatId);
+    form.set("caption", file.filename.slice(0, 200));
+    const bytes = Buffer.from(file.content, "base64");
+    form.set("document", new Blob([new Uint8Array(bytes)]), file.filename || "attachment");
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: "POST",
+      signal: AbortSignal.timeout(20000),
+      body: form,
+    });
+    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+    if (!response.ok || !payload.ok) return { ok: false, id, error: payload.description || "Telegram rejected an attachment." };
+    if (payload.result?.message_id) id = String(payload.result.message_id);
+  }
+  return { ok: true, id, error: "" };
+}
+
+function telegramChunks(value: string) {
+  const limit = 3900;
+  if (value.length <= limit) return [value];
+  const parts: string[] = [];
+  let rest = value;
+  while (rest.length) {
+    parts.push(rest.slice(0, limit));
+    rest = rest.slice(limit);
+  }
+  return parts;
 }
 
 export function cleanResendKey(value: string) {
@@ -245,6 +347,14 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
   } catch {
     return { delivery: "failed", messageId: "", provider: "smtp2go" };
   }
+}
+
+export async function sendFromMailbox(
+  sql: Sql,
+  input: { to: string; subject: string; text: string; html: string; fromAddress: string; replyTo: string; replyName: string },
+) {
+  const mail = await readMailConfig(sql);
+  return deliverSmtp2go(input.to, input.subject, input.text, input.html, mail.smtpKey, input.fromAddress, input.replyTo, input.replyName, []);
 }
 
 const STATUS_RANK: Record<string, number> = {

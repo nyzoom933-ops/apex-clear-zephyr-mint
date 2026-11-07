@@ -14,7 +14,7 @@ export const Route = createFileRoute("/api/cron/backup")({
           return new Response("Unauthorized", { status: 401 });
         }
         const { runBackup } = await import("@/lib/backup.server");
-        const result = await runBackup();
+        const result = await runBackup({ scheduled: true });
         return Response.json(result);
       },
     },
