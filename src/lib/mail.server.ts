@@ -188,19 +188,20 @@ export function cleanTelegramChat(value: string) {
 }
 
 function escapeTelegram(value: string) {
-  return value.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">");
+  return value.replace(/&/g, "&" + "amp;").replace(/</g, "&" + "lt;").replace(/>/g, "&" + "gt;");
 }
 
 async function deliverTelegram(sql: Sql, subject: string, text: string, attachments: MailFile[]) {
   const telegram = await readTelegram(sql);
-  if (!telegram.enabled || !telegram.token || !telegram.chatId) return { delivery: "stored", messageId: "", provider: "telegram" };
+  if (!telegram.enabled) return { delivery: "stored", messageId: "", provider: "telegram", error: "Desk notices are turned off." };
+  if (!telegram.token || !telegram.chatId) return { delivery: "stored", messageId: "", provider: "telegram", error: "Save the bot token and chat id." };
   const sent = await postTelegram(telegram.token, telegram.chatId, subject, text, attachments);
-  return { delivery: sent.ok ? "sent" : "failed", messageId: sent.id, provider: "telegram" };
+  return { delivery: sent.ok ? "sent" : "failed", messageId: sent.id, provider: "telegram", error: sent.error || "" };
 }
 
 export async function sendTelegramNotice(sql: Sql, subject: string, text: string) {
   const sent = await deliverTelegram(sql, subject, text, []);
-  return sent.delivery;
+  return { delivery: sent.delivery, error: sent.error };
 }
 
 export async function sendTelegramBackup(sql: Sql, subject: string, text: string, files: MailFile[]) {
@@ -209,6 +210,34 @@ export async function sendTelegramBackup(sql: Sql, subject: string, text: string
   const sent = await postTelegram(telegram.token, telegram.chatId, subject, text, files);
   return sent.ok ? "sent" as const : "failed" as const;
 }
+
+export async function lookupTelegramChats(sql: Sql, tokenInput: string) {
+  const saved = await readTelegram(sql);
+  const token = cleanTelegramToken(tokenInput) || saved.token;
+  if (!token) throw new Error("Paste the bot token first.");
+  const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`, { signal: AbortSignal.timeout(12000) });
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    description?: string;
+    result?: Array<{ message?: { chat?: TelegramChat }; edited_message?: { chat?: TelegramChat }; channel_post?: { chat?: TelegramChat }; my_chat_member?: { chat?: TelegramChat } }>;
+  };
+  if (!response.ok || !payload.ok) {
+    if (response.status === 404) throw new Error("Telegram does not recognize this bot token. Copy it again from BotFather, with no spaces.");
+    throw new Error(payload.description || "Telegram did not return chats.");
+  }
+  const chats = new Map<string, { id: string; label: string; type: string }>();
+  for (const update of payload.result || []) {
+    const chat = update.message?.chat || update.edited_message?.chat || update.channel_post?.chat || update.my_chat_member?.chat;
+    if (!chat?.id) continue;
+    const id = String(chat.id);
+    const label = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || (chat.username ? `@${chat.username}` : id);
+    chats.set(id, { id, label, type: chat.type || "" });
+  }
+  if (!chats.size) throw new Error("The bot has not seen a message yet. Open the bot in Telegram, press Start, then look again.");
+  return { chats: [...chats.values()] };
+}
+
+type TelegramChat = { id?: number; type?: string; title?: string; username?: string; first_name?: string; last_name?: string };
 
 export async function sendTelegramTest(sql: Sql) {
   const telegram = await readTelegram(sql);
@@ -324,12 +353,13 @@ async function deliver(to: string, subject: string, text: string, html: string, 
 }
 
 async function deliverSmtp2go(to: string, subject: string, text: string, html: string, apiKey: string, from: string, replyTo: string, replyName: string, attachments: MailFile[]) {
-  if (!apiKey || !from) return { delivery: "failed", messageId: "", provider: "smtp2go" };
+  if (!apiKey) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Save the SMTP2GO API key in Misc settings." };
+  if (!from) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "This advisor has no verified mailbox." };
   try {
     const response = await fetch("https://api.smtp2go.com/v3/email/send", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": apiKey, accept: "application/json" },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(20000),
       body: JSON.stringify({
         sender: senderAddress(from, replyName),
         to: [to],
@@ -340,12 +370,13 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
         ...(attachments.length ? { attachments: attachments.map((file) => ({ filename: file.filename, fileblob: file.content, mimetype: "application/octet-stream" })) } : {}),
       }),
     });
-    const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number } };
+    const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number; error?: string; error_code?: string } };
     const emailId = payload.data?.email_id ? String(payload.data.email_id) : "";
     const ok = response.ok && Boolean(emailId) && !payload.data?.failed;
-    return { delivery: ok ? "sent" : "failed", messageId: ok ? emailId : "", provider: "smtp2go" };
-  } catch {
-    return { delivery: "failed", messageId: "", provider: "smtp2go" };
+    const error = payload.data?.error || payload.data?.error_code || "";
+    return { delivery: ok ? "sent" : "failed", messageId: ok ? emailId : "", provider: "smtp2go", error: ok ? "" : error || "SMTP2GO did not accept the message." };
+  } catch (caught) {
+    return { delivery: "failed", messageId: "", provider: "smtp2go", error: caught instanceof Error && caught.message ? caught.message : "SMTP2GO did not respond." };
   }
 }
 

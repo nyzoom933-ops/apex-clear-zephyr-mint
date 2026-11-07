@@ -751,6 +751,15 @@ export const setDeskSwitch = createServerFn({ method: "POST" })
     return { enabled: data.enabled };
   });
 
+export const lookupTelegramChats = createServerFn({ method: "POST" })
+  .validator((input: { token?: string }) => ({ token: (input.token || "").trim() }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { lookupTelegramChats: lookup } = await import("@/lib/mail.server");
+    return lookup(await getSql(), data.token);
+  });
+
 export const sendTelegramTest = createServerFn({ method: "POST" }).handler(async () => {
   await requireAdmin();
   const { getSql } = await import("@/lib/db");

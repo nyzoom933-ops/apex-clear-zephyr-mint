@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
+import { advisorNoteLetter } from "@/lib/email-templates";
 import {
   adminLogin,
   adminLogout,
@@ -41,6 +42,7 @@ import {
   saveMailSetup,
   saveSmtpSetup,
   saveTelegramSetup,
+  lookupTelegramChats,
   setDeskSwitch,
   sendTelegramTest,
   saveDeskLogin,
@@ -610,6 +612,7 @@ function SettingsPanel({
   const [telegramHint, setTelegramHint] = useState("");
   const [hasTelegram, setHasTelegram] = useState(false);
   const [telegramEnabled, setTelegramEnabled] = useState(true);
+  const [telegramChats, setTelegramChats] = useState([]);
   const [backupSchedule, setBackupSchedule] = useState(true);
   const [telegramPending, setTelegramPending] = useState(false);
   const [mailPending, setMailPending] = useState(false);
@@ -819,7 +822,7 @@ function SettingsPanel({
               setTelegramEnabled(!enabled);
               setError("Could not save the Telegram switch.");
             });
-          }} />Send desk notices</label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Bot token</span><input type="password" autoComplete="off" className={controlClass} value={telegramToken} placeholder={hasTelegram ? `Saved ${telegramHint}` : "123456:ABC…"} onChange={event => setTelegramToken(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Chat id</span><input className={controlClass} value={telegramChat} placeholder="-1001234567890" onChange={event => setTelegramChat(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={telegramPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+          }} />Send desk notices</label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Bot token</span><input type="password" autoComplete="off" className={controlClass} value={telegramToken} placeholder={hasTelegram ? `Saved ${telegramHint}` : "123456:ABC…"} onChange={event => setTelegramToken(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Chat id</span><input className={controlClass} value={telegramChat} placeholder="-1001234567890" onChange={event => setTelegramChat(event.target.value)} />{telegramChats.length ? <span className="mt-2 flex flex-wrap gap-2">{telegramChats.map(chat => <button key={chat.id} type="button" className="min-h-9 rounded-full border border-border px-3 text-sm font-semibold text-primary" onClick={() => setTelegramChat(chat.id)}>{chat.label} · {chat.id}</button>)}</span> : null}</label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={telegramPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setTelegramPending(true);
@@ -837,6 +840,19 @@ function SettingsPanel({
               setNotice(setup.hasTelegram ? "Telegram settings saved." : "Chat id saved. Add the bot token to send notices.");
             }).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "Could not save Telegram.")).finally(() => setTelegramPending(false));
           }}>{telegramPending ? "Saving…" : "Save Telegram"}</button><button type="button" disabled={telegramPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setTelegramPending(true);
+            lookupTelegramChats({
+              data: {
+                token: telegramToken
+              }
+            }).then(result => {
+              setTelegramChats(result.chats);
+              if (result.chats.length === 1) setTelegramChat(result.chats[0].id);
+              setNotice(result.chats.length === 1 ? `Chat id ${result.chats[0].id} is filled in. Press Save Telegram.` : "Press the chat you want, then Save Telegram.");
+            }).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The chat id could not be found.")).finally(() => setTelegramPending(false));
+          }}>Find chat id</button><button type="button" disabled={telegramPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setTelegramPending(true);
@@ -2197,6 +2213,7 @@ function IntroOpensPanel({
 }
 
 function InboxPanel() {
+  const brand = useBrand();
   const [rows, setRows] = useState(null);
   const [advisors, setAdvisors] = useState([]);
   const [advisorId, setAdvisorId] = useState("");
@@ -2217,7 +2234,25 @@ function InboxPanel() {
   const selected = (rows ?? []).find(row => row.id === selectedId) || null;
   const pickedLead = leads.find(lead => lead.id === compose.leadId);
   const [composePreview, setComposePreview] = useState(null);
-  const [replyPreview, setReplyPreview] = useState(null);
+  const [replyError, setReplyError] = useState("");
+  const [sending, setSending] = useState(false);
+  const replyAdvisor = selected ? advisors.find(item => item.id === selected.advisorId) || advisors.find(item => item.name === selected.advisorName) : null;
+  const replySubject = selected ? /^re:/i.test(selected.subject) ? selected.subject : `Re: ${selected.subject}` : "";
+  const replyLetter = selected && selected.direction === "in" ? advisorNoteLetter({
+    company: brand.companyName,
+    companyPhone: brand.companyPhone,
+    logo: brand.emailLogo,
+    advisor: {
+      name: replyAdvisor?.name || selected.advisorName || brand.companyName,
+      phone: replyAdvisor?.phone || "",
+      email: replyAdvisor?.email || "",
+      mailbox: replyAdvisor?.mailbox || "",
+      role: replyAdvisor?.role || "",
+      personalPhone: replyAdvisor?.personalPhone || ""
+    },
+    greeting: selected.fromName ? `Dear ${selected.fromName},` : "Hello,",
+    message: replyBody.trim() || " "
+  }) : null;
   useEffect(() => {
     if (!compose.advisorId) {
       setComposePreview(null);
@@ -2236,26 +2271,6 @@ function InboxPanel() {
     }, 300);
     return () => clearTimeout(timer);
   }, [compose.advisorId, compose.subject, compose.message, pickedLead?.name, pickedLead?.email]);
-  useEffect(() => {
-    if (!replyOpen || !selected || selected.direction !== "in") {
-      setReplyPreview(null);
-      return;
-    }
-    const subject = /^re:/i.test(selected.subject) ? selected.subject : `Re: ${selected.subject}`;
-    const timer = setTimeout(() => {
-      previewAdvisorInboxMail({
-        data: {
-          advisorId: selected.advisorId,
-          toName: selected.fromName,
-          toEmail: selected.fromEmail,
-          subject,
-          message: replyBody,
-          quote: selected.body.slice(0, 1200)
-        }
-      }).then(setReplyPreview).catch(() => setReplyPreview(null));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [replyOpen, replyBody, selectedId]);
   async function load(nextAdvisor = advisorId) {
     const result = await listInboxMessages({
       data: {
@@ -2272,7 +2287,8 @@ function InboxPanel() {
       await load(nextAdvisor);
       const problem = result.errors?.[0];
       if (problem) setError(problem);
-      setNotice(result.added ? `Synced ${result.added} new message${result.added === 1 ? "" : "s"}.` : result.checked ? "Inbox is up to date." : "No advisor has IMAP settings yet.");
+      const headline = result.notified ? `Telegram notice sent for ${result.notified} message${result.notified === 1 ? "" : "s"}.` : result.telegram ? result.telegram : result.checked ? "No Telegram notice was sent." : "No advisor has IMAP settings yet.";
+      setNotice([headline, result.detail].filter(Boolean).join(" "));
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "Inbox could not be synced.");
     } finally {
@@ -2281,7 +2297,8 @@ function InboxPanel() {
   }
   useEffect(() => {
     listAdvisors().then(setAdvisors).catch(() => setError("Advisors could not be loaded."));
-    sync().catch(() => undefined);
+    load().catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "Inbox could not be loaded."));
+    syncInboxNow().then(() => load()).catch(() => undefined);
   }, []);
   useEffect(() => {
     const timer = setInterval(() => {
@@ -2302,8 +2319,13 @@ function InboxPanel() {
     return () => clearTimeout(timer);
   }, [leadQuery]);
   async function openMessage(row) {
+    if (selectedId === row.id) {
+      setSelectedId("");
+      setReplyOpen(false);
+      return;
+    }
     setSelectedId(row.id);
-    setReplyOpen(false);
+    setReplyOpen(row.direction === "in");
     setReplyBody("");
     if (!row.seen && row.direction === "in") {
       await markInboxMessageRead({
@@ -2320,30 +2342,45 @@ function InboxPanel() {
   async function sendReply(event) {
     event.preventDefault();
     if (!selected) return;
-    setPending(true);
+    const advisorId = selected.advisorId || replyAdvisor?.id || "";
+    if (!advisorId) {
+      setReplyError("This message is not tied to an advisor.");
+      return;
+    }
+    if (!replyAdvisor?.mailbox) {
+      setReplyError("Add a verified SMTP2GO mailbox on this advisor before sending.");
+      return;
+    }
+    if (!selected.fromEmail) {
+      setReplyError("This message has no reply address.");
+      return;
+    }
+    setSending(true);
     setError("");
+    setReplyError("");
     setNotice("");
     try {
-      const subject = /^re:/i.test(selected.subject) ? selected.subject : `Re: ${selected.subject}`;
+      const subject = replySubject;
       await sendAdvisorInboxMail({
         data: {
-          advisorId: selected.advisorId,
-          toEmail: selected.direction === "in" ? selected.fromEmail : selected.toEmail,
-          toName: selected.direction === "in" ? selected.fromName : selected.toName,
+          advisorId,
+          toEmail: selected.fromEmail,
+          toName: selected.fromName,
           subject,
           message: replyBody,
-          quote: selected.body.slice(0, 1200),
           leadId: selected.leadId
         }
       });
       setReplyOpen(false);
       setReplyBody("");
       await load();
-      setNotice("Reply sent with the advisor letter.");
+      setNotice("Reply sent.");
     } catch (caught) {
-      setError(caught instanceof Error && caught.message ? caught.message : "The reply could not be sent.");
+      const message = caught instanceof Error && caught.message ? caught.message : "The reply could not be sent.";
+      setError(message);
+      setReplyError(message);
     } finally {
-      setPending(false);
+      setSending(false);
     }
   }
   async function sendNew(event) {
@@ -2415,25 +2452,30 @@ function InboxPanel() {
         setSelectedId("");
         void load(event.target.value);
       }}><option value="">All advisors</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label>
-    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,280px)_1fr]">
-      <ul className="grid content-start gap-2">
-        {(rows ?? []).map(row => <li key={row.id}><button type="button" className={"w-full rounded-md border px-3 py-2 text-left " + (row.id === selectedId ? "border-action bg-surface" : "border-border bg-surface")} onClick={() => void openMessage(row)}><span className="flex items-center gap-2"><span className={"size-2 shrink-0 rounded-full " + (row.direction === "in" && !row.seen ? "bg-[#b42318]" : "bg-transparent")} aria-hidden="true" /><span className="truncate text-sm font-semibold text-primary">{row.direction === "out" ? `To ${row.toName || row.toEmail}` : row.fromName || row.fromEmail}</span></span><span className="mt-1 block truncate text-sm text-fg">{row.subject}</span><span className="mt-1 block text-xs text-fg">{row.receivedAt} UTC{row.leadName ? ` · ${row.leadName}` : ""}</span></button></li>)}
-        {rows && rows.length === 0 ? <li className="text-sm text-fg">No messages yet.</li> : null}
+    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-surface">
+      <ul>
+        {(rows ?? []).map(row => {
+          const open = row.id === selectedId;
+          return <li key={row.id} className="border-b border-border last:border-b-0">
+            <button type="button" className={"grid w-full grid-cols-1 items-center gap-1 px-4 py-3 text-left sm:grid-cols-[minmax(180px,240px)_minmax(0,1fr)_148px] sm:gap-4 " + (open ? "bg-[#f4f8fc]" : "hover:bg-[#f7f7f7]")} onClick={() => void openMessage(row)}>
+              <span className="flex min-w-0 items-center gap-2"><span className={"size-2 shrink-0 rounded-full " + (row.direction === "in" && !row.seen ? "bg-[#b42318]" : "bg-transparent")} aria-hidden="true" /><span className="truncate text-sm font-semibold text-primary">{row.direction === "out" ? `To ${row.toName || row.toEmail}` : row.fromName || row.fromEmail}</span></span>
+              <span className="truncate text-sm text-fg">{row.subject || "(no subject)"}</span>
+              <span className="text-xs text-fg sm:text-right">{row.receivedAt} UTC</span>
+            </button>
+            {open ? <div className="border-t border-border px-4 py-4">
+              <p className="text-xs font-semibold tracking-wide text-primary uppercase">{row.direction === "out" ? "Sent" : "Received"} · {row.advisorName}{row.leadName ? ` · ${row.leadName}` : ""}</p>
+              <p className="mt-3 whitespace-pre-wrap text-sm text-fg">{row.body || "This message has no text."}</p>
+              {row.direction === "in" ? <form className="mt-4 grid gap-3 border-t border-border pt-4" onSubmit={event => void sendReply(event)}>
+                <label className="block text-sm"><span className="font-semibold text-primary">Reply</span><textarea className={`${controlClass} mt-1 min-h-28`} value={replyBody} onChange={event => setReplyBody(event.target.value)} placeholder="Write the reply. The original email is not included." required={true} /></label>
+                {replyLetter ? <LetterPreview html={replyLetter.html} title={replySubject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{replyAdvisor?.mailbox ? `${replyAdvisor.name} <${replyAdvisor.mailbox}>` : replyAdvisor?.name || selected.advisorName}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{selected.fromName || selected.fromEmail}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{replySubject}</p></div>} /> : null}
+                {replyError ? <p className="text-sm text-danger">{replyError}</p> : null}
+                <button type="button" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={sending} onClick={event => void sendReply(event)}>{sending ? "Sending…" : "Send reply"}</button>
+              </form> : null}
+            </div> : null}
+          </li>;
+        })}
+        {rows && rows.length === 0 ? <li className="px-4 py-6 text-sm text-fg">No messages yet.</li> : null}
       </ul>
-      {selected ? <article className="rounded-lg border border-border bg-surface p-4">
-        <p className="text-xs font-semibold tracking-wide text-primary uppercase">{selected.direction === "out" ? "Sent" : "Received"}</p>
-        <h2 className="mt-1 text-xl font-semibold text-primary">{selected.subject}</h2>
-        <p className="mt-1 text-sm text-fg">{selected.direction === "out" ? `To ${selected.toName || selected.toEmail}` : `From ${selected.fromName || selected.fromEmail}`} · {selected.advisorName} · {selected.receivedAt} UTC</p>
-        {selected.leadName ? <p className="mt-1 text-sm text-fg">Lead: {selected.leadName}</p> : null}
-        <p className="mt-4 whitespace-pre-wrap text-sm text-fg">{selected.body || "This message has no text."}</p>
-        {selected.direction === "in" ? <button type="button" className="mt-4 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary" onClick={() => setReplyOpen(true)}>Reply</button> : null}
-        {replyOpen ? <form className="mt-4 grid gap-3 border-t border-border pt-4" onSubmit={event => void sendReply(event)}>
-          <p className="text-sm text-fg">The reply is sent as the advisor letter, with the signature and the help bar, from {selected.advisorName}.</p>
-          <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-28`} value={replyBody} onChange={event => setReplyBody(event.target.value)} required={true} /></label>
-          {replyPreview ? <LetterPreview html={replyPreview.html} title={replyPreview.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{replyPreview.from}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{replyPreview.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{replyPreview.subject}</p></div>} /> : null}
-          <button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : "Send reply"}</button>
-        </form> : null}
-      </article> : <p className="text-sm text-fg">Select a message.</p>}
     </div>
   </section>;
 }

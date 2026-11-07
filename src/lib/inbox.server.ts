@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import type { Sql } from "@/lib/db";
@@ -5,6 +6,30 @@ import { advisorNoteLetter } from "@/lib/email-templates";
 import { sendFromMailbox } from "@/lib/mail.server";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+export function latestMessageText(value: string) {
+  const text = value.replace(/\r\n/g, "\n").replace(/\u00a0/g, " ").trim();
+  if (!text) return "";
+  const lines = text.split("\n");
+  let cut = lines.length;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    const window = lines.slice(index, index + 4).join(" ").replace(/\s+/g, " ").trim();
+    const wrote = /^on\b[\s\S]{0,280}\bwrote:\s*$/i.test(window);
+    const marker = /^-{2,}\s*original message\s*-{2,}$/i.test(line)
+      || /^-{5,}\s*forwarded message\s*-{5,}$/i.test(line)
+      || /^_{8,}$/.test(line)
+      || /^begin forwarded message:?$/i.test(line)
+      || line.startsWith(">");
+    const outlook = /^from:\s+\S/i.test(line) && lines.slice(index + 1, index + 6).some((item) => /^(sent|date|to|cc|subject):\s/i.test(item.trim()));
+    if (wrote || marker || outlook) {
+      cut = index;
+      break;
+    }
+  }
+  const fresh = lines.slice(0, cut).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return fresh || "No new text. The rest repeats an earlier message.";
+}
 
 export async function ensureInbox(sql: Sql) {
   await sql`alter table advisors add column if not exists imap_host text not null default ''`;
@@ -31,6 +56,8 @@ export async function ensureInbox(sql: Sql) {
       seen boolean not null default false
     )
   `;
+  await sql`alter table inbox_messages add column if not exists telegram_notified boolean not null default false`;
+  await sql`alter table inbox_messages add column if not exists folder text not null default 'INBOX'`;
 }
 
 type MailboxRow = {
@@ -45,6 +72,12 @@ type MailboxRow = {
 };
 
 export async function syncInboxes(sql: Sql) {
+  const run = inboxQueue.then(() => syncInboxesNow(sql));
+  inboxQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function syncInboxesNow(sql: Sql) {
   await ensureInbox(sql);
   const advisors = await sql<MailboxRow>`
     select id, name, imap_host, imap_port, imap_user, imap_password, imap_secure, coalesce(imap_last_uid, 0) as imap_last_uid
@@ -52,40 +85,118 @@ export async function syncInboxes(sql: Sql) {
     where imap_host <> '' and imap_user <> '' and imap_password <> ''
   `;
   let added = 0;
+  let notified = 0;
+  let telegram = "";
+  let detail = "";
   const errors: string[] = [];
   for (const advisor of advisors) {
     try {
-      added += await syncAdvisor(sql, advisor);
+      const result = await syncAdvisor(sql, advisor);
+      added += result.added;
+      notified += result.notified;
+      if (result.telegram) telegram = result.telegram;
+      if (result.detail) detail = [detail, result.detail].filter(Boolean).join(" · ");
     } catch (caught) {
-      const detail = caught instanceof Error && caught.message ? caught.message : "could not connect";
-      errors.push(`${advisor.name || advisor.imap_user}: ${detail}`);
+      const detailText = caught instanceof Error && caught.message ? caught.message : "could not connect";
+      errors.push(`${advisor.name || advisor.imap_user}: ${detailText}`);
     }
   }
-  return { added, checked: advisors.length, errors };
+  if (errors.length) await reportInboxFailure(sql, errors.join("\n"));
+  else await sql`delete from site_settings where key = 'inbox_sync_error'`;
+  return { added, checked: advisors.length, errors, notified, telegram, detail };
+}
+
+async function reportInboxFailure(sql: Sql, text: string) {
+  const rows = await sql<{ value: string }>`select value from site_settings where key = 'inbox_sync_error'`;
+  if (rows[0]?.value === text) return;
+  await sql`
+    insert into site_settings (key, value) values ('inbox_sync_error', ${text.slice(0, 500)})
+    on conflict (key) do update set value = excluded.value
+  `;
+  const { sendTelegramNotice } = await import("@/lib/mail.server");
+  await sendTelegramNotice(sql, "Inbox sync failed", text).catch(() => undefined);
+}
+
+async function openMailbox(advisor: MailboxRow) {
+  const name = advisor.imap_host.trim().replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
+  const savedPort = Number(advisor.imap_port) || 993;
+  let address = name;
+  try {
+    address = (await lookup(name, { family: 4 })).address;
+  } catch {
+    address = name;
+  }
+  const attempts = savedPort === 993 ? [{ port: 993, secure: true }, { port: 143, secure: false }] : [{ port: savedPort, secure: advisor.imap_secure !== false }, { port: 993, secure: true }];
+  let last = "Could not reach the mailbox.";
+  for (const attempt of attempts) {
+    const client = new ImapFlow({
+      host: address,
+      port: attempt.port,
+      secure: attempt.secure,
+      auth: { user: advisor.imap_user, pass: advisor.imap_password },
+      tls: { rejectUnauthorized: false, servername: name },
+      logger: false,
+      connectionTimeout: 20000,
+      greetingTimeout: 20000,
+      socketTimeout: 20000,
+      disableAutoIdle: true,
+    });
+    client.on("error", () => undefined);
+    try {
+      await client.connect();
+      return client;
+    } catch (caught) {
+      const message = caught instanceof Error && caught.message ? caught.message : "could not connect";
+      last = /required time/i.test(message) ? `Could not reach ${name} on port ${attempt.port}. Use the mail server host, usually mail.yourdomain.com.` : message;
+      try {
+        client.close();
+      } catch {
+        /* the failed socket is already closed */
+      }
+    }
+  }
+  throw new Error(last);
 }
 
 async function syncAdvisor(sql: Sql, advisor: MailboxRow) {
-  const client = new ImapFlow({
-    host: advisor.imap_host,
-    port: Number(advisor.imap_port) || 993,
-    secure: advisor.imap_secure !== false,
-    auth: { user: advisor.imap_user, pass: advisor.imap_password },
-    logger: false,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-  });
+  const client = await openMailbox(advisor);
   let added = 0;
-  await client.connect();
-  const lock = await client.getMailboxLock("INBOX");
+  const fresh: string[] = [];
+  const notes: string[] = [];
   try {
-    const first = !advisor.imap_last_uid;
-    const since = new Date(Date.now() - 14 * DAY);
-    const found = first ? await client.search({ since }, { uid: true }) : await client.search({ uid: `${advisor.imap_last_uid + 1}:*` }, { uid: true });
-    const uids = (found || []).map((uid) => Number(uid)).filter((uid) => uid > advisor.imap_last_uid).slice(-40);
-    let max = advisor.imap_last_uid;
-    for (const uid of uids) {
-      const message = await client.fetchOne(String(uid), { source: true, internalDate: true }, { uid: true });
-      if (!message || !message.source) continue;
+    for (const folder of ["INBOX", "INBOX.Junk", "INBOX.spam", "Junk", "Spam"]) {
+      try {
+        const result = await readFolder(sql, client, advisor, folder, fresh);
+        added += result.added;
+        if (result.detail) notes.push(result.detail);
+      } catch (error) {
+        if (folder === "INBOX") throw error;
+      }
+    }
+  } finally {
+    await client.logout().catch(() => undefined);
+  }
+  const notice = await notifyInbox(sql, advisor, fresh);
+  return { added, notified: notice.sent, telegram: notice.note, detail: notes.join(" · ") };
+}
+
+async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folder: string, fresh: string[]) {
+  let lock: { release: () => void };
+  try {
+    lock = await client.getMailboxLock(folder);
+  } catch {
+    return { added: 0, detail: "" };
+  }
+  let added = 0;
+  let latest = "";
+  try {
+    const box = client.mailbox;
+    const exists = box && typeof box === "object" ? Number(box.exists || 0) : 0;
+    if (!exists) return { added: 0, detail: folder === "INBOX" ? "INBOX is empty" : "" };
+    const start = Math.max(1, exists - 14);
+    for await (const message of client.fetch(`${start}:${exists}`, { uid: true, source: true, internalDate: true })) {
+      const uid = Number(message.uid || 0);
+      if (!uid || !message.source) continue;
       const parsed = await simpleParser(message.source);
       const from = parsed.from?.value?.[0];
       const to = parsed.to && !Array.isArray(parsed.to) ? parsed.to.value?.[0] : Array.isArray(parsed.to) ? parsed.to[0]?.value?.[0] : undefined;
@@ -94,24 +205,31 @@ async function syncAdvisor(sql: Sql, advisor: MailboxRow) {
         ? await sql<{ id: string }>`select id from crm_leads where lower(email) = ${fromEmail} order by received_at desc limit 1`
         : [];
       const rawHtml = typeof parsed.html === "string" ? parsed.html : "";
-      const body = (parsed.text || rawHtml.replace(/<[^>]+>/g, " ") || "").replace(/\s+\n/g, "\n").trim().slice(0, 20000);
-      const receivedAt = parsed.date instanceof Date ? parsed.date : message.internalDate instanceof Date ? message.internalDate : new Date();
+      const body = latestMessageText(parsed.text || rawHtml.replace(/<[^>]+>/g, " ") || "").slice(0, 20000);
+      const receivedAt = message.internalDate instanceof Date ? message.internalDate : parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime()) ? parsed.date : new Date();
+      latest = `${parsed.subject || "(no subject)"} from ${fromEmail || "unknown"}`;
+      if (folder !== "INBOX" && Date.now() - receivedAt.getTime() > 2 * DAY) continue;
       const existing = await sql<{ id: string }>`
-        select id from inbox_messages where advisor_id = ${advisor.id} and direction = 'in' and uid = ${uid} limit 1
+        select id from inbox_messages where advisor_id = ${advisor.id} and direction = 'in' and uid = ${uid} and coalesce(folder, 'INBOX') = ${folder} limit 1
       `;
-      if (existing[0]) {
-        max = Math.max(max, uid);
-        continue;
+      if (existing[0]) continue;
+      const messageId = (parsed.messageId || "").slice(0, 300);
+      if (messageId) {
+        const duplicate = await sql<{ id: string }>`
+          select id from inbox_messages where direction = 'in' and message_id = ${messageId} limit 1
+        `;
+        if (duplicate[0]) continue;
       }
+      const id = crypto.randomUUID();
       await sql`
         insert into inbox_messages (
-          id, advisor_id, direction, uid, message_id, from_name, from_email, to_name, to_email, subject, body_text, lead_id, received_at, seen
+          id, advisor_id, direction, uid, message_id, from_name, from_email, to_name, to_email, subject, body_text, lead_id, received_at, seen, folder
         ) values (
-          ${crypto.randomUUID()},
+          ${id},
           ${advisor.id},
           'in',
           ${uid},
-          ${(parsed.messageId || "").slice(0, 300)},
+          ${messageId},
           ${(from?.name || "").slice(0, 160)},
           ${fromEmail.slice(0, 160)},
           ${(to?.name || "").slice(0, 160)},
@@ -120,30 +238,70 @@ async function syncAdvisor(sql: Sql, advisor: MailboxRow) {
           ${body},
           ${lead[0]?.id || ""},
           ${receivedAt.toISOString()},
-          false
+          false,
+          ${folder}
         )
       `;
+      fresh.push(id);
       added += 1;
-      max = Math.max(max, uid);
-      if (!first) {
-        const { sendTelegramNotice } = await import("@/lib/mail.server");
-        const who = from?.name?.trim() ? `${from.name.trim()} <${fromEmail}>` : fromEmail || "Unknown sender";
-        const preview = body.replace(/\s+/g, " ").trim().slice(0, 280);
-        await sendTelegramNotice(
-          sql,
-          `New email for ${advisor.name || advisor.imap_user}`,
-          [`From: ${who}`, `Subject: ${parsed.subject || "(no subject)"}`, lead[0] ? "Matched a lead." : "", preview].filter(Boolean).join("\n"),
-        ).catch(() => undefined);
-      }
     }
-    await sql`update advisors set imap_last_uid = ${max} where id = ${advisor.id}`;
   } finally {
     lock.release();
-    await client.logout().catch(() => undefined);
   }
-  return added;
+  return { added, detail: latest ? `${folder}: latest “${latest}”` : "" };
 }
 
+let inboxQueue: Promise<void> = Promise.resolve();
+
+async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[]) {
+  const ids = [...new Set(fresh.filter(Boolean))];
+  let row: { id: string; from_name: string; from_email: string; subject: string; body_text: string; received_at: string; message_id: string } | undefined;
+  for (const id of ids) {
+    const extra = await sql<{ id: string; from_name: string; from_email: string; subject: string; body_text: string; received_at: string; message_id: string }>`
+      select id, from_name, from_email, subject, body_text, received_at, coalesce(message_id, '') as message_id
+      from inbox_messages
+      where id = ${id} and telegram_notified = false
+      limit 1
+    `;
+    if (extra[0] && (!row || String(extra[0].received_at) > String(row.received_at))) row = extra[0];
+  }
+  if (!row) return { sent: 0, note: "" };
+  const claimed = await sql<{ id: string }>`
+    update inbox_messages set telegram_notified = true
+    where id = ${row.id} and telegram_notified = false
+    returning id
+  `;
+  if (!claimed[0]) return { sent: 0, note: "" };
+  if (row.message_id) {
+    const prior = await sql<{ id: string }>`
+      select id from inbox_messages
+      where direction = 'in' and telegram_notified = true and message_id = ${row.message_id} and id <> ${row.id}
+      limit 1
+    `;
+    if (prior[0]) return { sent: 0, note: "" };
+  }
+  const who = row.from_name?.trim() ? `${row.from_name.trim()} <${row.from_email}>` : row.from_email || "Unknown sender";
+  const text = (row.body_text || "").trim().slice(0, 3000);
+  const { sendTelegramNotice } = await import("@/lib/mail.server");
+  try {
+    const result = await sendTelegramNotice(
+      sql,
+      `New email for ${advisor.name || advisor.imap_user}`,
+      [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`, "", text || "(no text)"].join("\n"),
+    );
+    if (result.delivery !== "sent") {
+      await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
+      return { sent: 0, note: result.error || "Telegram did not accept the notice." };
+    }
+    if (row.message_id) {
+      await sql`update inbox_messages set telegram_notified = true where direction = 'in' and message_id = ${row.message_id}`;
+    }
+    return { sent: 1, note: "" };
+  } catch (error) {
+    await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
+    return { sent: 0, note: error instanceof Error ? error.message : "Telegram did not accept the notice." };
+  }
+}
 export async function listInbox(sql: Sql, advisorId: string) {
   await ensureInbox(sql);
   const rows = advisorId
@@ -212,7 +370,7 @@ export async function listInbox(sql: Sql, advisorId: string) {
     toName: row.to_name,
     toEmail: row.to_email,
     subject: row.subject,
-    body: row.body_text,
+    body: latestMessageText(row.body_text),
     leadId: row.lead_id,
     leadName: row.lead_name,
     receivedAt: row.received_at,
@@ -235,8 +393,8 @@ export async function previewInboxLetter(
   const advisor = advisors[0];
   if (!advisor) throw new Error("Select an advisor.");
   const companyRows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo')`;
-  const company = companyRows.find((row) => row.key === "company_name")?.value.trim() || "Account Holding";
-  const companyPhone = companyRows.find((row) => row.key === "company_phone")?.value.trim() || "";
+  const company = companyRows.find((row) => row.key === "company_name")?.value?.trim() || "Account Holding";
+  const companyPhone = companyRows.find((row) => row.key === "company_phone")?.value?.trim() || "";
   const logo = companyRows.find((row) => row.key === "email_logo")?.value || null;
   const toName = (input.toName || "").trim();
   const toEmail = (input.toEmail || "").trim();
@@ -273,8 +431,8 @@ export async function sendInboxMail(
   const message = input.message.trim().slice(0, 8000);
   if (!subject || !message) throw new Error("Add a subject and a message.");
   const companyRows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo')`;
-  const company = companyRows.find((row) => row.key === "company_name")?.value.trim() || "Account Holding";
-  const companyPhone = companyRows.find((row) => row.key === "company_phone")?.value.trim() || "";
+  const company = companyRows.find((row) => row.key === "company_name")?.value?.trim() || "Account Holding";
+  const companyPhone = companyRows.find((row) => row.key === "company_phone")?.value?.trim() || "";
   const logo = companyRows.find((row) => row.key === "email_logo")?.value || null;
   const letter = advisorNoteLetter({
     company,
@@ -283,7 +441,6 @@ export async function sendInboxMail(
     advisor: { name: advisor.name, phone: advisor.phone, email: advisor.email, mailbox: advisor.mailbox, role: advisor.role, personalPhone: advisor.personal_phone },
     greeting: input.toName.trim() ? `Dear ${input.toName.trim()},` : "Hello,",
     message,
-    quote: input.quote,
   });
   const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox;
   const sent = await sendFromMailbox(sql, {
@@ -295,7 +452,7 @@ export async function sendInboxMail(
     replyTo,
     replyName: advisor.name,
   });
-  if (sent.delivery !== "sent") throw new Error("The message was not accepted. Check the advisor mailbox in SMTP2GO.");
+  if (sent.delivery !== "sent") throw new Error(sent.error || "The message was not accepted. Check the advisor mailbox in SMTP2GO.");
   await ensureInbox(sql);
   await sql`
     insert into inbox_messages (
@@ -322,7 +479,7 @@ const globalRef = globalThis as typeof globalThis & { __inboxTimer?: ReturnType<
 
 export function ensureInboxSchedule() {
   if (globalRef.__inboxTimer) return;
-  globalRef.__inboxTimer = setInterval(() => void runInboxSync(), 5 * 60 * 1000);
+  globalRef.__inboxTimer = setInterval(() => void runInboxSync(), 2 * 60 * 1000);
   void runInboxSync();
 }
 
