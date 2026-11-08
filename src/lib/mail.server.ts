@@ -191,16 +191,16 @@ function escapeTelegram(value: string) {
   return value.replace(/&/g, "&" + "amp;").replace(/</g, "&" + "lt;").replace(/>/g, "&" + "gt;");
 }
 
-async function deliverTelegram(sql: Sql, subject: string, text: string, attachments: MailFile[]) {
+async function deliverTelegram(sql: Sql, subject: string, text: string, attachments: MailFile[], expand = "") {
   const telegram = await readTelegram(sql);
   if (!telegram.enabled) return { delivery: "stored", messageId: "", provider: "telegram", error: "Desk notices are turned off." };
   if (!telegram.token || !telegram.chatId) return { delivery: "stored", messageId: "", provider: "telegram", error: "Save the bot token and chat id." };
-  const sent = await postTelegram(telegram.token, telegram.chatId, subject, text, attachments);
+  const sent = await postTelegram(telegram.token, telegram.chatId, subject, text, attachments, expand);
   return { delivery: sent.ok ? "sent" : "failed", messageId: sent.id, provider: "telegram", error: sent.error || "" };
 }
 
-export async function sendTelegramNotice(sql: Sql, subject: string, text: string) {
-  const sent = await deliverTelegram(sql, subject, text, []);
+export async function sendTelegramNotice(sql: Sql, subject: string, text: string, expand = "") {
+  const sent = await deliverTelegram(sql, subject, text, [], expand);
   return { delivery: sent.delivery, error: sent.error };
 }
 
@@ -247,8 +247,8 @@ export async function sendTelegramTest(sql: Sql) {
   return { ok: true as const };
 }
 
-async function postTelegram(token: string, chatId: string, subject: string, text: string, attachments: MailFile[]) {
-  const chunks = telegramChunks(`<b>${escapeTelegram(subject)}</b>\n\n${escapeTelegram(text.trim())}`);
+async function postTelegram(token: string, chatId: string, subject: string, text: string, attachments: MailFile[], expand = "") {
+  const chunks = telegramChunks(telegramHtml(subject, text, expand));
   let id = "";
   for (const chunk of chunks) {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -277,6 +277,20 @@ async function postTelegram(token: string, chatId: string, subject: string, text
     if (payload.result?.message_id) id = String(payload.result.message_id);
   }
   return { ok: true, id, error: "" };
+}
+
+function telegramHtml(subject: string, text: string, expand: string) {
+  const head = `<b>${escapeTelegram(subject)}</b>\n\n${escapeTelegram(text.trim())}`.slice(0, 3900);
+  const extra = expand.trim();
+  if (!extra || extra === text.trim()) return head;
+  let body = extra.slice(0, 3500);
+  let html = head;
+  while (body.length > 40) {
+    html = `${head}\n\n<blockquote expandable>${escapeTelegram(body)}</blockquote>`;
+    if (html.length <= 3900) return html;
+    body = body.slice(0, Math.floor(body.length * 0.75));
+  }
+  return head;
 }
 
 function telegramChunks(value: string) {

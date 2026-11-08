@@ -58,6 +58,7 @@ export async function ensureInbox(sql: Sql) {
   `;
   await sql`alter table inbox_messages add column if not exists telegram_notified boolean not null default false`;
   await sql`alter table inbox_messages add column if not exists folder text not null default 'INBOX'`;
+  await sql`alter table inbox_messages add column if not exists body_raw text not null default ''`;
 }
 
 type MailboxRow = {
@@ -205,7 +206,8 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
         ? await sql<{ id: string }>`select id from crm_leads where lower(email) = ${fromEmail} order by received_at desc limit 1`
         : [];
       const rawHtml = typeof parsed.html === "string" ? parsed.html : "";
-      const body = latestMessageText(parsed.text || rawHtml.replace(/<[^>]+>/g, " ") || "").slice(0, 20000);
+      const rawSource = (parsed.text || rawHtml.replace(/<[^>]+>/g, " ") || "").replace(/\s+\n/g, "\n").trim().slice(0, 12000);
+      const body = latestMessageText(rawSource).slice(0, 20000);
       const receivedAt = message.internalDate instanceof Date ? message.internalDate : parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime()) ? parsed.date : new Date();
       latest = `${parsed.subject || "(no subject)"} from ${fromEmail || "unknown"}`;
       if (folder !== "INBOX" && Date.now() - receivedAt.getTime() > 2 * DAY) continue;
@@ -223,7 +225,7 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
       const id = crypto.randomUUID();
       await sql`
         insert into inbox_messages (
-          id, advisor_id, direction, uid, message_id, from_name, from_email, to_name, to_email, subject, body_text, lead_id, received_at, seen, folder
+          id, advisor_id, direction, uid, message_id, from_name, from_email, to_name, to_email, subject, body_text, body_raw, lead_id, received_at, seen, folder
         ) values (
           ${id},
           ${advisor.id},
@@ -236,6 +238,7 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
           ${(to?.address || advisor.imap_user).slice(0, 160)},
           ${(parsed.subject || "(no subject)").slice(0, 300)},
           ${body},
+          ${rawSource},
           ${lead[0]?.id || ""},
           ${receivedAt.toISOString()},
           false,
@@ -255,10 +258,10 @@ let inboxQueue: Promise<void> = Promise.resolve();
 
 async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[]) {
   const ids = [...new Set(fresh.filter(Boolean))];
-  let row: { id: string; from_name: string; from_email: string; subject: string; body_text: string; received_at: string; message_id: string } | undefined;
+  let row: { id: string; from_name: string; from_email: string; subject: string; body_text: string; body_raw: string; received_at: string; message_id: string } | undefined;
   for (const id of ids) {
-    const extra = await sql<{ id: string; from_name: string; from_email: string; subject: string; body_text: string; received_at: string; message_id: string }>`
-      select id, from_name, from_email, subject, body_text, received_at, coalesce(message_id, '') as message_id
+    const extra = await sql<{ id: string; from_name: string; from_email: string; subject: string; body_text: string; body_raw: string; received_at: string; message_id: string }>`
+      select id, from_name, from_email, subject, body_text, coalesce(body_raw, '') as body_raw, received_at, coalesce(message_id, '') as message_id
       from inbox_messages
       where id = ${id} and telegram_notified = false
       limit 1
@@ -281,14 +284,13 @@ async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[]) {
     if (prior[0]) return { sent: 0, note: "" };
   }
   const who = row.from_name?.trim() ? `${row.from_name.trim()} <${row.from_email}>` : row.from_email || "Unknown sender";
-  const text = (row.body_text || "").trim().slice(0, 3000);
+  const preview = (row.body_text || "").trim();
+  const full = (row.body_raw || preview).trim();
+  const visible = [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`, "", preview.slice(0, 700) || "(no text)"].join("\n");
+  const expand = full && full !== preview.slice(0, 700).trim() ? full : "";
   const { sendTelegramNotice } = await import("@/lib/mail.server");
   try {
-    const result = await sendTelegramNotice(
-      sql,
-      `New email for ${advisor.name || advisor.imap_user}`,
-      [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`, "", text || "(no text)"].join("\n"),
-    );
+    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, expand);
     if (result.delivery !== "sent") {
       await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
       return { sent: 0, note: result.error || "Telegram did not accept the notice." };
