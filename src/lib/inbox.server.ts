@@ -120,43 +120,42 @@ async function reportInboxFailure(sql: Sql, text: string) {
 
 async function openMailbox(advisor: MailboxRow) {
   const name = advisor.imap_host.trim().replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
-  const savedPort = Number(advisor.imap_port) || 993;
+  const port = Number(advisor.imap_port) || 993;
+  const secure = port === 993 ? true : advisor.imap_secure !== false;
   let address = name;
   try {
     address = (await lookup(name, { family: 4 })).address;
   } catch {
     address = name;
   }
-  const attempts = savedPort === 993 ? [{ port: 993, secure: true }, { port: 143, secure: false }] : [{ port: savedPort, secure: advisor.imap_secure !== false }, { port: 993, secure: true }];
-  let last = "Could not reach the mailbox.";
-  for (const attempt of attempts) {
-    const client = new ImapFlow({
-      host: address,
-      port: attempt.port,
-      secure: attempt.secure,
-      auth: { user: advisor.imap_user, pass: advisor.imap_password },
-      tls: { rejectUnauthorized: false, servername: name },
-      logger: false,
-      connectionTimeout: 20000,
-      greetingTimeout: 20000,
-      socketTimeout: 20000,
-      disableAutoIdle: true,
-    });
-    client.on("error", () => undefined);
+  const client = new ImapFlow({
+    host: address,
+    port,
+    secure,
+    auth: { user: advisor.imap_user, pass: advisor.imap_password },
+    tls: { rejectUnauthorized: false, servername: name },
+    logger: false,
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 20000,
+    disableAutoIdle: true,
+  });
+  client.on("error", () => undefined);
+  try {
+    await client.connect();
+    return client;
+  } catch (caught) {
     try {
-      await client.connect();
-      return client;
-    } catch (caught) {
-      const message = caught instanceof Error && caught.message ? caught.message : "could not connect";
-      last = /required time/i.test(message) ? `Could not reach ${name} on port ${attempt.port}. Use the mail server host, usually mail.yourdomain.com.` : message;
-      try {
-        client.close();
-      } catch {
-        /* the failed socket is already closed */
-      }
+      client.close();
+    } catch {
+      /* the failed socket is already closed */
     }
+    const message = caught instanceof Error && caught.message ? caught.message : "could not connect";
+    if (/required time|timed out|timeout/i.test(message)) {
+      throw new Error(`Could not reach ${name} on port ${port}. Nothing answered. In Advisors, set the IMAP host to the mail server hostname, usually mail.yourdomain.com, port 993, with SSL checked.`);
+    }
+    throw new Error(`${name} on port ${port}: ${message}`);
   }
-  throw new Error(last);
 }
 
 async function syncAdvisor(sql: Sql, advisor: MailboxRow) {

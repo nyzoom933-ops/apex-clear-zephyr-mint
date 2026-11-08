@@ -21,6 +21,8 @@ export type InvestmentPdfInput = {
   signedOn: string;
   signaturePng?: Uint8Array;
   companyName?: string;
+  logo?: string;
+  companyAddress?: string;
 };
 
 export type ConfirmationPdfInput = InvestmentPdfInput & {
@@ -119,8 +121,15 @@ export async function buildConfirmationPdf(input: ConfirmationPdfInput) {
   const brandName = pdfSafe(input.companyName || "Account Holding");
   const brand = brandName.toUpperCase();
   const brandSub = "CERTIFICATE OF DEPOSIT";
-  page.drawText(brand, { x: left + (width - bold.widthOfTextAtSize(brand, 16)) / 2, y, size: 16, font: bold, color: blue });
-  y -= 16;
+  const mark = await embedMark(doc, input.logo);
+  if (mark) {
+    const box = markBox(mark, 180, 36);
+    page.drawImage(mark, { x: left + (width - box.width) / 2, y: y - box.height, width: box.width, height: box.height });
+    y -= box.height + 10;
+  } else {
+    page.drawText(brand, { x: left + (width - bold.widthOfTextAtSize(brand, 16)) / 2, y, size: 16, font: bold, color: blue });
+    y -= 16;
+  }
   page.drawText(brandSub, { x: left + (width - font.widthOfTextAtSize(brandSub, 10)) / 2, y, size: 10, font, color: blue });
   y -= 16;
   banner();
@@ -272,7 +281,8 @@ export async function buildConfirmationPdf(input: ConfirmationPdfInput) {
   }
 
   pages.forEach((item, index) => {
-    item.drawText(brandName, { x: left, y: 28, size: 8, font, color: muted });
+    const foot = [brandName, plainAddress(input.companyAddress)].filter(Boolean).join("  ·  ");
+    item.drawText(fit(foot, font, 8, width - 110), { x: left, y: 28, size: 8, font, color: muted });
     item.drawText(`Page ${index + 1} of ${pages.length}`, { x: left, y: 16, size: 8, font, color: muted });
     const mark = "CONFIRMATION";
     item.drawText(mark, { x: left + width - bold.widthOfTextAtSize(mark, 9), y: 22, size: 9, font: bold, color: blue });
@@ -287,6 +297,8 @@ export type InvoicePdfInput = {
   address: string[];
   amount: string;
   billing: InvoiceBilling;
+  logo?: string;
+  companyAddress?: string;
 };
 
 export async function buildInvoicePdf(input: InvoicePdfInput) {
@@ -309,8 +321,7 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   const railW = 186;
 
   page.drawRectangle({ x: left, y: 734, width: 332, height: 42, color: blue });
-  page.drawText(fit(ascii(bill.brand), bold, 13, 300), { x: left + 16, y: 756, size: 13, font: bold, color: white });
-  page.drawText("CERTIFICATE OF DEPOSIT", { x: left + 16, y: 742, size: 8, font: bold, color: white });
+  await paintBrandBar(doc, page, bold, white, left, bill.brand, input.logo);
 
   page.drawRectangle({ x: railX, y: 588, width: railW, height: 188, color: panel });
   let cy = 756;
@@ -444,25 +455,26 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   page.drawText(footer, { x: left, y: 26, size: 7, font, color: muted });
   const brand = fit(ascii(bill.brand), bold, 8, 150);
   page.drawText(brand, { x: left + width - bold.widthOfTextAtSize(brand, 8), y: 26, size: 8, font: bold, color: blue });
+  paintAddress(page, font, muted, left, input.companyAddress);
 
   const bytes = await doc.save();
   return Buffer.from(bytes).toString("base64");
 }
 
 export type ReceiptPdfInput = {
-  company: string;
   clientName: string;
+  address: string[];
   email: string;
   amount: string;
   term: string;
   promoApy: string;
   finalApy: string;
-  reference: string;
   depositCode: string;
   accountNumber: string;
-  fileName: string;
   receivedOn: string;
-  phone: string;
+  billing: InvoiceBilling;
+  logo?: string;
+  companyAddress?: string;
 };
 
 export async function buildReceiptPdf(input: ReceiptPdfInput) {
@@ -474,62 +486,194 @@ export async function buildReceiptPdf(input: ReceiptPdfInput) {
   const ink = rgb(0.11, 0.11, 0.11);
   const muted = rgb(0.35, 0.35, 0.35);
   const panel = rgb(0.953, 0.957, 0.961);
+  const rowAlt = rgb(0.965, 0.969, 0.973);
+  const white = rgb(1, 1, 1);
   const hair = rgb(0.82, 0.84, 0.86);
+  const dark = rgb(0.13, 0.15, 0.17);
+  const bill = input.billing;
   const left = 40;
   const width = 532;
+  const railX = 386;
+  const railW = 186;
 
-  page.drawRectangle({ x: 0, y: 742, width: 612, height: 50, color: blue });
-  page.drawText(fit(ascii(input.company) || "Account Holding", bold, 14, 340), { x: left, y: 762, size: 14, font: bold, color: rgb(1, 1, 1) });
-  page.drawText("PAYMENT RECEIPT", { x: 430, y: 762, size: 11, font: bold, color: rgb(1, 1, 1) });
+  page.drawRectangle({ x: left, y: 734, width: 332, height: 42, color: blue });
+  await paintBrandBar(doc, page, bold, white, left, bill.brand, input.logo);
 
-  let y = 700;
-  page.drawText("Payment confirmed", { x: left, y, size: 20, font: bold, color: ink });
+  page.drawRectangle({ x: railX, y: 588, width: railW, height: 188, color: panel });
+  let cy = 756;
+  page.drawText("CONTACT US", { x: railX + 14, y: cy, size: 8, font: bold, color: ink });
+  cy -= 16;
+  page.drawText("A", { x: railX + 14, y: cy, size: 8, font: bold, color: blue });
+  for (const row of [ascii(bill.contactName), ...asciiKeep(bill.contactAddress).split("\n").map((line) => line.trim()).filter(Boolean)].slice(0, 4)) {
+    page.drawText(fit(row, font, 7.5, railW - 40), { x: railX + 28, y: cy, size: 7.5, font, color: ink });
+    cy -= 10;
+  }
+  page.drawText("T", { x: railX + 14, y: cy, size: 8, font: bold, color: blue });
+  page.drawText(fit(ascii(bill.phone), font, 7.5, railW - 40), { x: railX + 28, y: cy, size: 7.5, font, color: ink });
+  cy -= 16;
+  page.drawText("Receipt", { x: railX + 14, y: cy, size: 8, font: bold, color: ink });
+  cy -= 11;
+  for (const row of linesOf("This receipt confirms the payment your advisor approved. This certificate is active.", font, 7, railW - 28)) {
+    if (cy < 648) break;
+    page.drawText(row, { x: railX + 14, y: cy, size: 7, font, color: muted });
+    cy -= 9;
+  }
+  page.drawRectangle({ x: railX, y: 588, width: railW, height: 52, color: dark });
+  page.drawText("Approved", { x: railX + 14, y: 624, size: 7.5, font: bold, color: white });
+  page.drawText(fit(ascii(input.receivedOn) || "—", bold, 11, railW - 28), { x: railX + 14, y: 606, size: 11, font: bold, color: white });
+
+  let y = 716;
+  page.drawText(fit(ascii(input.clientName).toUpperCase(), bold, 9, 320), { x: left, y, size: 9, font: bold, color: ink });
+  y -= 13;
+  for (const row of input.address.map((item) => ascii(item).toUpperCase()).filter(Boolean).slice(0, 4)) {
+    page.drawText(fit(row, font, 8, 320), { x: left, y, size: 8, font, color: muted });
+    y -= 11;
+  }
+  drawBarcode(page, left, y - 28, 220, 22, bill.accountNumber || bill.crn);
+
+  y = 560;
+  page.drawText("Payment receipt", { x: left, y, size: 22, font: bold, color: ink });
   y -= 22;
-  for (const row of linesOf("This receipt confirms the payment your advisor approved. This certificate is active.", font, 10, width)) {
-    page.drawText(row, { x: left, y, size: 10, font, color: muted });
-    y -= 14;
+  page.drawText("Certificate", { x: left, y, size: 11, font: bold, color: ink });
+  y -= 14;
+  for (const row of linesOf("The figures below are the terms in effect after the payment was confirmed.", font, 8.5, width)) {
+    page.drawText(row, { x: left, y, size: 8.5, font, color: muted });
+    y -= 11;
   }
 
   y -= 8;
-  page.drawRectangle({ x: left, y: y - 72, width: width, height: 88, color: panel });
-  page.drawText("AMOUNT CONFIRMED", { x: left + 16, y: y - 18, size: 8, font: bold, color: muted });
-  page.drawText(fit(ascii(input.amount) || "—", bold, 22, 280), { x: left + 16, y: y - 50, size: 22, font: bold, color: blue });
-  page.drawText("APPROVED", { x: left + width - 150, y: y - 18, size: 8, font: bold, color: muted });
-  page.drawText(fit(ascii(input.receivedOn) || "—", bold, 12, 140), { x: left + width - 150, y: y - 40, size: 12, font: bold, color: ink });
-  y -= 104;
-
+  page.drawRectangle({ x: left, y: y - 4, width: width, height: 3, color: blue });
+  y -= 6;
   const rows: Array<[string, string]> = [
-    ["Client", input.clientName],
-    ["Email", input.email],
-    ["Certificate", input.term],
-    ["Promo APY", input.promoApy || "—"],
-    ["Final APY", input.finalApy || "—"],
-    ["Customer reference", input.reference || "—"],
-    ["Deposit code", input.depositCode || "—"],
-    ["Account number", input.accountNumber || "—"],
-    ["Confirmation file", input.fileName || "—"],
+    ["Email", ascii(input.email)],
+    ["Certificate", ascii(input.term)],
+    ["Promo APY", ascii(input.promoApy) || "—"],
+    ["Final APY", ascii(input.finalApy) || "—"],
+    ["Customer reference", ascii(bill.crn) || "—"],
+    ["Deposit code", ascii(input.depositCode) || "—"],
+    ["Account number", ascii(input.accountNumber) || "—"],
   ];
+  const right = left + width - 12;
+  const valueMax = 250;
   rows.forEach((row, index) => {
-    if (index % 2 === 0) page.drawRectangle({ x: left, y: y - 8, width: width, height: 26, color: panel });
-    page.drawText(row[0].toUpperCase(), { x: left + 12, y, size: 8, font: bold, color: muted });
-    page.drawText(fit(ascii(row[1]) || "—", bold, 10, 280), { x: left + 210, y, size: 10, font: bold, color: ink });
-    y -= 26;
+    const top = y;
+    page.drawRectangle({ x: left, y: top - 16, width: width, height: 22, color: index % 2 === 0 ? rowAlt : white });
+    page.drawText(row[0].toUpperCase(), { x: left + 10, y: top - 10, size: 7, font: bold, color: muted });
+    let size = 9;
+    let value = row[1];
+    while (size > 6.5 && inkWidth(bold, value, size) > valueMax) size -= 0.25;
+    if (inkWidth(bold, value, size) > valueMax) value = fit(value, bold, size, valueMax);
+    page.drawText(value, { x: right - inkWidth(bold, value, size), y: top - 11, size, font: bold, color: ink });
+    y -= 22;
   });
+  page.drawLine({ start: { x: left, y: y + 6 }, end: { x: left + width, y: y + 6 }, thickness: 0.6, color: hair });
 
-  y -= 18;
-  page.drawText("Certificate", { x: left, y, size: 12, font: bold, color: ink });
-  y -= 18;
-  for (const row of linesOf("This certificate is active. The term, rate, and maturity date are in Active CDs.", font, 10, width)) {
-    page.drawText(row, { x: left, y, size: 10, font, color: muted });
-    y -= 14;
+  y -= 16;
+  page.drawLine({ start: { x: left, y }, end: { x: left + width, y }, thickness: 1.2, color: ink });
+  y -= 22;
+  page.drawText("Amount received", { x: left, y, size: 12, font: bold, color: ink });
+  const amount = ascii(input.amount);
+  page.drawText(amount, { x: left + width - bold.widthOfTextAtSize(amount, 16), y: y - 1, size: 16, font: bold, color: blue });
+  y -= 10;
+  page.drawLine({ start: { x: left, y }, end: { x: left + width, y }, thickness: 1.2, color: ink });
+
+  const boxTop = y - 18;
+  const boxH = 108;
+  const gap = 12;
+  const leftBox = (width - gap) * 0.58;
+  const rightBox = width - gap - leftBox;
+  page.drawRectangle({ x: left, y: boxTop - boxH, width: leftBox, height: boxH, color: white, borderColor: hair, borderWidth: 1 });
+  page.drawRectangle({ x: left + leftBox + gap, y: boxTop - boxH, width: rightBox, height: boxH, color: panel });
+  page.drawText("This certificate", { x: left + 12, y: boxTop - 16, size: 9, font: bold, color: ink });
+  let uy = boxTop - 30;
+  for (const row of linesOf("The certificate is active. The term, rate, and maturity date are in Active CDs.", font, 7.5, leftBox - 24)) {
+    page.drawText(row, { x: left + 12, y: uy, size: 7.5, font, color: muted });
+    uy -= 10;
   }
+  uy -= 4;
+  page.drawLine({ start: { x: left + 12, y: uy + 6 }, end: { x: left + leftBox - 12, y: uy + 6 }, thickness: 0.5, color: hair });
+  page.drawText(fit(ascii(bill.contactName), bold, 7.5, leftBox * 0.55), { x: left + 12, y: uy - 6, size: 7.5, font: bold, color: ink });
+  asciiKeep(bill.contactAddress)
+    .split("\n")
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .forEach((row, index) => page.drawText(fit(row, font, 7, leftBox * 0.55), { x: left + 12, y: uy - 17 - index * 9, size: 7, font, color: ink }));
+  page.drawText("FDIC CERTIFICATE", { x: left + leftBox * 0.58, y: uy - 6, size: 6.5, font: bold, color: muted });
+  page.drawText(fit(ascii(bill.fdic), bold, 11, leftBox * 0.36), { x: left + leftBox * 0.58, y: uy - 20, size: 11, font: bold, color: ink });
 
-  page.drawLine({ start: { x: left, y: 48 }, end: { x: left + width, y: 48 }, thickness: 0.6, color: hair });
-  const footer = fit(`${ascii(input.company) || "Account Holding"}${input.phone ? `  ·  ${ascii(input.phone)}` : ""}`, font, 8, width);
-  page.drawText(footer, { x: left, y: 30, size: 8, font, color: muted });
+  const assistX = left + leftBox + gap + 12;
+  page.drawText("Payment assistance", { x: assistX, y: boxTop - 16, size: 9, font: bold, color: ink });
+  let py = boxTop - 32;
+  for (const row of linesOf("Questions go to your introducing agent advisor.", font, 8, rightBox - 24)) {
+    page.drawText(row, { x: assistX, y: py, size: 8, font, color: muted });
+    py -= 11;
+  }
+  py -= 4;
+  page.drawText("Monday to Friday", { x: assistX, y: py, size: 8, font: bold, color: ink });
+  py -= 12;
+  page.drawText("9:00am to 5:00pm", { x: assistX, y: py, size: 8, font, color: ink });
+  py -= 14;
+  page.drawText(fit(ascii(bill.phone), bold, 9, rightBox - 24), { x: assistX, y: py, size: 9, font: bold, color: blue });
+
+  page.drawLine({ start: { x: left, y: 42 }, end: { x: left + width, y: 42 }, thickness: 0.6, color: hair });
+  const footer = fit(`${ascii(bill.contactName)}  ·  ${asciiKeep(bill.contactAddress).replace(/\n/g, ", ")}`, font, 7, 360);
+  page.drawText(footer, { x: left, y: 26, size: 7, font, color: muted });
+  const brand = fit(ascii(bill.brand), bold, 8, 150);
+  page.drawText(brand, { x: left + width - bold.widthOfTextAtSize(brand, 8), y: 26, size: 8, font: bold, color: blue });
+  paintAddress(page, font, muted, left, input.companyAddress);
 
   const bytes = await doc.save();
   return Buffer.from(bytes).toString("base64");
+}
+
+async function embedMark(doc: PDFDocument, logo?: string) {
+  const match = logo?.match(/^data:image\/(png|jpeg);base64,(.+)$/i);
+  if (!match?.[2]) return null;
+  try {
+    const bytes = Buffer.from(match[2], "base64");
+    return match[1].toLowerCase() === "png" ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function markBox(image: { width: number; height: number }, maxWidth: number, maxHeight: number) {
+  const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+  return { width: image.width * scale, height: image.height * scale };
+}
+
+async function paintBrandBar(
+  doc: PDFDocument,
+  page: ReturnType<PDFDocument["addPage"]>,
+  bold: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  white: ReturnType<typeof rgb>,
+  left: number,
+  brand: string,
+  logo?: string,
+) {
+  const image = await embedMark(doc, logo);
+  if (!image) {
+    page.drawText(fit(ascii(brand), bold, 13, 300), { x: left + 16, y: 756, size: 13, font: bold, color: white });
+    page.drawText("CERTIFICATE OF DEPOSIT", { x: left + 16, y: 742, size: 8, font: bold, color: white });
+    return;
+  }
+  const box = markBox(image, 120, 26);
+  page.drawRectangle({ x: left + 8, y: 742, width: box.width + 8, height: 26, color: rgb(1, 1, 1) });
+  page.drawImage(image, { x: left + 12, y: 744, width: box.width, height: box.height });
+  page.drawText("CERTIFICATE OF DEPOSIT", { x: left + 24 + box.width, y: 750, size: 8, font: bold, color: white });
+}
+
+function paintAddress(
+  page: ReturnType<PDFDocument["addPage"]>,
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  color: ReturnType<typeof rgb>,
+  left: number,
+  address?: string,
+) {
+  const line = plainAddress(address);
+  if (!line) return;
+  page.drawText(fit(line, font, 7, 360), { x: left, y: 14, size: 7, font, color });
 }
 
 function inkWidth(face: Awaited<ReturnType<PDFDocument["embedFont"]>>, value: string, size: number) {
@@ -582,6 +726,10 @@ function drawBarcode(
   });
 }
 
+function plainAddress(value?: string) {
+  return (value || "").replace(/[^\x20-\x7E\n]/g, " ").replace(/\n/g, ", ").replace(/\s+/g, " ").trim();
+}
+
 function pdfSafe(value: string) {
   return value.replace(/[^\x20-\x7E]/g, "").trim() || "Account Holding";
 }
@@ -611,6 +759,12 @@ export async function buildInvestmentPdf(input: InvestmentPdfInput) {
   const ink = rgb(0.09, 0.13, 0.11);
   const muted = rgb(0.35, 0.38, 0.36);
   let y = 748;
+  const mark = await embedMark(doc, input.logo);
+  if (mark) {
+    const box = markBox(mark, 160, 36);
+    page.drawImage(mark, { x: 48, y: y - box.height, width: box.width, height: box.height });
+    y -= box.height + 16;
+  }
 
   function text(value: string, size: number, face: typeof font, color = ink) {
     page.drawText(value, { x: 48, y, size, font: face, color });
@@ -671,6 +825,11 @@ export async function buildInvestmentPdf(input: InvestmentPdfInput) {
     page.drawImage(image, { x: 56, y: y - height, width, height });
   } else {
     text("Signature will appear here after the investor signs.", 10, font, muted);
+  }
+
+  const address = plainAddress(input.companyAddress);
+  if (address) {
+    page.drawText(fit(address, font, 8, 500), { x: 48, y: 28, size: 8, font, color: muted });
   }
 
   const bytes = await doc.save();

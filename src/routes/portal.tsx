@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, FileUp, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
+import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, FileUp, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TrendingUp, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
@@ -82,7 +82,7 @@ function PortalPage() {
   );
 }
 
-type PortalTab = "dashboard" | "active" | "investments" | "fund" | "manage";
+type PortalTab = "dashboard" | "active" | "transactions" | "investments" | "fund" | "manage";
 
 const PromoContext = createContext<PromoOffer>(EMPTY_PROMO);
 
@@ -93,6 +93,7 @@ function usePromo() {
 const PORTAL_TABS: { id: PortalTab; label: string; icon: LucideIcon }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "active", label: "Active CDs", icon: Landmark },
+  { id: "transactions", label: "Transactions", icon: Receipt },
   { id: "investments", label: "Investments", icon: Wallet },
   { id: "fund", label: "Add investment", icon: Plus },
   { id: "manage", label: "Manage", icon: SlidersHorizontal },
@@ -216,6 +217,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
             />
           ) : null}
           {tab === "active" ? <ActiveCds positions={holdings} waiting={pipeline.length} account={account} onAdd={() => setTab("fund")} /> : null}
+          {tab === "transactions" ? <Transactions positions={holdings} /> : null}
           {tab === "investments" ? <InvestmentList positions={pipeline} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
           {tab === "fund" ? (
             <FundingPanel
@@ -864,6 +866,14 @@ function formatDate(date: Date) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
+function currentValue(principal: number, rate: number, opened: string, months: number) {
+  const start = Date.parse(`${opened}T00:00:00Z`);
+  if (!principal || !Number.isFinite(start)) return principal;
+  const years = Math.max(0, (Date.now() - start) / (365.25 * 24 * 60 * 60 * 1000));
+  const termYears = months > 0 ? months / 12 : years;
+  return principal * Math.pow(1 + rate, Math.min(years, termYears));
+}
+
 function elapsed(start: string, end: Date | null) {
   const opened = Date.parse(`${start}T00:00:00Z`);
   const matures = end?.getTime() ?? opened;
@@ -1253,7 +1263,7 @@ function ActiveCds({ positions, waiting, account, onAdd }: { positions: FundingP
           ? waiting > 0
             ? "You do not have an active certificate yet. A CD appears here after your advisor confirms the payment."
             : "You do not have an active certificate yet."
-          : "These certificates are active because your advisor confirmed the payment."}
+          : "These certificates are active."}
       </p>
       {empty ? (
         <EmptyBanners onAdd={onAdd} />
@@ -1274,6 +1284,7 @@ function ActiveCd({ position, account }: { position: FundingPosition; account: P
   const opened = position.createdAt;
   const matures = maturityOn(opened, rates.months);
   const payout = rates.principal * Math.pow(1 + rates.rate, rates.months / 12);
+  const today = currentValue(rates.principal, rates.rate, opened, rates.months);
   const clientName = [account.payload.firstName, account.payload.middleName, account.payload.surname].filter(Boolean).join(" ");
   const address = [account.payload.street, account.payload.apt, account.payload.city, account.payload.region, account.payload.postal, account.payload.country].filter(Boolean).join(", ");
   return (
@@ -1287,41 +1298,59 @@ function ActiveCd({ position, account }: { position: FundingPosition; account: P
           <StatusBadge status={position.status} />
         </div>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Highlight icon={Wallet} label="Deposit" value={position.amount} />
+        <Highlight icon={TrendingUp} label="Current value" value={money(today)} />
+        <Highlight icon={Banknote} label="Expected payout" value={money(payout)} />
         <Highlight icon={Percent} label="Final APY" value={rates.final} />
         <Highlight icon={CalendarRange} label="Term" value={rates.months ? `${rates.months} months` : position.termLabel} />
         <Highlight icon={CalendarClock} label="Matures" value={matures ? formatDate(matures) : "—"} />
-        <Highlight icon={Banknote} label="Expected payout" value={money(payout)} />
       </div>
+      <TermChart items={[{ id: position.id, months: rates.months, amount: rates.principal, start: opened, end: matures }]} />
       <button type="button" className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         {open ? "Hide CD details" : "CD details"}
       </button>
       {open ? (
         <div className="mt-4 border-t border-border pt-4">
           <p className="text-sm text-fg">{position.issuer}</p>
-          <dl className="mt-4 grid border-t border-l border-border sm:grid-cols-2 lg:grid-cols-4">
-            <Fact label="Client name" value={clientName} />
-            <Fact label="Address" value={address} />
-            <Fact label="Deposit code" value={position.depositCode} />
-            <Fact label="Deposit number" value={position.depositNumber} />
-            <Fact label="Account number" value={position.accountNumber} />
-            <Fact label="Confirmation date" value={slashDate(position.confirmedOn)} />
-            <Fact label="Reference number" value={position.referenceNumber} />
-            <Fact label="Interest rate" value="Fixed" />
-            <Fact label="Compounding frequency" value="Daily" />
-            <Fact label="Callable feature" value="Non-callable" />
-            <Fact label="Issue date" value={slashDate(opened)} />
-            <Fact label="Base APY" value={position.termLabel.match(/([\d.]+%)/)?.[1] ?? "—"} />
-            <Fact label="Promo APY" value={rates.promo} />
-            <Fact label="Minimum" value={position.minimumInvestment} />
-            <Fact label="Structure" value={position.structure} />
-            <Fact label="Advisor" value={position.advisorName ? `${position.advisorName}${position.advisorPhone ? ` · ${position.advisorPhone}` : ""}` : "—"} />
-            <Fact label="Deposit insurance" value={position.capitalProtection} />
-            <Fact label="Signed" value={position.signerName ? `${position.signerName}${position.signedOn ? ` · ${slashDate(position.signedOn)}` : ""}` : "—"} />
+          <div className="mt-4 grid items-stretch gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <section className="rounded-md border border-border bg-bg px-4 py-4">
+              <p className="text-[11px] font-semibold tracking-wide text-heading uppercase">Account holder</p>
+              <p className="mt-1 text-lg font-semibold text-primary">{clientName || "—"}</p>
+              <p className="mt-1 text-sm leading-6 text-fg">{address || "—"}</p>
+              <p className="mt-4 text-[11px] font-semibold tracking-wide text-heading uppercase">Signed</p>
+              <p className="mt-1 text-sm text-fg">{position.signerName ? `${position.signerName}${position.signedOn ? ` · ${slashDate(position.signedOn)}` : ""}` : "—"}</p>
+            </section>
+            <dl className="grid h-full grid-cols-2 grid-rows-2 gap-3">
+              <CodeFact label="Deposit code" value={position.depositCode} />
+              <CodeFact label="Deposit number" value={position.depositNumber} />
+              <CodeFact label="Account number" value={position.accountNumber} />
+              <CodeFact label="Reference number" value={position.referenceNumber} />
+            </dl>
+          </div>
+          <dl className="mt-4 grid sm:grid-cols-2 sm:gap-x-8">
+            {(
+              [
+                ["Confirmation date", slashDate(position.confirmedOn), false],
+                ["Issue date", slashDate(opened), false],
+                ["Interest rate", "Fixed", false],
+                ["Compounding", "Daily", false],
+                ["Callable feature", "Non-callable", false],
+                ["Base APY", position.termLabel.match(/([\d.]+%)/)?.[1] ?? "—", false],
+                ["Promo APY", rates.promo, false],
+                ["Minimum", position.minimumInvestment, false],
+                ["Structure", position.structure, false],
+                ["Advisor", position.advisorName ? `${position.advisorName}${position.advisorPhone ? ` · ${position.advisorPhone}` : ""}` : "—", false],
+                ["Deposit insurance", position.capitalProtection, true],
+              ] as [string, string, boolean][]
+            ).map(([label, value, wide]) => (
+              <div key={label} className={"grid grid-cols-[7.5rem_1fr] gap-2 border-b border-border py-1 text-sm " + (wide ? "sm:col-span-2" : "")}>
+                <dt className="text-primary">{label}</dt>
+                <dd className="text-fg">{value || "—"}</dd>
+              </div>
+            ))}
           </dl>
           <TermsPdf id={position.id} compact />
-          {position.paymentFileName ? <PaymentReceipt id={position.id} /> : null}
         </div>
       ) : null}
     </article>
@@ -1346,11 +1375,11 @@ function slashDate(iso: string) {
   return `${Number(month)}/${Number(day)}/${year}`;
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function CodeFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-r border-b border-border px-3 py-3">
+    <div className="flex h-full flex-col justify-center rounded-md border border-border bg-white px-3 py-3">
       <dt className="text-[11px] font-semibold tracking-wide text-heading uppercase">{label}</dt>
-      <dd className="mt-1 text-sm text-fg">{value || "—"}</dd>
+      <dd className="mt-1 font-mono text-sm font-semibold tracking-wide text-primary">{value || "—"}</dd>
     </div>
   );
 }
@@ -1532,7 +1561,35 @@ function openDataFile(file: string, name: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function PaymentReceipt({ id }: { id: string }) {
+function Transactions({ positions }: { positions: FundingPosition[] }) {
+  const receipts = positions.filter((position) => position.paymentFileName);
+  return (
+    <section className="mt-6">
+      <h1 className="text-3xl font-semibold">Transactions</h1>
+      <p className="mt-2 text-fg">Payment receipts for confirmed certificates.</p>
+      {receipts.length === 0 ? (
+        <p className="mt-6 text-sm text-fg">No payment receipts yet.</p>
+      ) : (
+        <ul className="mt-4 grid gap-3">
+          {receipts.map((position) => {
+            const rates = investmentRates(position, usePromo());
+            return (
+              <li key={position.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-border bg-surface px-4 py-3">
+                <p className="font-semibold text-primary">{certificateTitle(position, rates.months, rates.final)}</p>
+                <p className="text-sm text-fg">{position.amount}</p>
+                {position.confirmedOn ? <p className="text-sm text-fg">{slashDate(position.confirmedOn)}</p> : null}
+                {rates.promo !== "—" ? <p className="text-sm font-semibold text-primary">Final APY {rates.final}</p> : null}
+                <PaymentReceipt id={position.id} inline />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PaymentReceipt({ id, inline = false }: { id: string; inline?: boolean }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -1578,10 +1635,8 @@ function PaymentReceipt({ id }: { id: string }) {
   }
 
   return (
-    <div className="mt-4 rounded-md border border-border bg-white px-4 py-3">
-      <p className="text-[11px] font-semibold tracking-wide text-heading uppercase">Payment receipt</p>
-      <p className="mt-1 text-sm text-fg">Emailed when your advisor approved the payment.</p>
-      <div className="mt-3 flex flex-wrap gap-2">
+    <>
+      <div className={inline ? "ml-auto flex flex-wrap gap-2" : "mt-3 flex flex-wrap gap-2"}>
         <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void view()}>
           {pending ? "Opening…" : "View PDF"}
         </button>
@@ -1589,7 +1644,7 @@ function PaymentReceipt({ id }: { id: string }) {
           Download PDF
         </button>
       </div>
-      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      {error ? <p className="mt-2 w-full text-sm text-danger">{error}</p> : null}
       {viewing && bytes ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setViewing(false)}>
           <div role="dialog" aria-modal="true" aria-label="Payment receipt" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
@@ -1603,7 +1658,7 @@ function PaymentReceipt({ id }: { id: string }) {
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }
 

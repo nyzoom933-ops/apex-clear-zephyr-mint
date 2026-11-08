@@ -410,7 +410,9 @@ export type SiteBrand = {
   socialBanner: string | null;
   emailLogo: string | null;
   footerLogo: string | null;
+  pdfLogo: string | null;
   footerText: string;
+  companyAddress: string;
   backupEmail: string;
   lastBackupAt: string;
   publicDomain: string;
@@ -474,7 +476,7 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const rows = await sql<{ key: string; value: string }>`
-    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'company_phone', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain', 'color_action', 'color_heading', 'color_text', 'color_label', 'color_border', 'color_background', 'page_background')
+    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'company_phone', 'company_address', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'pdf_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain', 'color_action', 'color_heading', 'color_text', 'color_label', 'color_border', 'color_background', 'page_background')
   `;
   const brand: SiteBrand = {
     logo: null,
@@ -486,7 +488,9 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     socialBanner: null,
     emailLogo: null,
     footerLogo: null,
+    pdfLogo: null,
     footerText: "",
+    companyAddress: "",
     backupEmail: "",
     lastBackupAt: "",
     publicDomain: "",
@@ -498,7 +502,9 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     if (row.key === "social_banner") brand.socialBanner = row.value;
     if (row.key === "email_logo") brand.emailLogo = row.value;
     if (row.key === "footer_logo") brand.footerLogo = row.value;
+    if (row.key === "pdf_logo" && /^data:image\/(png|jpeg);base64,/i.test(row.value)) brand.pdfLogo = row.value;
     if (row.key === "footer_text") brand.footerText = row.value;
+    if (row.key === "company_address") brand.companyAddress = row.value;
     if (row.key === "backup_email") brand.backupEmail = row.value;
     if (row.key === "backup_at") brand.lastBackupAt = row.value;
     if (row.key === "company_name" && row.value.trim()) brand.companyName = row.value.trim();
@@ -527,7 +533,9 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     socialBanner: assertShareImage(input.socialBanner),
     emailLogo: assertImage(input.emailLogo),
     footerLogo: assertImage(input.footerLogo),
+    pdfLogo: input.pdfLogo ? assertShareImage(input.pdfLogo) : null,
     footerText: (input.footerText || "").slice(0, 800),
+    companyAddress: (input.companyAddress || "").trim().slice(0, 400),
     backupEmail: cleanBackupEmail(input.backupEmail || ""),
     lastBackupAt: input.lastBackupAt || "",
     publicDomain: cleanPublicDomain(input.publicDomain || ""),
@@ -543,8 +551,8 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    for (const key of ["logo", "favicon", "cover", "socialBanner", "emailLogo", "footerLogo"] as const) {
-      const column = key === "socialBanner" ? "social_banner" : key === "emailLogo" ? "email_logo" : key === "footerLogo" ? "footer_logo" : key;
+    for (const key of ["logo", "favicon", "cover", "socialBanner", "emailLogo", "footerLogo", "pdfLogo"] as const) {
+      const column = key === "socialBanner" ? "social_banner" : key === "emailLogo" ? "email_logo" : key === "footerLogo" ? "footer_logo" : key === "pdfLogo" ? "pdf_logo" : key;
       const value = data[key];
       if (!value) {
         await sql`delete from site_settings where key = ${column}`;
@@ -565,6 +573,14 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     } else {
       await sql`
         insert into site_settings (key, value) values ('company_phone', ${data.companyPhone})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    if (!data.companyAddress) {
+      await sql`delete from site_settings where key = 'company_address'`;
+    } else {
+      await sql`
+        insert into site_settings (key, value) values ('company_address', ${data.companyAddress})
         on conflict (key) do update set value = excluded.value
       `;
     }
@@ -633,6 +649,16 @@ export const runDatabaseBackup = createServerFn({ method: "POST" }).handler(asyn
   if (!result.ok) throw new Error(result.error);
   return result;
 });
+
+export const restoreDatabaseBackup = createServerFn({ method: "POST" })
+  .validator((input: { file: string }) => ({ file: input.file || "" }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { restoreBackup } = await import("@/lib/backup.server");
+    const result = await restoreBackup(data.file);
+    if (!result.ok) throw new Error(result.error);
+    return result;
+  });
 
 export const getMailSetup = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
@@ -1104,6 +1130,8 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   await ensureFundingExtras(sql);
+  const { restyleLegacyFundingCodes } = await import("@/lib/funding-codes.server");
+  await restyleLegacyFundingCodes(sql);
   const { ensureDemoApplications } = await import("@/lib/seed-applications.server");
   await ensureDemoApplications(sql);
   const rows = await sql<{ id: string; type_id: string; name: string; issuer: string; structure: string; currency: string; jurisdiction: string; coupon_type: string; minimum_investment: string; credit_rating: string; capital_protection: string; amount: string; frequency: string; term_label: string; status: FundingPosition["status"]; advisor_name: string | null; advisor_phone: string | null; signed: boolean; signer_name: string; signed_on: string | null; confirmed_on: string | null; deposit_code: string; deposit_number: string; account_number: string; reference_number: string; payment_file_name: string; promo_apy: string; final_apy: string; created_at: string }>`
@@ -2554,6 +2582,8 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
   await ensureInvoiceBillingColumn(sql);
   await ensureContactColumns(sql);
   await ensureFundingExtras(sql);
+  const { restyleLegacyFundingCodes } = await import("@/lib/funding-codes.server");
+  await restyleLegacyFundingCodes(sql);
   const { ensureDemoApplications } = await import("@/lib/seed-applications.server");
   await ensureDemoApplications(sql);
   const rows = await sql<{
@@ -2728,6 +2758,7 @@ async function paymentReceiptFile(sql: Sql, id: string) {
 }
 
 async function paymentReceiptPdf(sql: Sql, id: string) {
+  await ensureInvoiceBillingColumn(sql);
   const rows = await sql<{
     email: string;
     amount: string;
@@ -2735,19 +2766,20 @@ async function paymentReceiptPdf(sql: Sql, id: string) {
     reference_number: string | null;
     deposit_code: string | null;
     account_number: string | null;
-    payment_file_name: string;
     promo_apy: string | null;
     final_apy: string | null;
     received_on: string | null;
     applicant_name: string | null;
+    payload: ApplicationPayload | string | null;
+    invoice_billing: unknown;
   }>`
     select f.email, f.amount, f.term_label, f.reference_number, f.deposit_code, f.account_number,
-           f.payment_file_name, f.promo_apy, f.final_apy,
+           f.promo_apy, f.final_apy, f.invoice_billing,
            to_char(coalesce(f.payment_approved_at, f.payment_uploaded_at, now()) at time zone 'UTC', 'YYYY-MM-DD') as received_on,
-           app.applicant_name
+           app.applicant_name, app.payload
     from fundings f
     left join lateral (
-      select applicant_name from applications
+      select applicant_name, payload from applications
       where lower(email) = lower(f.email)
       order by submitted_at desc nulls last
       limit 1
@@ -2756,24 +2788,30 @@ async function paymentReceiptPdf(sql: Sql, id: string) {
   `;
   const row = rows[0];
   if (!row) return "";
+  const payload = row.payload ? (typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload) : null;
+  const clientName = row.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || row.email;
+  const address = [
+    [payload?.street, payload?.apt].filter(Boolean).join(" "),
+    [payload?.city, payload?.region, payload?.postal].filter(Boolean).join(", "),
+    payload?.country ?? "",
+  ].filter(Boolean);
   const rates = row.final_apy ? { promo: row.promo_apy || "—", final: row.final_apy } : ratesFor(row.term_label, row.amount, (await loadPromo(sql)).tiers);
-  const company = await readCompanyName(sql);
-  const phoneRows = await sql<{ value: string }>`select value from site_settings where key = 'company_phone'`;
   const { buildReceiptPdf } = await import("@/lib/investment-pdf.server");
+  const brand = await readPdfBrand(sql);
   return buildReceiptPdf({
-    company,
-    clientName: row.applicant_name || row.email,
+    clientName,
+    address,
     email: row.email,
     amount: row.amount,
     term: row.term_label,
     promoApy: rates.promo,
     finalApy: rates.final,
-    reference: row.reference_number ?? "",
     depositCode: row.deposit_code ?? "",
     accountNumber: row.account_number ?? "",
-    fileName: row.payment_file_name,
     receivedOn: usDate(row.received_on || ""),
-    phone: phoneRows[0]?.value?.trim() || "",
+    billing: resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number ?? ""),
+    logo: brand.logo,
+    companyAddress: brand.companyAddress,
   });
 }
 
@@ -3049,6 +3087,7 @@ export const downloadInvestmentPdf = createServerFn({ method: "POST" })
       signedOn: row.signed_on || (png ? "Signed on the account application" : ""),
       signaturePng: png,
       companyName: await readCompanyName(sql),
+      ...(await readPdfBrand(sql)),
     };
     const pdf =
       row.status === "payment_approved"
@@ -3141,11 +3180,14 @@ export const downloadInvoicePdf = createServerFn({ method: "POST" })
       payload?.country ?? "",
     ].filter(Boolean);
     const { buildInvoicePdf } = await import("@/lib/investment-pdf.server");
+    const brand = await readPdfBrand(sql);
     const pdf = await buildInvoicePdf({
       clientName,
       address,
       amount: row.amount,
       billing: resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number),
+      logo: brand.logo,
+      companyAddress: brand.companyAddress,
     });
     return { pdf };
   });
@@ -3246,6 +3288,17 @@ type FundingMail = {
 async function readCompanyName(sql: Sql) {
   const rows = await sql<{ value: string }>`select value from site_settings where key = 'company_name'`;
   return rows[0]?.value?.trim() || DEFAULT_COMPANY_NAME;
+}
+
+async function readPdfBrand(sql: Sql) {
+  const rows = await sql<{ key: string; value: string }>`
+    select key, value from site_settings where key in ('pdf_logo', 'company_address')
+  `;
+  const logo = rows.find((row) => row.key === "pdf_logo")?.value ?? "";
+  return {
+    logo: /^data:image\/(png|jpeg);base64,/i.test(logo) ? logo : "",
+    companyAddress: rows.find((row) => row.key === "company_address")?.value?.trim() ?? "",
+  };
 }
 
 async function investorName(sql: Sql, email: string) {

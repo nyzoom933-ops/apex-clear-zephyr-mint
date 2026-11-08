@@ -39,6 +39,7 @@ import {
   signInAsClient,
   setSiteBrand,
   runDatabaseBackup,
+  restoreDatabaseBackup,
   saveMailSetup,
   saveSmtpSetup,
   saveTelegramSetup,
@@ -581,11 +582,13 @@ function SettingsPanel({
   const [favicon, setFavicon] = useState(brand.favicon);
   const [companyName, setCompanyName] = useState(brand.companyName);
   const [companyPhone, setCompanyPhone] = useState(brand.companyPhone);
+  const [companyAddress, setCompanyAddress] = useState(brand.companyAddress);
   const [cloudflareCode, setCloudflareCode] = useState(brand.cloudflareCode);
   const [cover, setCover] = useState(brand.cover);
   const [socialBanner, setSocialBanner] = useState(brand.socialBanner);
   const [emailLogo, setEmailLogo] = useState(brand.emailLogo);
   const [footerLogo, setFooterLogo] = useState(brand.footerLogo);
+  const [pdfLogo, setPdfLogo] = useState(brand.pdfLogo);
   const [footerText, setFooterText] = useState(brand.footerText);
   const [backupEmail, setBackupEmail] = useState(brand.backupEmail);
   const [publicDomain, setPublicDomain] = useState(brand.publicDomain);
@@ -599,6 +602,7 @@ function SettingsPanel({
   const [wantImage, setWantImage] = useState(Boolean(brand.pageBackground?.startsWith("data:image/")));
   const [lastBackupAt, setLastBackupAt] = useState(brand.lastBackupAt);
   const [backupPending, setBackupPending] = useState(false);
+  const [restorePending, setRestorePending] = useState(false);
   const [resendKey, setResendKey] = useState("");
   const [mailFrom, setMailFrom] = useState("");
   const [keyHint, setKeyHint] = useState("");
@@ -624,11 +628,13 @@ function SettingsPanel({
     setFavicon(brand.favicon);
     setCompanyName(brand.companyName);
     setCompanyPhone(brand.companyPhone);
+    setCompanyAddress(brand.companyAddress);
     setCloudflareCode(brand.cloudflareCode);
     setCover(brand.cover);
     setSocialBanner(brand.socialBanner);
     setEmailLogo(brand.emailLogo);
     setFooterLogo(brand.footerLogo);
+    setPdfLogo(brand.pdfLogo);
     setFooterText(brand.footerText);
     setBackupEmail(brand.backupEmail);
     setPublicDomain(brand.publicDomain);
@@ -641,7 +647,7 @@ function SettingsPanel({
     setPageBackground(brand.pageBackground);
     setWantImage(Boolean(brand.pageBackground?.startsWith("data:image/")));
     setLastBackupAt(brand.lastBackupAt);
-  }, [brand.logo, brand.favicon, brand.companyName, brand.companyPhone, brand.cloudflareCode, brand.cover, brand.socialBanner, brand.emailLogo, brand.footerLogo, brand.footerText, brand.backupEmail, brand.publicDomain, brand.lastBackupAt, brand.colorAction, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
+  }, [brand.logo, brand.favicon, brand.companyName, brand.companyPhone, brand.companyAddress, brand.cloudflareCode, brand.cover, brand.socialBanner, brand.emailLogo, brand.footerLogo, brand.pdfLogo, brand.footerText, brand.backupEmail, brand.publicDomain, brand.lastBackupAt, brand.colorAction, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
   useEffect(() => {
     getMailSetup().then(setup => {
       setMailFrom(setup.mailFrom);
@@ -664,12 +670,13 @@ function SettingsPanel({
       return;
     }
     const share = kind === "cover" || kind === "socialBanner" || kind === "pageBackground";
-    if (share && file.type !== "image/png" && file.type !== "image/jpeg") {
-      setError("Use a JPEG or PNG for the cover, social banner, and background.");
+    const pdf = kind === "pdfLogo";
+    if ((share || pdf) && file.type !== "image/png" && file.type !== "image/jpeg") {
+      setError(pdf ? "Use a PNG or JPEG for the PDF logo." : "Use a JPEG or PNG for the cover, social banner, and background.");
       return;
     }
-    if (file.size > (share ? 1e6 : 4e5)) {
-      setError(share ? "Use a JPEG or PNG under 1 MB." : "Use an image under 400 KB.");
+    if (file.size > (share || pdf ? 1e6 : 4e5)) {
+      setError(share || pdf ? "Use a JPEG or PNG under 1 MB." : "Use an image under 400 KB.");
       return;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -678,7 +685,7 @@ function SettingsPanel({
       reader.onerror = () => reject(new Error("Could not read that file."));
       reader.readAsDataURL(file);
     });
-    if (kind === "logo") setLogo(dataUrl);else if (kind === "favicon") setFavicon(dataUrl);else if (kind === "cover") setCover(dataUrl);else if (kind === "emailLogo") setEmailLogo(dataUrl);else if (kind === "footerLogo") setFooterLogo(dataUrl);else if (kind === "pageBackground") setPageBackground(dataUrl);else setSocialBanner(dataUrl);
+    if (kind === "logo") setLogo(dataUrl);else if (kind === "favicon") setFavicon(dataUrl);else if (kind === "cover") setCover(dataUrl);else if (kind === "emailLogo") setEmailLogo(dataUrl);else if (kind === "footerLogo") setFooterLogo(dataUrl);else if (kind === "pdfLogo") setPdfLogo(dataUrl);else if (kind === "pageBackground") setPageBackground(dataUrl);else setSocialBanner(dataUrl);
   }
   async function save() {
     setError("");
@@ -691,11 +698,13 @@ function SettingsPanel({
           favicon,
           companyName,
           companyPhone,
+          companyAddress,
           cloudflareCode,
           cover,
           socialBanner,
           emailLogo,
           footerLogo,
+          pdfLogo,
           footerText,
           backupEmail,
           lastBackupAt,
@@ -717,13 +726,13 @@ function SettingsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">{section === "logos" ? "Logos" : section === "appearance" ? "Appearance" : section === "misc" ? "Misc" : "General"}</h1>{section === "general" ? <Fragment><p className="mt-2 text-fg">The company name is used in the header, page titles, emails, and certificates.</p><label className="mt-6 block max-w-md"><span className="mb-1.5 block text-sm font-medium">Company name</span><input className={controlClass} value={companyName} onChange={event => setCompanyName(event.target.value)} /></label><label className="mt-6 block max-w-md"><span className="mb-1.5 block text-sm font-medium">Company phone</span><input className={controlClass} value={companyPhone} placeholder="1-800-000-0000" onChange={event => setCompanyPhone(event.target.value)} /><span className="mt-1 block text-sm text-fg">Shown in the “We’re here to help” bar on client and lead emails.</span></label><label className="mt-6 block max-w-md"><span className="mb-1.5 block text-sm font-medium">Public domain</span><input className={controlClass} value={publicDomain} placeholder="https://www.example.com" onChange={event => setPublicDomain(event.target.value)} /><span className="mt-1 block text-sm text-fg">Client emails use this for the Open the investor portal button. Use the public site, not the Vercel address.</span></label><DeskLoginSettings /><div className="mt-6 max-w-xl rounded-lg border border-danger/40 bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Clear database</h2><p className="mt-1 text-sm text-fg">Deletes applications, clients, leads, investments, invoices, active CDs, and notifications. Settings, rates, advisors, and the desk login stay.</p><button type="button" className="mt-3 min-h-11 rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger" onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">{section === "logos" ? "Logos" : section === "appearance" ? "Appearance" : section === "misc" ? "Misc" : "General"}</h1>{section === "general" ? <Fragment><p className="mt-2 text-fg">The company name is used in the header, page titles, emails, and certificates.</p><label className="mt-6 block max-w-md"><span className="mb-1.5 block text-sm font-medium">Company name</span><input className={controlClass} value={companyName} onChange={event => setCompanyName(event.target.value)} /></label><label className="mt-6 block max-w-md"><span className="mb-1.5 block text-sm font-medium">Company phone</span><input className={controlClass} value={companyPhone} placeholder="1-800-000-0000" onChange={event => setCompanyPhone(event.target.value)} /><span className="mt-1 block text-sm text-fg">Shown in the “We’re here to help” bar on client and lead emails.</span></label><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Company address</span><textarea className={controlClass + " min-h-24"} value={companyAddress} placeholder={"123 Market Street\nNew York, NY 10001"} onChange={event => setCompanyAddress(event.target.value)} /><span className="mt-1 block text-sm text-fg">Printed on invoices, receipts, and certificate PDFs.</span></label><label className="mt-6 block max-w-md"><span className="mb-1.5 block text-sm font-medium">Public domain</span><input className={controlClass} value={publicDomain} placeholder="https://www.example.com" onChange={event => setPublicDomain(event.target.value)} /><span className="mt-1 block text-sm text-fg">Client emails use this for the Open the investor portal button. Use the public site, not the Vercel address.</span></label><DeskLoginSettings /><div className="mt-6 max-w-xl rounded-lg border border-danger/40 bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Clear database</h2><p className="mt-1 text-sm text-fg">Deletes applications, clients, leads, investments, invoices, active CDs, and notifications. Settings, rates, advisors, and the desk login stay.</p><button type="button" className="mt-3 min-h-11 rounded-md border border-danger px-4 py-2 text-sm font-semibold text-danger" onClick={() => {
           if (!window.confirm("Clear the database? Applications, clients, investments, invoices, active CDs, and notifications will be deleted. This cannot be undone.")) return;
           setError("");
           setNotice("");
           setPending(true);
           clearDatabase().then(() => setNotice("Database cleared. Settings and the desk login were kept.")).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The database could not be cleared.")).finally(() => setPending(false));
-        }}>{pending ? "Clearing…" : "Clear database"}</button></div></Fragment> : null}{section === "misc" ? <Fragment><p className="mt-2 text-fg">Mail delivery, the daily database backup, and site analytics.</p><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Database backup</h2><p className="mt-2 text-sm text-fg">The zip is sent only to the Telegram chat{backupSchedule ? " every day at 12:00 UTC on the published server" : ""}. It is not emailed. If it is too large for one message, it is sent in numbered parts. Restore the parts in order.{lastBackupAt ? ` Last backup: ${lastBackupAt.replace("T", " ").slice(0, 16)} UTC.` : " No backup has been sent yet."}</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={backupSchedule} onChange={event => {
+        }}>{pending ? "Clearing…" : "Clear database"}</button></div></Fragment> : null}{section === "misc" ? <Fragment><p className="mt-2 text-fg">Mail delivery, the daily database backup, and site analytics.</p><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Database backup</h2><p className="mt-2 text-sm text-fg">The zip is sent only to the Telegram chat{backupSchedule ? " every day at 12:00 UTC on the published server" : ""}. It is one file and it is not emailed.{lastBackupAt ? ` Last backup: ${lastBackupAt.replace("T", " ").slice(0, 16)} UTC.` : " No backup has been sent yet."}</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={backupSchedule} onChange={event => {
             const enabled = event.target.checked;
             setBackupSchedule(enabled);
             setDeskSwitch({
@@ -742,9 +751,31 @@ function SettingsPanel({
           runDatabaseBackup().then(async result => {
             setLastBackupAt(result.at);
             await brand.refresh();
-            setNotice(result.telegram === "sent" ? `Backup sent to Telegram${result.parts > 1 ? ` in ${result.parts} parts` : ""}.` : result.telegram === "failed" ? "Telegram did not accept the backup." : "Save the Telegram bot token and chat id before sending a backup.");
+            setNotice(result.telegram === "sent" ? "Backup sent to Telegram as one file." : result.telegram === "failed" ? "Telegram did not accept the backup." : "Save the Telegram bot token and chat id before sending a backup.");
           }).catch(() => setError("The backup could not be sent.")).finally(() => setBackupPending(false));
-        }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Backup only. Client mail goes through SMTP2GO first. Resend is used if SMTP2GO is not set or does not accept the message. Desk notices and database backups go to Telegram, not email. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+        }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button><label className="mt-4 block text-sm"><span className="font-semibold text-primary">Restore a backup</span><input type="file" accept=".zip,.sql,application/zip,text/plain" className={`${controlClass} mt-1`} disabled={restorePending} onChange={event => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            if (!window.confirm("Restore this backup? Current applications, leads, investments, and other saved rows are replaced. The desk login, API keys, and mailbox passwords already on this server stay.")) return;
+            setError("");
+            setNotice("");
+            setRestorePending(true);
+            const reader = new FileReader();
+            reader.onload = () => {
+              const encoded = String(reader.result || "").split(",")[1] || "";
+              restoreDatabaseBackup({
+                data: {
+                  file: encoded
+                }
+              }).then(result => setNotice(`Backup restored. ${result.statements} rows were loaded.`)).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The backup could not be restored.")).finally(() => setRestorePending(false));
+            };
+            reader.onerror = () => {
+              setRestorePending(false);
+              setError("The backup file could not be read.");
+            };
+            reader.readAsDataURL(file);
+          }} /></label>{restorePending ? <p className="mt-2 text-sm text-fg">Restoring the backup…</p> : null}</div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Backup only. Client mail goes through SMTP2GO first. Resend is used if SMTP2GO is not set or does not accept the message. Desk notices and database backups go to Telegram, not email. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setMailPending(true);
@@ -899,7 +930,7 @@ function SettingsPanel({
         setColorBackground(DEFAULT_THEME.colorBackground);
         setPageBackground(null);
         setWantImage(false);
-      }}>Reset appearance</button></Fragment> : null}{section === "logos" ? <Fragment><p className="mt-2 text-fg">These images replace the wordmark, browser icon, email header, footer, application cover, and shared-link image.</p><div className="mt-6 grid gap-4 sm:grid-cols-2"><ImageSetting label="Website logo" value={logo} onFile={file => void onFile(file, "logo")} onClear={() => setLogo(null)} /><ImageSetting label="Email header logo" hint="Shown in the email header from your public domain. Use a PNG or JPEG, and set the public domain in General." value={emailLogo} onFile={file => void onFile(file, "emailLogo")} onClear={() => setEmailLogo(null)} /><ImageSetting label="Footer logo" hint="Shown in the portal footer. The company name is used if this is empty." value={footerLogo} onFile={file => void onFile(file, "footerLogo")} onClear={() => setFooterLogo(null)} /><ImageSetting label="Favicon" value={favicon} onFile={file => void onFile(file, "favicon")} onClear={() => setFavicon(null)} /><ImageSetting label="App cover" hint="Shown on the application. Also used for the shared link if no banner is set." value={cover} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "cover")} onClear={() => setCover(null)} /><ImageSetting label="Social link banner" hint="Image shown when the site link is shared." value={socialBanner} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "socialBanner")} onClear={() => setSocialBanner(null)} /></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Footer text</span><textarea className={controlClass + " min-h-28"} value={footerText} placeholder="FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply." onChange={event => setFooterText(event.target.value)} /><span className="mt-1 block text-sm text-fg">Shown under the footer logo. Leave blank to use the standard note.</span></label></Fragment> : null}{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save"}</button></section>;
+      }}>Reset appearance</button></Fragment> : null}{section === "logos" ? <Fragment><p className="mt-2 text-fg">These images replace the wordmark, browser icon, email header, footer, PDF letterhead, application cover, and shared-link image.</p><div className="mt-6 grid gap-4 sm:grid-cols-2"><ImageSetting label="Website logo" value={logo} onFile={file => void onFile(file, "logo")} onClear={() => setLogo(null)} /><ImageSetting label="PDF logo" hint="Printed on invoices, receipts, and certificate PDFs. Use a PNG or JPEG. The company name is used if this is empty." value={pdfLogo} accept="image/png,image/jpeg" onFile={file => void onFile(file, "pdfLogo")} onClear={() => setPdfLogo(null)} /><ImageSetting label="Email header logo" hint="Shown in the email header from your public domain. Use a PNG or JPEG, and set the public domain in General." value={emailLogo} onFile={file => void onFile(file, "emailLogo")} onClear={() => setEmailLogo(null)} /><ImageSetting label="Footer logo" hint="Shown in the portal footer. The company name is used if this is empty." value={footerLogo} onFile={file => void onFile(file, "footerLogo")} onClear={() => setFooterLogo(null)} /><ImageSetting label="Favicon" value={favicon} onFile={file => void onFile(file, "favicon")} onClear={() => setFavicon(null)} /><ImageSetting label="App cover" hint="Shown on the application. Also used for the shared link if no banner is set." value={cover} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "cover")} onClear={() => setCover(null)} /><ImageSetting label="Social link banner" hint="Image shown when the site link is shared." value={socialBanner} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "socialBanner")} onClear={() => setSocialBanner(null)} /></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Footer text</span><textarea className={controlClass + " min-h-28"} value={footerText} placeholder="FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply." onChange={event => setFooterText(event.target.value)} /><span className="mt-1 block text-sm text-fg">Shown under the footer logo. Leave blank to use the standard note.</span></label></Fragment> : null}{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save"}</button></section>;
 }
 function ColorSetting({
   label,
@@ -1195,7 +1226,7 @@ function FundingRow({
     setAmount(row.amount);
     setOpenedOn(row.createdAt);
   }, [row]);
-  return <li className="rounded-md border border-border bg-surface p-4"><p className="font-semibold text-primary">{row.email} · {row.termLabel || row.name}</p><p className="mt-1 text-sm text-fg">{row.amount} · {row.createdAt}{row.status === "pending" ? " · Pending call/email" : " · Terms signed"}{row.contactBy === "email" ? " · Do not call. Use email." : ""}</p>{row.contactBy === "email" ? <p className="mt-1 text-sm font-semibold text-primary">Do not call. Use email.</p> : <p className="mt-1 text-sm text-fg">Call {row.contactPhone || "the number on the application"}</p>}<div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}{advisor.phone ? ` · ${advisor.phone}` : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Status</span><select className={`${controlClass} mt-1`} value={status} onChange={event => setStatus(event.target.value)}>{row.status === "instructions_sent" ? <option value="instructions_sent">Invoice created</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="pending">Pending call/email</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="approved_phone">Approved by phone</option> : null}<option value="cancelled">Cancelled</option></select></label></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><AdminField label="Amount" value={amount} onChange={setAmount} /><label className="block"><span className="mb-1.5 block text-sm font-medium">Date</span><input className={controlClass} type="date" value={openedOn} onChange={event => setOpenedOn(event.target.value)} /></label><AdminField label="Deposit code" value={depositCode} onChange={setDepositCode} /><AdminField label="Deposit number" value={depositNumber} onChange={setDepositNumber} /><AdminField label="Account number" value={accountNumber} onChange={setAccountNumber} /><AdminField label="Reference number" value={referenceNumber} onChange={setReferenceNumber} /></div><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary" onClick={() => onSave(row, status, advisorId, {
+  return <li className="rounded-md border border-border bg-surface p-4"><p className="font-semibold text-primary">{row.email} · {row.termLabel || row.name}</p><p className="mt-1 text-sm text-fg">{row.amount} · {row.createdAt}{row.status === "pending" ? " · Pending call/email" : " · Terms signed"}{row.contactBy === "email" ? " · Do not call. Use email." : ""}</p>{row.contactBy === "email" ? <p className="mt-1 text-sm font-semibold text-primary">Do not call. Use email.</p> : <p className="mt-1 text-sm text-fg">Call {row.contactPhone || "the number on the application"}</p>}<div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}{advisor.phone ? ` · ${advisor.phone}` : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Status</span><select className={`${controlClass} mt-1`} value={status} onChange={event => setStatus(event.target.value)}>{row.status === "instructions_sent" ? <option value="instructions_sent">Invoice created</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="pending">Pending call/email</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="approved_phone">Approved by phone</option> : null}<option value="cancelled">Cancelled</option></select></label></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><AdminField label="Amount" value={amount} onChange={setAmount} /><label className="block"><span className="mb-1.5 block text-sm font-medium">Date</span><input className={controlClass} type="date" value={openedOn} onChange={event => setOpenedOn(event.target.value)} /></label><AdminField label="Deposit code" value={depositCode} onChange={setDepositCode} /><AdminField label="Deposit number" value={depositNumber} onChange={setDepositNumber} /><AdminField label="Account number" value={accountNumber} onChange={setAccountNumber} /><AdminField label="Reference number" value={referenceNumber} onChange={setReferenceNumber} /></div><p className="mt-2 text-xs text-fg">Deposit code is CD- plus 4 letters and 4 digits. Deposit number is DN, the date, and 4 letters. Account number is 12 digits. Reference is W plus 4 letters and 3 digits.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary" onClick={() => onSave(row, status, advisorId, {
         depositCode,
         depositNumber,
         accountNumber,
