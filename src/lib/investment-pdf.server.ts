@@ -332,7 +332,7 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   cy -= 16;
   page.drawText("Attention", { x: railX + 14, y: cy, size: 8, font: bold, color: ink });
   cy -= 11;
-  for (const row of linesOf("Send US dollars only. Foreign currency is returned. Contact your adviser to pay in another currency.", font, 7, railW - 28)) {
+  for (const row of linesOf("Send US dollars only. Foreign currency is returned. Contact your advisor to pay in another currency.", font, 7, railW - 28)) {
     if (cy < 648) break;
     page.drawText(row, { x: railX + 14, y: cy, size: 7, font, color: muted });
     cy -= 9;

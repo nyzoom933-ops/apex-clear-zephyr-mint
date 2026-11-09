@@ -338,13 +338,10 @@ async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[], pictu
     if (prior[0]) return { sent: 0, note: "" };
   }
   const who = row.from_name?.trim() ? `${row.from_name.trim()} <${row.from_email}>` : row.from_email || "Unknown sender";
-  const preview = (row.body_text || "").trim();
-  const full = (row.body_raw || preview).trim();
-  const visible = [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`, "", preview.slice(0, 700) || "(no text)"].join("\n");
-  const expand = full && full !== preview.slice(0, 700).trim() ? full : "";
+  const visible = [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`].join("\n");
   const { sendTelegramNotice } = await import("@/lib/mail.server");
   try {
-    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, expand, pictures.get(row.id) || []);
+    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, "", pictures.get(row.id) || []);
     if (result.delivery !== "sent") {
       await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
       return { sent: 0, note: result.error || "Telegram did not accept the notice." };

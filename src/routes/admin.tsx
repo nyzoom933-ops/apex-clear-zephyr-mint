@@ -19,6 +19,9 @@ import {
   listCrmLeads,
   importPerfexLeads,
   listIntroOpens,
+  listTrashOpens,
+  trashIntroOpen,
+  removeIntroOpen,
   listInboxMessages,
   syncInboxNow,
   markInboxMessageRead,
@@ -2182,15 +2185,16 @@ function IntroOpensPanel({
   onApplication
 }) {
   const [rows, setRows] = useState(null);
+  const [view, setView] = useState("open");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
-  function load() {
-    return listIntroOpens().then(setRows);
+  function load(next = view) {
+    return (next === "trash" ? listTrashOpens() : listIntroOpens()).then(setRows);
   }
   useEffect(() => {
-    load().catch(() => setError("Opened introductions could not be loaded."));
-  }, []);
+    load(view).catch(() => setError(view === "trash" ? "Trash could not be loaded." : "Opened introductions could not be loaded."));
+  }, [view]);
   async function sync() {
     setPending(true);
     setError("");
@@ -2205,13 +2209,38 @@ function IntroOpensPanel({
       setPending(false);
     }
   }
+  async function trash(email) {
+    setError("");
+    setNotice("");
+    try {
+      await trashIntroOpen({ data: { email } });
+      await load();
+      setNotice("Moved to trash.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Could not move this open to trash.");
+    }
+  }
+  async function remove(email) {
+    setError("");
+    setNotice("");
+    try {
+      await removeIntroOpen({ data: { email } });
+      await load();
+      setNotice("Removed.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Could not remove this open.");
+    }
+  }
   return <section>
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-3xl font-semibold">Opens</h1>
-        <p className="mt-2 max-w-2xl text-fg">Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again.</p>
+        <h1 className="text-3xl font-semibold">{view === "trash" ? "Trash" : "Opens"}</h1>
+        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Deleted opens stay here until you remove them." : "Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again."}</p>
       </div>
-      <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button>
+      {view === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button> : null}
+    </div>
+    <div className="mt-4 flex flex-wrap gap-2">
+      {[["open", "Opens"], ["trash", "Trash"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (view === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setView(id)}>{label}</button>)}
     </div>
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
@@ -2227,7 +2256,7 @@ function IntroOpensPanel({
             </div>
             <p className="text-sm text-fg">{row.advisorName || "No advisor"}</p>
             <p className="text-sm whitespace-nowrap text-fg">{row.sentAt} UTC</p>
-            {linkExpired ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
+            {view === "open" && linkExpired ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
               id: row.leadId,
               name: row.name,
               email: row.email,
@@ -2241,7 +2270,7 @@ function IntroOpensPanel({
               notes: "",
               advisorId: row.advisorId,
               receivedAt: new Date().toISOString()
-            })}>Resend new link</button> : !row.applicationSent && !applied ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
+            })}>Resend new link</button> : view === "open" && !row.applicationSent && !applied ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
               id: row.leadId,
               name: row.name,
               email: row.email,
@@ -2256,6 +2285,7 @@ function IntroOpensPanel({
               advisorId: row.advisorId,
               receivedAt: new Date().toISOString()
             })}>Application email</button> : null}
+            {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void remove(row.email)}>Remove</button> : <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void trash(row.email)}>Delete</button>}
           </div>
           <div className="mt-3 border-t border-border pt-3">
             <PipelineSteps row={row} />
@@ -2263,7 +2293,7 @@ function IntroOpensPanel({
         </li>;
       })}
     </ul>
-    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">No rates introductions have been sent yet.</p> : null}
+    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">{view === "trash" ? "Trash is empty." : "No rates introductions have been sent yet."}</p> : null}
   </section>;
 }
 

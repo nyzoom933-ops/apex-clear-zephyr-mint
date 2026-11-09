@@ -1503,6 +1503,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const kind = data.kind === "promo" ? "promo" : "custom";
     const promoCode = kind === "promo" ? data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}` : data.copy?.promoCode || "";
     const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode, kind, advisor });
+    const link = inviteApplicationUrl(origin, token);
     const letter = applicationLetter({
       leadName: data.name,
       company: await readCompanyName(sql),
@@ -1514,7 +1515,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       logo: settings.find((row) => row.key === "email_logo")?.value || null,
       portalUrl: origin,
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
-      link: inviteApplicationUrl(origin, token),
+      link,
       variant: kind,
       copy: data.copy ? { ...data.copy, promoCode } : { subject: "", headline: "", hope: "", ready: "", instruction: "", codeNote: "", followUp: "", thanks: "", promoCode },
     });
@@ -1523,6 +1524,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       clientEmail: data.email,
       clientName: data.name,
       detail: letter.text,
+      adminDetail: [`${data.months}-month certificate`, promoCode ? `Promo code ${promoCode}` : "", "Application", link].filter(Boolean).join("\n"),
       extraHtml: letter.html,
       subject: letter.subject,
       replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
@@ -1819,8 +1821,53 @@ export type IntroOpen = {
 export const listIntroOpens = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
-  const sql = await getSql();
+  return readIntroOpens(await getSql(), false);
+});
+
+export const listTrashOpens = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  return readIntroOpens(await getSql(), true);
+});
+
+export const trashIntroOpen = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("That open has no email.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureOpenTrash(sql);
+    await sql`insert into open_trash (email) values (${data.email}) on conflict (email) do nothing`;
+    return { ok: true as const };
+  });
+
+export const removeIntroOpen = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("That open has no email.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureOpenTrash(sql);
+    await sql`delete from notifications where audience = 'client' and step = 'lead_intro' and lower(recipient) = ${data.email}`;
+    await sql`delete from open_trash where lower(email) = ${data.email}`;
+    return { ok: true as const };
+  });
+
+async function ensureOpenTrash(sql: Sql) {
+  await sql`create table if not exists open_trash (email text primary key, created_at timestamptz not null default now())`;
+}
+
+async function readIntroOpens(sql: Sql, trash: boolean) {
   await ensureCrmLeads(sql);
+  await ensureOpenTrash(sql);
   const rows = await sql<{
     lead_id: string;
     name: string;
@@ -1963,6 +2010,7 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
       where n.audience = 'client' and n.step = 'lead_intro' and n.delivery = 'sent'
+        and (${trash}::boolean = exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient)))
       order by lower(n.recipient), n.created_at desc
     ) opens
     order by sent_at desc
@@ -1992,7 +2040,7 @@ export const listIntroOpens = createServerFn({ method: "GET" }).handler(async ()
     paymentMailStatus: row.payment_mail_status || "",
     confirmationMailStatus: row.confirmation_mail_status || "",
   }));
-});
+}
 
 export const saveCrmLead = createServerFn({ method: "POST" })
   .validator((input: CrmLead) => {

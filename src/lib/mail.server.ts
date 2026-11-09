@@ -49,10 +49,11 @@ export async function notifyStep(
     portalUrl: origin,
     extraHtml: input.extraHtml,
   });
+  const deskDetail = input.adminDetail ?? (input.extraHtml ? "" : input.detail);
   const admin = renderStep(input.step, "admin", {
     name: input.clientName,
     email: input.clientEmail,
-    detail: input.adminDetail || input.detail,
+    detail: deskDetail,
     companyName,
     companyPhone,
     emailLogo,
