@@ -430,6 +430,12 @@ function assertPageBackground(value: string | null) {
   return assertShareImage(value);
 }
 
+function assertPdfLogo(value: string | null) {
+  if (!value) return null;
+  if (/^data:image\/svg\+xml/i.test(value) && value.length <= 500_000) return value;
+  return assertShareImage(value);
+}
+
 function assertShareImage(value: string | null) {
   if (!value) return null;
   if (!/^data:image\/(png|jpeg);base64,/.test(value) || value.length > 1_400_000) {
@@ -502,7 +508,7 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     if (row.key === "social_banner") brand.socialBanner = row.value;
     if (row.key === "email_logo") brand.emailLogo = row.value;
     if (row.key === "footer_logo") brand.footerLogo = row.value;
-    if (row.key === "pdf_logo" && /^data:image\/(png|jpeg);base64,/i.test(row.value)) brand.pdfLogo = row.value;
+    if (row.key === "pdf_logo" && (/^data:image\/(png|jpeg);base64,/i.test(row.value) || /^data:image\/svg\+xml/i.test(row.value))) brand.pdfLogo = row.value;
     if (row.key === "footer_text") brand.footerText = row.value;
     if (row.key === "company_address") brand.companyAddress = row.value;
     if (row.key === "backup_email") brand.backupEmail = row.value;
@@ -533,7 +539,7 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     socialBanner: assertShareImage(input.socialBanner),
     emailLogo: assertImage(input.emailLogo),
     footerLogo: assertImage(input.footerLogo),
-    pdfLogo: input.pdfLogo ? assertShareImage(input.pdfLogo) : null,
+    pdfLogo: input.pdfLogo ? assertPdfLogo(input.pdfLogo) : null,
     footerText: (input.footerText || "").slice(0, 800),
     companyAddress: (input.companyAddress || "").trim().slice(0, 400),
     backupEmail: cleanBackupEmail(input.backupEmail || ""),
@@ -1577,7 +1583,7 @@ export type LeadPage = {
   focus: CrmLead | null;
 };
 
-const LEAD_PAGE_SIZE = 50;
+const LEAD_PAGE_SIZE = 25;
 
 export const listCrmLeads = createServerFn({ method: "GET" })
   .validator((input: { page?: number; query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean; focusId?: string } | undefined) => {
@@ -2097,7 +2103,11 @@ export const importPerfexLeads = createServerFn({ method: "POST" }).handler(asyn
   const incoming = await readPerfexLeads(base, token);
   const existing = await sql<{ id: string; email: string; perfex_id: string }>`select id, lower(email) as email, coalesce(perfex_id, '') as perfex_id from crm_leads`;
   const byPerfex = new Map(existing.filter((row) => row.perfex_id).map((row) => [row.perfex_id, row.id]));
-  const byEmail = new Map(existing.filter((row) => row.email).map((row) => [row.email, row.id]));
+  const byEmail = new Map<string, { id: string; perfexId: string }>();
+  for (const row of existing) {
+    const email = leadEmail(row.email);
+    if (email && !byEmail.has(email)) byEmail.set(email, { id: row.id, perfexId: row.perfex_id });
+  }
   let created = 0;
   let skipped = 0;
   const updates: { perfexId: string; status: string; amount: string; term: string; objective: string }[] = [];
@@ -2107,6 +2117,13 @@ export const importPerfexLeads = createServerFn({ method: "POST" }).handler(asyn
       continue;
     }
     if (lead.email && byEmail.has(lead.email)) {
+      const found = byEmail.get(lead.email)!;
+      if (!found.perfexId) {
+        await sql`update crm_leads set perfex_id = ${lead.perfexId} where id = ${found.id} and perfex_id = ''`;
+        found.perfexId = lead.perfexId;
+        byPerfex.set(lead.perfexId, found.id);
+        updates.push({ perfexId: lead.perfexId, status: lead.status, amount: lead.amount, term: lead.term, objective: lead.objective });
+      }
       skipped += 1;
       continue;
     }
@@ -2116,7 +2133,7 @@ export const importPerfexLeads = createServerFn({ method: "POST" }).handler(asyn
       values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, '', ${lead.source}, ${lead.status}, ${lead.receivedAt}, ${lead.perfexId})
     `;
     byPerfex.set(lead.perfexId, id);
-    if (lead.email) byEmail.set(lead.email, id);
+    if (lead.email) byEmail.set(lead.email, { id, perfexId: lead.perfexId });
     created += 1;
   }
   await updatePerfexDetails(sql, updates);
@@ -2154,6 +2171,13 @@ function perfexRecords(payload: unknown) {
   return [];
 }
 
+function leadEmail(value: string) {
+  const text = value.trim().toLowerCase();
+  const wrapped = text.match(/<([^>]+)>/)?.[1] || text;
+  const email = wrapped.replace(/^mailto:/, "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+}
+
 function perfexText(row: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -2168,7 +2192,7 @@ function perfexLead(row: Record<string, unknown>) {
   const perfexId = perfexText(row, "id");
   const name = (perfexText(row, "name") || `${perfexText(row, "first_name")} ${perfexText(row, "last_name")}`.trim()).replace(/\s+/g, " ").slice(0, 120);
   if (!perfexId || name.length < 2) return null;
-  const email = perfexText(row, "email").toLowerCase();
+  const email = leadEmail(perfexText(row, "email"));
   const received = new Date(perfexText(row, "dateadded", "created_at", "date_added") || Date.now());
   const statusId = perfexText(row, "status");
   const statusName = PERFEX_STATUS_NAMES[statusId] || perfexText(row, "status_name", "statusname");
@@ -2179,7 +2203,7 @@ function perfexLead(row: Record<string, unknown>) {
   return {
     perfexId: perfexId.slice(0, 40),
     name,
-    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "",
+    email: leadEmail(email),
     phone: perfexText(row, "phonenumber", "phone").slice(0, 80),
     amount: amount.slice(0, 80),
     term: term.slice(0, 80),
@@ -2499,6 +2523,15 @@ export const markInboxMessageRead = createServerFn({ method: "POST" })
     const { markInboxRead } = await import("@/lib/inbox.server");
     await markInboxRead(await getSql(), data.id);
     return { ok: true as const };
+  });
+
+export const getInboxFiles = createServerFn({ method: "GET" })
+  .validator((input: { id: string }) => ({ id: (input.id || "").slice(0, 80) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { readInboxFiles } = await import("@/lib/inbox.server");
+    return { files: await readInboxFiles(await getSql(), data.id) };
   });
 
 export const previewAdvisorInboxMail = createServerFn({ method: "POST" })
@@ -3296,7 +3329,7 @@ async function readPdfBrand(sql: Sql) {
   `;
   const logo = rows.find((row) => row.key === "pdf_logo")?.value ?? "";
   return {
-    logo: /^data:image\/(png|jpeg);base64,/i.test(logo) ? logo : "",
+    logo: /^data:image\/(png|jpeg);base64,/i.test(logo) || /^data:image\/svg\+xml/i.test(logo) ? logo : "",
     companyAddress: rows.find((row) => row.key === "company_address")?.value?.trim() ?? "",
   };
 }

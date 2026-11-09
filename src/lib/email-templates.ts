@@ -297,13 +297,13 @@ function advisorSignature(advisor: MailAdvisor | undefined, company: string) {
   return { html, text };
 }
 
-export function advisorNoteLetter(input: { company: string; companyPhone?: string; logo?: string | null; advisor: MailAdvisor; greeting: string; message: string; quote?: string }) {
+export function advisorNoteLetter(input: { company: string; companyPhone?: string; logo?: string | null; advisor: MailAdvisor; greeting: string; message: string; quote?: string; pageUrl?: string; logoCid?: string }) {
   const sign = advisorSignature(input.advisor, input.company);
-  const message = escapeHtml(input.message).replace(/\n/g, "<br>");
+  const message = messageHtml(input.message);
   const quote = input.quote?.trim()
     ? `<tr><td style="padding:8px 36px 8px 36px;"><p style="margin:0; padding:12px 14px; border-left:3px solid #d6e4ef; color:#5a6a7a; font-family:Arial, Helvetica, sans-serif; font-size:13px; line-height:20px;">${escapeHtml(input.quote.trim()).replace(/\n/g, "<br>")}</p></td></tr>`
     : "";
-  const logo = emailLogoSrc(input.logo, undefined);
+  const logo = input.logoCid ? `cid:${input.logoCid}` : emailLogoSrc(input.logo, input.pageUrl);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(input.company)}" height="32" style="display:block;height:32px;width:auto;max-width:180px;border:0;">`
     : `<p style="margin:0; font-family:Arial, Helvetica, sans-serif; font-size:13px; letter-spacing:1px; color:#ffffff;">${escapeHtml(input.company.toUpperCase())}</p>`;
@@ -319,7 +319,7 @@ export function advisorNoteLetter(input: { company: string; companyPhone?: strin
         <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
         <tr><td style="padding:28px 36px 8px 36px;">
           <p style="margin:0; font-size:15px; line-height:23px;">${escapeHtml(input.greeting)}</p>
-          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${message}</p>
+          <div style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${message}</div>
         </td></tr>
         ${quote}
         <tr><td style="padding:18px 36px 8px 36px; font-size:15px; line-height:23px;">${sign.html}</td></tr>
@@ -334,6 +334,82 @@ export function advisorNoteLetter(input: { company: string; companyPhone?: strin
 </html>`;
   const text = [input.greeting, "", input.message, input.quote?.trim() ? `\n${input.quote.trim()}` : "", "", sign.text, phone ? `We're here to help. Call ${phone}.` : ""].filter(Boolean).join("\n");
   return { html, text };
+}
+
+function messageHtml(source: string) {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const blocks: string[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (!lines[index].trim()) {
+      index += 1;
+      continue;
+    }
+    if (tableAt(lines, index)) {
+      const rows: string[] = [];
+      while (index < lines.length && lines[index].includes("|")) {
+        rows.push(lines[index]);
+        index += 1;
+      }
+      blocks.push(mailTable(rows));
+      continue;
+    }
+    const bullet = /^[-*]\s+/.test(lines[index].trim());
+    const numbered = /^\d+\.\s+/.test(lines[index].trim());
+    if (bullet || numbered) {
+      const items: string[] = [];
+      const pattern = bullet ? /^[-*]\s+/ : /^\d+\.\s+/;
+      while (index < lines.length && pattern.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(pattern, ""));
+        index += 1;
+      }
+      const tag = bullet ? "ul" : "ol";
+      blocks.push(`<${tag} style="margin:0 0 14px 18px; padding:0; font-size:15px; line-height:23px;">${items.map((item) => `<li style="margin:0 0 4px 0;">${inlineMarkdown(item)}</li>`).join("")}</${tag}>`);
+      continue;
+    }
+    const paragraph: string[] = [];
+    while (index < lines.length && lines[index].trim() && !tableAt(lines, index) && !/^[-*]\s+/.test(lines[index].trim()) && !/^\d+\.\s+/.test(lines[index].trim())) {
+      paragraph.push(lines[index]);
+      index += 1;
+    }
+    blocks.push(`<p style="margin:0 0 14px 0; font-size:15px; line-height:23px;">${inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>")}</p>`);
+  }
+  return blocks.join("") || `<p style="margin:0; font-size:15px; line-height:23px;">&nbsp;</p>`;
+}
+
+function tableAt(lines: string[], index: number) {
+  return Boolean(lines[index]?.includes("|") && lines[index + 1] && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1]));
+}
+
+function mailTable(rows: string[]) {
+  const header = splitRow(rows[0]);
+  const align = splitRow(rows[1]).map((cell) => (cell.trim().endsWith(":") && cell.trim().startsWith(":") ? "center" : cell.trim().endsWith(":") ? "right" : "left"));
+  const body = rows.slice(2).map(splitRow);
+  const head = header
+    .map((cell, cellIndex) => `<td align="${align[cellIndex] || "left"}" style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">${inlineMarkdown(cell)}</td>`)
+    .join("");
+  const lines = body
+    .map((cells, rowIndex) => {
+      const background = rowIndex % 2 ? "#f7fbfe" : "#ffffff";
+      const rule = rowIndex === body.length - 1 ? "" : "border-bottom:1px solid #e7eef4;";
+      return `<tr>${cells
+        .map((cell, cellIndex) => `<td align="${align[cellIndex] || "left"}" style="padding:11px 14px; background:${background}; ${rule} font-size:14px; line-height:20px; color:#1a1a1a;">${inlineMarkdown(cell)}</td>`)
+        .join("")}</tr>`;
+    })
+    .join("");
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef; margin:0 0 14px 0;"><tr>${head}</tr>${lines}</table>`;
+}
+
+function splitRow(row: string) {
+  return row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function inlineMarkdown(value: string) {
+  let html = escapeHtml(value);
+  html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, '<a href="$2" style="color:#006fcf; text-decoration:underline;">$1</a>');
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:]|$)/g, "$1<em>$2</em>");
+  return html;
 }
 
 function companyHelp(phone?: string) {

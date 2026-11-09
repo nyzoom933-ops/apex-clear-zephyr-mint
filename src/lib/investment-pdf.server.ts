@@ -68,24 +68,23 @@ export async function buildConfirmationPdf(input: ConfirmationPdfInput) {
   }
 
   function banner() {
-    page.drawRectangle({ x: left, y: y - 34, width, height: 34, color: blue });
     const title = "CERTIFICATE OF DEPOSIT (CD) CLIENT CONFIRMATION PACKAGE";
     const issuer = input.issuer.toUpperCase();
     page.drawText(issuer, {
       x: left + (width - bold.widthOfTextAtSize(issuer, 9)) / 2,
-      y: y - 14,
+      y: y - 12,
       size: 9,
       font: bold,
-      color: rgb(1, 1, 1),
+      color: blue,
     });
     page.drawText(title, {
       x: left + (width - bold.widthOfTextAtSize(title, 8)) / 2,
-      y: y - 26,
+      y: y - 24,
       size: 8,
       font: bold,
-      color: rgb(1, 1, 1),
+      color: ink,
     });
-    y -= 48;
+    y -= 40;
   }
 
   function heading(value: string) {
@@ -120,18 +119,15 @@ export async function buildConfirmationPdf(input: ConfirmationPdfInput) {
 
   const brandName = pdfSafe(input.companyName || "Account Holding");
   const brand = brandName.toUpperCase();
-  const brandSub = "CERTIFICATE OF DEPOSIT";
   const mark = await embedMark(doc, input.logo);
   if (mark) {
     const box = markBox(mark, 180, 36);
-    page.drawImage(mark, { x: left + (width - box.width) / 2, y: y - box.height, width: box.width, height: box.height });
+    page.drawImage(mark, { x: left, y: y - box.height, width: box.width, height: box.height });
     y -= box.height + 10;
   } else {
     page.drawText(brand, { x: left + (width - bold.widthOfTextAtSize(brand, 16)) / 2, y, size: 16, font: bold, color: blue });
     y -= 16;
   }
-  page.drawText(brandSub, { x: left + (width - font.widthOfTextAtSize(brandSub, 10)) / 2, y, size: 10, font, color: blue });
-  y -= 16;
   banner();
 
   const boxTop = y;
@@ -320,8 +316,7 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   const railX = 386;
   const railW = 186;
 
-  page.drawRectangle({ x: left, y: 734, width: 332, height: 42, color: blue });
-  await paintBrandBar(doc, page, bold, white, left, bill.brand, input.logo);
+  const brandMark = await paintBrandBar(doc, page, bold, blue, left, bill.brand, input.logo);
 
   page.drawRectangle({ x: railX, y: 588, width: railW, height: 188, color: panel });
   let cy = 756;
@@ -348,14 +343,14 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
     page.drawText(row, { x: railX + 14, y: 612 - index * 9, size: 7, font, color: white });
   });
 
-  let y = 716;
-  page.drawText(fit(ascii(input.clientName).toUpperCase(), bold, 9, 320), { x: left, y, size: 9, font: bold, color: ink });
+  let y = brandMark.bottom - 18;
+  page.drawText(fit(ascii(input.clientName).toUpperCase(), bold, 9, 320), { x: brandMark.x, y, size: 9, font: bold, color: ink });
   y -= 13;
   for (const row of input.address.map((item) => ascii(item).toUpperCase()).filter(Boolean).slice(0, 4)) {
-    page.drawText(fit(row, font, 8, 320), { x: left, y, size: 8, font, color: muted });
+    page.drawText(fit(row, font, 8, 320), { x: brandMark.x, y, size: 8, font, color: muted });
     y -= 11;
   }
-  drawBarcode(page, left, y - 28, 220, 22, bill.accountNumber || bill.crn);
+  drawBarcode(page, brandMark.x, y - 28, 220, 22, bill.accountNumber || bill.crn);
 
   y = 560;
   page.drawText("Payment Invoice", { x: left, y, size: 22, font: bold, color: ink });
@@ -496,8 +491,7 @@ export async function buildReceiptPdf(input: ReceiptPdfInput) {
   const railX = 386;
   const railW = 186;
 
-  page.drawRectangle({ x: left, y: 734, width: 332, height: 42, color: blue });
-  await paintBrandBar(doc, page, bold, white, left, bill.brand, input.logo);
+  const brandMark = await paintBrandBar(doc, page, bold, blue, left, bill.brand, input.logo);
 
   page.drawRectangle({ x: railX, y: 588, width: railW, height: 188, color: panel });
   let cy = 756;
@@ -522,14 +516,14 @@ export async function buildReceiptPdf(input: ReceiptPdfInput) {
   page.drawText("Approved", { x: railX + 14, y: 624, size: 7.5, font: bold, color: white });
   page.drawText(fit(ascii(input.receivedOn) || "—", bold, 11, railW - 28), { x: railX + 14, y: 606, size: 11, font: bold, color: white });
 
-  let y = 716;
-  page.drawText(fit(ascii(input.clientName).toUpperCase(), bold, 9, 320), { x: left, y, size: 9, font: bold, color: ink });
+  let y = brandMark.bottom - 18;
+  page.drawText(fit(ascii(input.clientName).toUpperCase(), bold, 9, 320), { x: brandMark.x, y, size: 9, font: bold, color: ink });
   y -= 13;
   for (const row of input.address.map((item) => ascii(item).toUpperCase()).filter(Boolean).slice(0, 4)) {
-    page.drawText(fit(row, font, 8, 320), { x: left, y, size: 8, font, color: muted });
+    page.drawText(fit(row, font, 8, 320), { x: brandMark.x, y, size: 8, font, color: muted });
     y -= 11;
   }
-  drawBarcode(page, left, y - 28, 220, 22, bill.accountNumber || bill.crn);
+  drawBarcode(page, brandMark.x, y - 28, 220, 22, bill.accountNumber || bill.crn);
 
   y = 560;
   page.drawText("Payment receipt", { x: left, y, size: 22, font: bold, color: ink });
@@ -628,13 +622,38 @@ export async function buildReceiptPdf(input: ReceiptPdfInput) {
 }
 
 async function embedMark(doc: PDFDocument, logo?: string) {
-  const match = logo?.match(/^data:image\/(png|jpeg);base64,(.+)$/i);
-  if (!match?.[2]) return null;
+  const prepared = await logoBytes(logo);
+  if (!prepared) return null;
   try {
-    const bytes = Buffer.from(match[2], "base64");
-    return match[1].toLowerCase() === "png" ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+    return prepared.kind === "jpg" ? await doc.embedJpg(prepared.bytes) : await doc.embedPng(prepared.bytes);
   } catch {
     return null;
+  }
+}
+
+async function logoBytes(logo?: string): Promise<{ kind: "png" | "jpg"; bytes: Buffer } | null> {
+  const svg = decodeSvg(logo || "");
+  if (svg.includes("<svg")) {
+    const { Resvg } = await import("@resvg/resvg-js");
+    const png = new Resvg(svg, { fitTo: { mode: "width", value: 640 }, font: { loadSystemFonts: false } }).render().asPng();
+    return { kind: "png", bytes: Buffer.from(png) };
+  }
+  const match = logo?.match(/^data:image\/(png|jpeg);base64,([a-zA-Z0-9+/=\s]+)$/i);
+  if (!match?.[2]) return null;
+  return { kind: match[1].toLowerCase() === "png" ? "png" : "jpg", bytes: Buffer.from(match[2].replace(/\s/g, ""), "base64") };
+}
+
+function decodeSvg(logo: string) {
+  if (!/^data:image\/svg\+xml/i.test(logo)) return "";
+  const comma = logo.indexOf(",");
+  if (comma < 0) return "";
+  const meta = logo.slice(0, comma);
+  const body = logo.slice(comma + 1);
+  if (/;base64/i.test(meta)) return Buffer.from(body.replace(/\s/g, ""), "base64").toString("utf8");
+  try {
+    return decodeURIComponent(body);
+  } catch {
+    return body;
   }
 }
 
@@ -651,17 +670,16 @@ async function paintBrandBar(
   left: number,
   brand: string,
   logo?: string,
-) {
+): Promise<{ x: number; bottom: number }> {
   const image = await embedMark(doc, logo);
   if (!image) {
-    page.drawText(fit(ascii(brand), bold, 13, 300), { x: left + 16, y: 756, size: 13, font: bold, color: white });
-    page.drawText("CERTIFICATE OF DEPOSIT", { x: left + 16, y: 742, size: 8, font: bold, color: white });
-    return;
+    page.drawText(fit(ascii(brand), bold, 13, 300), { x: left, y: 756, size: 13, font: bold, color: white });
+    return { x: left, bottom: 748 };
   }
-  const box = markBox(image, 120, 26);
-  page.drawRectangle({ x: left + 8, y: 742, width: box.width + 8, height: 26, color: rgb(1, 1, 1) });
-  page.drawImage(image, { x: left + 12, y: 744, width: box.width, height: box.height });
-  page.drawText("CERTIFICATE OF DEPOSIT", { x: left + 24 + box.width, y: 750, size: 8, font: bold, color: white });
+  const box = markBox(image, 150, 32);
+  const y = 756 - box.height;
+  page.drawImage(image, { x: left, y, width: box.width, height: box.height });
+  return { x: left, bottom: y };
 }
 
 function paintAddress(

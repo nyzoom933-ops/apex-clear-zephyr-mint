@@ -3,7 +3,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import type { Sql } from "@/lib/db";
 import { advisorNoteLetter } from "@/lib/email-templates";
-import { sendFromMailbox } from "@/lib/mail.server";
+import { emailLogoFile, sendFromMailbox, type MailFile } from "@/lib/mail.server";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -59,6 +59,7 @@ export async function ensureInbox(sql: Sql) {
   await sql`alter table inbox_messages add column if not exists telegram_notified boolean not null default false`;
   await sql`alter table inbox_messages add column if not exists folder text not null default 'INBOX'`;
   await sql`alter table inbox_messages add column if not exists body_raw text not null default ''`;
+  await sql`alter table inbox_messages add column if not exists attachments jsonb not null default '[]'::jsonb`;
 }
 
 type MailboxRow = {
@@ -107,21 +108,36 @@ async function syncInboxesNow(sql: Sql) {
   return { added, checked: advisors.length, errors, notified, telegram, detail };
 }
 
+function failureKey(text: string) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
 async function reportInboxFailure(sql: Sql, text: string) {
-  const rows = await sql<{ value: string }>`select value from site_settings where key = 'inbox_sync_error'`;
-  if (rows[0]?.value === text) return;
+  const key = failureKey(text);
+  const rows = await sql<{ key: string; value: string }>`
+    select key, value from site_settings where key in ('inbox_sync_error', 'inbox_sync_notice_at')
+  `;
+  const previous = rows.find((row) => row.key === "inbox_sync_error")?.value ?? "";
+  const noticed = Date.parse(rows.find((row) => row.key === "inbox_sync_notice_at")?.value ?? "");
+  const same = previous === key;
+  const recent = Number.isFinite(noticed) && Date.now() - noticed < 6 * 60 * 60 * 1000;
   await sql`
-    insert into site_settings (key, value) values ('inbox_sync_error', ${text.slice(0, 500)})
+    insert into site_settings (key, value) values ('inbox_sync_error', ${key})
+    on conflict (key) do update set value = excluded.value
+  `;
+  if (same || recent) return;
+  await sql`
+    insert into site_settings (key, value) values ('inbox_sync_notice_at', ${new Date().toISOString()})
     on conflict (key) do update set value = excluded.value
   `;
   const { sendTelegramNotice } = await import("@/lib/mail.server");
-  await sendTelegramNotice(sql, "Inbox sync failed", text).catch(() => undefined);
+  await sendTelegramNotice(sql, "Inbox sync failed", key).catch(() => undefined);
 }
 
 async function openMailbox(advisor: MailboxRow) {
   const name = advisor.imap_host.trim().replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
   const port = Number(advisor.imap_port) || 993;
-  const secure = port === 993 ? true : advisor.imap_secure !== false;
+  const secure = port === 143 ? false : port === 993 ? true : advisor.imap_secure !== false;
   let address = name;
   try {
     address = (await lookup(name, { family: 4 })).address;
@@ -135,9 +151,9 @@ async function openMailbox(advisor: MailboxRow) {
     auth: { user: advisor.imap_user, pass: advisor.imap_password },
     tls: { rejectUnauthorized: false, servername: name },
     logger: false,
-    connectionTimeout: 20000,
-    greetingTimeout: 20000,
-    socketTimeout: 20000,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 45000,
     disableAutoIdle: true,
   });
   client.on("error", () => undefined);
@@ -159,14 +175,25 @@ async function openMailbox(advisor: MailboxRow) {
 }
 
 async function syncAdvisor(sql: Sql, advisor: MailboxRow) {
+  try {
+    return await readAdvisor(sql, advisor);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!/timed out|timeout|required time|Nothing answered|ECONNRESET|socket|closed/i.test(message)) throw error;
+    return readAdvisor(sql, advisor);
+  }
+}
+
+async function readAdvisor(sql: Sql, advisor: MailboxRow) {
   const client = await openMailbox(advisor);
   let added = 0;
   const fresh: string[] = [];
+  const pictures = new Map<string, MailFile[]>();
   const notes: string[] = [];
   try {
     for (const folder of ["INBOX", "INBOX.Junk", "INBOX.spam", "Junk", "Spam"]) {
       try {
-        const result = await readFolder(sql, client, advisor, folder, fresh);
+        const result = await readFolder(sql, client, advisor, folder, fresh, pictures);
         added += result.added;
         if (result.detail) notes.push(result.detail);
       } catch (error) {
@@ -176,11 +203,11 @@ async function syncAdvisor(sql: Sql, advisor: MailboxRow) {
   } finally {
     await client.logout().catch(() => undefined);
   }
-  const notice = await notifyInbox(sql, advisor, fresh);
+  const notice = await notifyInbox(sql, advisor, fresh, pictures);
   return { added, notified: notice.sent, telegram: notice.note, detail: notes.join(" · ") };
 }
 
-async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folder: string, fresh: string[]) {
+async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folder: string, fresh: string[], pictures: Map<string, MailFile[]>) {
   let lock: { release: () => void };
   try {
     lock = await client.getMailboxLock(folder);
@@ -222,9 +249,11 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
         if (duplicate[0]) continue;
       }
       const id = crypto.randomUUID();
+      const images = emailFiles(parsed.attachments);
+      const stored = JSON.stringify(images.map((file) => ({ filename: file.filename, contentType: file.contentType, content: file.content })));
       await sql`
         insert into inbox_messages (
-          id, advisor_id, direction, uid, message_id, from_name, from_email, to_name, to_email, subject, body_text, body_raw, lead_id, received_at, seen, folder
+          id, advisor_id, direction, uid, message_id, from_name, from_email, to_name, to_email, subject, body_text, body_raw, lead_id, received_at, seen, folder, attachments
         ) values (
           ${id},
           ${advisor.id},
@@ -241,10 +270,12 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
           ${lead[0]?.id || ""},
           ${receivedAt.toISOString()},
           false,
-          ${folder}
+          ${folder},
+          ${stored}::jsonb
         )
       `;
       fresh.push(id);
+      if (images.length) pictures.set(id, images);
       added += 1;
     }
   } finally {
@@ -253,9 +284,33 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
   return { added, detail: latest ? `${folder}: latest “${latest}”` : "" };
 }
 
+function emailFiles(attachments: Array<{ filename?: string; contentType?: string; content?: Buffer; size?: number }> | undefined): Array<MailFile & { contentType: string }> {
+  const files: Array<MailFile & { contentType: string }> = [];
+  for (const attachment of attachments || []) {
+    const type = (attachment.contentType || "application/octet-stream").toLowerCase();
+    if (type.startsWith("multipart/") || type === "text/html" || type === "text/plain" || /pkcs7|pgp-signature/.test(type)) continue;
+    const bytes = attachment.content;
+    const size = bytes?.length || attachment.size || 0;
+    if (!bytes || size < 1 || size > 20_000_000) continue;
+    const name = (attachment.filename || "").trim();
+    const image = type.startsWith("image/") && !type.includes("svg");
+    if (image) {
+      if (size < 1024) continue;
+      if (size < 8192 && (!name || /pixel|spacer|logo|icon|signature|blank|track/i.test(name))) continue;
+    } else if (!name || size < 32) {
+      continue;
+    }
+    const extension = image ? (type.includes("png") ? "png" : type.includes("webp") ? "webp" : type.includes("gif") ? "gif" : "jpg") : "bin";
+    const filename = (name || `image-${files.length + 1}.${extension}`).replace(/[^\w.\-]+/g, "-").slice(0, 80);
+    files.push({ filename, contentType: type, content: Buffer.from(bytes).toString("base64") });
+    if (files.length >= 8) break;
+  }
+  return files;
+}
+
 let inboxQueue: Promise<void> = Promise.resolve();
 
-async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[]) {
+async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[], pictures: Map<string, MailFile[]>) {
   const ids = [...new Set(fresh.filter(Boolean))];
   let row: { id: string; from_name: string; from_email: string; subject: string; body_text: string; body_raw: string; received_at: string; message_id: string } | undefined;
   for (const id of ids) {
@@ -289,7 +344,7 @@ async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[]) {
   const expand = full && full !== preview.slice(0, 700).trim() ? full : "";
   const { sendTelegramNotice } = await import("@/lib/mail.server");
   try {
-    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, expand);
+    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, expand, pictures.get(row.id) || []);
     if (result.delivery !== "sent") {
       await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
       return { sent: 0, note: result.error || "Telegram did not accept the notice." };
@@ -321,12 +376,17 @@ export async function listInbox(sql: Sql, advisorId: string) {
         lead_name: string;
         received_at: string;
         seen: boolean;
+        files: unknown;
       }>`
         select m.id, m.advisor_id, coalesce(a.name, '') as advisor_name, m.direction,
           m.from_name, m.from_email, m.to_name, m.to_email, m.subject, m.body_text, m.lead_id,
           coalesce(l.name, '') as lead_name,
           to_char(m.received_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as received_at,
-          m.seen
+          m.seen,
+          (
+            select coalesce(jsonb_agg(jsonb_build_object('filename', item->>'filename', 'contentType', item->>'contentType')), '[]'::jsonb)
+            from jsonb_array_elements(coalesce(m.attachments, '[]'::jsonb)) item
+          ) as files
         from inbox_messages m
         left join advisors a on a.id = m.advisor_id
         left join crm_leads l on l.id = m.lead_id
@@ -349,12 +409,17 @@ export async function listInbox(sql: Sql, advisorId: string) {
         lead_name: string;
         received_at: string;
         seen: boolean;
+        files: unknown;
       }>`
         select m.id, m.advisor_id, coalesce(a.name, '') as advisor_name, m.direction,
           m.from_name, m.from_email, m.to_name, m.to_email, m.subject, m.body_text, m.lead_id,
           coalesce(l.name, '') as lead_name,
           to_char(m.received_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as received_at,
-          m.seen
+          m.seen,
+          (
+            select coalesce(jsonb_agg(jsonb_build_object('filename', item->>'filename', 'contentType', item->>'contentType')), '[]'::jsonb)
+            from jsonb_array_elements(coalesce(m.attachments, '[]'::jsonb)) item
+          ) as files
         from inbox_messages m
         left join advisors a on a.id = m.advisor_id
         left join crm_leads l on l.id = m.lead_id
@@ -376,7 +441,38 @@ export async function listInbox(sql: Sql, advisorId: string) {
     leadName: row.lead_name,
     receivedAt: row.received_at,
     seen: row.seen,
+    files: fileMeta(row.files),
   }));
+}
+
+function fileMeta(value: unknown) {
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = [];
+    }
+  }
+  const rows = Array.isArray(parsed) ? parsed : [];
+  return rows.flatMap((item) => {
+    const file = item as { filename?: string; contentType?: string };
+    const filename = (file.filename || "").trim();
+    if (!filename) return [];
+    return [{ filename, contentType: file.contentType || "application/octet-stream" }];
+  });
+}
+
+export async function readInboxFiles(sql: Sql, id: string) {
+  await ensureInbox(sql);
+  const rows = await sql<{ attachments: unknown }>`select attachments from inbox_messages where id = ${id} limit 1`;
+  const value = rows[0]?.attachments;
+  const stored = Array.isArray(value) ? value : typeof value === "string" ? (JSON.parse(value) as unknown[]) : [];
+  return stored.flatMap((item) => {
+    const file = item as { filename?: string; contentType?: string; content?: string };
+    if (!file.content) return [];
+    return [{ filename: file.filename || "file", contentType: file.contentType || "application/octet-stream", content: file.content }];
+  });
 }
 
 export async function markInboxRead(sql: Sql, id: string) {
@@ -393,16 +489,18 @@ export async function previewInboxLetter(
   `;
   const advisor = advisors[0];
   if (!advisor) throw new Error("Select an advisor.");
-  const companyRows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo')`;
+  const companyRows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo', 'public_domain')`;
   const company = companyRows.find((row) => row.key === "company_name")?.value?.trim() || "Account Holding";
   const companyPhone = companyRows.find((row) => row.key === "company_phone")?.value?.trim() || "";
   const logo = companyRows.find((row) => row.key === "email_logo")?.value || null;
+  const pageUrl = companyRows.find((row) => row.key === "public_domain")?.value || "";
   const toName = (input.toName || "").trim();
   const toEmail = (input.toEmail || "").trim();
   const letter = advisorNoteLetter({
     company,
     companyPhone,
     logo,
+    pageUrl,
     advisor: { name: advisor.name, phone: advisor.phone, email: advisor.email, mailbox: advisor.mailbox, role: advisor.role, personalPhone: advisor.personal_phone },
     greeting: toName ? `Dear ${toName},` : "Hello,",
     message: (input.message || "").trim() || " ",
@@ -431,14 +529,18 @@ export async function sendInboxMail(
   const subject = input.subject.trim().slice(0, 300);
   const message = input.message.trim().slice(0, 8000);
   if (!subject || !message) throw new Error("Add a subject and a message.");
-  const companyRows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo')`;
+  const companyRows = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo', 'public_domain')`;
   const company = companyRows.find((row) => row.key === "company_name")?.value?.trim() || "Account Holding";
   const companyPhone = companyRows.find((row) => row.key === "company_phone")?.value?.trim() || "";
   const logo = companyRows.find((row) => row.key === "email_logo")?.value || null;
+  const pageUrl = companyRows.find((row) => row.key === "public_domain")?.value || "";
+  const logoFile = emailLogoFile(logo);
   const letter = advisorNoteLetter({
     company,
     companyPhone,
     logo,
+    pageUrl,
+    logoCid: logoFile?.filename || "",
     advisor: { name: advisor.name, phone: advisor.phone, email: advisor.email, mailbox: advisor.mailbox, role: advisor.role, personalPhone: advisor.personal_phone },
     greeting: input.toName.trim() ? `Dear ${input.toName.trim()},` : "Hello,",
     message,
@@ -452,6 +554,7 @@ export async function sendInboxMail(
     fromAddress: advisor.mailbox,
     replyTo,
     replyName: advisor.name,
+    attachments: logoFile ? [logoFile] : [],
   });
   if (sent.delivery !== "sent") throw new Error(sent.error || "The message was not accepted. Check the advisor mailbox in SMTP2GO.");
   await ensureInbox(sql);

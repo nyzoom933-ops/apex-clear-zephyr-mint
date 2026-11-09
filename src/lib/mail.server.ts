@@ -199,8 +199,8 @@ async function deliverTelegram(sql: Sql, subject: string, text: string, attachme
   return { delivery: sent.ok ? "sent" : "failed", messageId: sent.id, provider: "telegram", error: sent.error || "" };
 }
 
-export async function sendTelegramNotice(sql: Sql, subject: string, text: string, expand = "") {
-  const sent = await deliverTelegram(sql, subject, text, [], expand);
+export async function sendTelegramNotice(sql: Sql, subject: string, text: string, expand = "", files: MailFile[] = []) {
+  const sent = await deliverTelegram(sql, subject, text, files, expand);
   return { delivery: sent.delivery, error: sent.error };
 }
 
@@ -262,21 +262,30 @@ async function postTelegram(token: string, chatId: string, subject: string, text
     if (payload.result?.message_id) id = String(payload.result.message_id);
   }
   for (const file of attachments) {
-    const form = new FormData();
-    form.set("chat_id", chatId);
-    form.set("caption", file.filename.slice(0, 200));
     const bytes = Buffer.from(file.content, "base64");
-    form.set("document", new Blob([new Uint8Array(bytes)]), file.filename || "attachment");
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
-      method: "POST",
-      signal: AbortSignal.timeout(20000),
-      body: form,
-    });
-    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
-    if (!response.ok || !payload.ok) return { ok: false, id, error: payload.description || "Telegram rejected an attachment." };
-    if (payload.result?.message_id) id = String(payload.result.message_id);
+    const photo = /\.(jpe?g|png|webp|gif)$/i.test(file.filename);
+    const sent = photo
+      ? await postTelegramFile(token, chatId, "sendPhoto", "photo", file.filename, bytes)
+      : await postTelegramFile(token, chatId, "sendDocument", "document", file.filename, bytes);
+    const delivered = sent.ok || !photo ? sent : await postTelegramFile(token, chatId, "sendDocument", "document", file.filename, bytes);
+    if (!delivered.ok) return { ok: false, id, error: delivered.error || "Telegram rejected an attachment." };
+    if (delivered.id) id = delivered.id;
   }
   return { ok: true, id, error: "" };
+}
+
+async function postTelegramFile(token: string, chatId: string, method: "sendPhoto" | "sendDocument", field: "photo" | "document", filename: string, bytes: Buffer) {
+  const form = new FormData();
+  form.set("chat_id", chatId);
+  form.set(field, new Blob([new Uint8Array(bytes)]), filename || "image.jpg");
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    signal: AbortSignal.timeout(20000),
+    body: form,
+  });
+  const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };
+  if (!response.ok || !payload.ok) return { ok: false, id: "", error: payload.description || "Telegram rejected an attachment." };
+  return { ok: true, id: payload.result?.message_id ? String(payload.result.message_id) : "", error: "" };
 }
 
 function telegramHtml(subject: string, text: string, expand: string) {
@@ -329,7 +338,7 @@ export function cleanMailFrom(value: string) {
   return from;
 }
 
-export type MailFile = { filename: string; content: string };
+export type MailFile = { filename: string; content: string; contentType?: string; contentId?: string };
 
 function senderAddress(from: string, name: string) {
   const email = from.match(/<([^>]+)>/)?.[1] ?? from;
@@ -381,7 +390,7 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
         html_body: html,
         text_body: text,
         ...(replyTo ? { custom_headers: [{ header: "Reply-To", value: replyTo }] } : {}),
-        ...(attachments.length ? { attachments: attachments.map((file) => ({ filename: file.filename, fileblob: file.content, mimetype: "application/octet-stream" })) } : {}),
+        ...smtpFiles(attachments),
       }),
     });
     const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number; error?: string; error_code?: string } };
@@ -396,10 +405,29 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
 
 export async function sendFromMailbox(
   sql: Sql,
-  input: { to: string; subject: string; text: string; html: string; fromAddress: string; replyTo: string; replyName: string },
+  input: { to: string; subject: string; text: string; html: string; fromAddress: string; replyTo: string; replyName: string; attachments?: MailFile[] },
 ) {
   const mail = await readMailConfig(sql);
-  return deliverSmtp2go(input.to, input.subject, input.text, input.html, mail.smtpKey, input.fromAddress, input.replyTo, input.replyName, []);
+  return deliverSmtp2go(input.to, input.subject, input.text, input.html, mail.smtpKey, input.fromAddress, input.replyTo, input.replyName, input.attachments || []);
+}
+
+export function emailLogoFile(logo: string | null | undefined): MailFile | null {
+  const match = logo?.trim().match(/^data:(image\/(?:png|jpeg|gif|webp));base64,([a-zA-Z0-9+/=\s]+)$/i);
+  if (!match?.[2]) return null;
+  const type = match[1].toLowerCase();
+  const extension = type.includes("png") ? "png" : type.includes("gif") ? "gif" : type.includes("webp") ? "webp" : "jpg";
+  const filename = `logo.${extension}`;
+  return { filename, content: match[2].replace(/\s/g, ""), contentType: type, contentId: filename };
+}
+
+function smtpFiles(files: MailFile[]) {
+  const inline = files.filter((file) => file.contentId);
+  const attached = files.filter((file) => !file.contentId);
+  const shape = (file: MailFile) => ({ filename: file.filename, fileblob: file.content, mimetype: file.contentType || "application/octet-stream" });
+  return {
+    ...(attached.length ? { attachments: attached.map(shape) } : {}),
+    ...(inline.length ? { inlines: inline.map(shape) } : {}),
+  };
 }
 
 const STATUS_RANK: Record<string, number> = {

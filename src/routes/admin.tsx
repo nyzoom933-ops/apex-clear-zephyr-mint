@@ -17,10 +17,12 @@ import {
   listAdvisors,
   listApplications,
   listCrmLeads,
+  importPerfexLeads,
   listIntroOpens,
   listInboxMessages,
   syncInboxNow,
   markInboxMessageRead,
+  getInboxFiles,
   previewAdvisorInboxMail,
   sendAdvisorInboxMail,
   listFundings,
@@ -671,8 +673,9 @@ function SettingsPanel({
     }
     const share = kind === "cover" || kind === "socialBanner" || kind === "pageBackground";
     const pdf = kind === "pdfLogo";
-    if ((share || pdf) && file.type !== "image/png" && file.type !== "image/jpeg") {
-      setError(pdf ? "Use a PNG or JPEG for the PDF logo." : "Use a JPEG or PNG for the cover, social banner, and background.");
+    const svg = pdf && (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg"));
+    if (!svg && (share || pdf) && file.type !== "image/png" && file.type !== "image/jpeg") {
+      setError(pdf ? "Use an SVG, PNG, or JPEG for the PDF logo." : "Use a JPEG or PNG for the cover, social banner, and background.");
       return;
     }
     if (file.size > (share || pdf ? 1e6 : 4e5)) {
@@ -930,7 +933,7 @@ function SettingsPanel({
         setColorBackground(DEFAULT_THEME.colorBackground);
         setPageBackground(null);
         setWantImage(false);
-      }}>Reset appearance</button></Fragment> : null}{section === "logos" ? <Fragment><p className="mt-2 text-fg">These images replace the wordmark, browser icon, email header, footer, PDF letterhead, application cover, and shared-link image.</p><div className="mt-6 grid gap-4 sm:grid-cols-2"><ImageSetting label="Website logo" value={logo} onFile={file => void onFile(file, "logo")} onClear={() => setLogo(null)} /><ImageSetting label="PDF logo" hint="Printed on invoices, receipts, and certificate PDFs. Use a PNG or JPEG. The company name is used if this is empty." value={pdfLogo} accept="image/png,image/jpeg" onFile={file => void onFile(file, "pdfLogo")} onClear={() => setPdfLogo(null)} /><ImageSetting label="Email header logo" hint="Shown in the email header from your public domain. Use a PNG or JPEG, and set the public domain in General." value={emailLogo} onFile={file => void onFile(file, "emailLogo")} onClear={() => setEmailLogo(null)} /><ImageSetting label="Footer logo" hint="Shown in the portal footer. The company name is used if this is empty." value={footerLogo} onFile={file => void onFile(file, "footerLogo")} onClear={() => setFooterLogo(null)} /><ImageSetting label="Favicon" value={favicon} onFile={file => void onFile(file, "favicon")} onClear={() => setFavicon(null)} /><ImageSetting label="App cover" hint="Shown on the application. Also used for the shared link if no banner is set." value={cover} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "cover")} onClear={() => setCover(null)} /><ImageSetting label="Social link banner" hint="Image shown when the site link is shared." value={socialBanner} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "socialBanner")} onClear={() => setSocialBanner(null)} /></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Footer text</span><textarea className={controlClass + " min-h-28"} value={footerText} placeholder="FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply." onChange={event => setFooterText(event.target.value)} /><span className="mt-1 block text-sm text-fg">Shown under the footer logo. Leave blank to use the standard note.</span></label></Fragment> : null}{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save"}</button></section>;
+      }}>Reset appearance</button></Fragment> : null}{section === "logos" ? <Fragment><p className="mt-2 text-fg">These images replace the wordmark, browser icon, email header, footer, PDF letterhead, application cover, and shared-link image.</p><div className="mt-6 grid gap-4 sm:grid-cols-2"><ImageSetting label="Website logo" value={logo} onFile={file => void onFile(file, "logo")} onClear={() => setLogo(null)} /><ImageSetting label="PDF logo" hint="Printed on invoices, receipts, and certificate PDFs. Use an SVG so the background stays transparent." value={pdfLogo} accept="image/svg+xml,image/png,image/jpeg" onFile={file => void onFile(file, "pdfLogo")} onClear={() => setPdfLogo(null)} /><ImageSetting label="Email header logo" hint="Shown in the email header from your public domain. Use a PNG or JPEG, and set the public domain in General." value={emailLogo} onFile={file => void onFile(file, "emailLogo")} onClear={() => setEmailLogo(null)} /><ImageSetting label="Footer logo" hint="Shown in the portal footer. The company name is used if this is empty." value={footerLogo} onFile={file => void onFile(file, "footerLogo")} onClear={() => setFooterLogo(null)} /><ImageSetting label="Favicon" value={favicon} onFile={file => void onFile(file, "favicon")} onClear={() => setFavicon(null)} /><ImageSetting label="App cover" hint="Shown on the application. Also used for the shared link if no banner is set." value={cover} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "cover")} onClear={() => setCover(null)} /><ImageSetting label="Social link banner" hint="Image shown when the site link is shared." value={socialBanner} wide={true} accept="image/png,image/jpeg" onFile={file => void onFile(file, "socialBanner")} onClear={() => setSocialBanner(null)} /></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Footer text</span><textarea className={controlClass + " min-h-28"} value={footerText} placeholder="FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply." onChange={event => setFooterText(event.target.value)} /><span className="mt-1 block text-sm text-fg">Shown under the footer logo. Leave blank to use the standard note.</span></label></Fragment> : null}{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary hover:bg-action-deep disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save"}</button></section>;
 }
 function ColorSetting({
   label,
@@ -1808,6 +1811,7 @@ function PipelineLeadsPanel() {
   const [to, setTo] = useState("");
   const [withEmail, setWithEmail] = useState(false);
   const [pageNumber, setPageNumber] = useState(1);
+  const [syncing, setSyncing] = useState(false);
 
   function load(nextPage = pageNumber) {
     return listCrmLeads({ data: { page: nextPage, query, source, status, advisorId, from, to, withEmail } }).then((result) => {
@@ -1853,10 +1857,30 @@ function PipelineLeadsPanel() {
     }
   }
 
+  async function syncLeads() {
+    setSyncing(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await importPerfexLeads();
+      await load(1);
+      setNotice(`Sync finished. ${result.created} new, ${result.updated} updated, ${result.skipped} already here with the same email.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Leads could not be synced.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const rows = page?.rows ?? [];
   return <section>
-    <h1 className="text-3xl font-semibold">Leads</h1>
-    <p className="mt-2 max-w-2xl text-fg">Search the pipeline, then filter by source, status, advisor, or when the lead arrived.</p>
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 className="text-3xl font-semibold">Leads</h1>
+        <p className="mt-2 max-w-2xl text-fg">Search the pipeline, then filter by source, status, advisor, or when the lead arrived.</p>
+      </div>
+      <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={syncing} onClick={() => void syncLeads()}>{syncing ? "Syncing…" : "Sync leads"}</button>
+    </div>
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
     <div className="mt-4 grid gap-3 lg:grid-cols-4">
@@ -2243,6 +2267,16 @@ function IntroOpensPanel({
   </section>;
 }
 
+function downloadInboxFile(file) {
+  const bytes = Uint8Array.from(atob(file.content), char => char.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: file.contentType || "application/octet-stream" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.filename || "attachment";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function InboxPanel() {
   const brand = useBrand();
   const [rows, setRows] = useState(null);
@@ -2267,12 +2301,14 @@ function InboxPanel() {
   const [composePreview, setComposePreview] = useState(null);
   const [replyError, setReplyError] = useState("");
   const [sending, setSending] = useState(false);
+  const [messageFiles, setMessageFiles] = useState([]);
   const replyAdvisor = selected ? advisors.find(item => item.id === selected.advisorId) || advisors.find(item => item.name === selected.advisorName) : null;
   const replySubject = selected ? /^re:/i.test(selected.subject) ? selected.subject : `Re: ${selected.subject}` : "";
   const replyLetter = selected && selected.direction === "in" ? advisorNoteLetter({
     company: brand.companyName,
     companyPhone: brand.companyPhone,
     logo: brand.emailLogo,
+    pageUrl: brand.publicDomain,
     advisor: {
       name: replyAdvisor?.name || selected.advisorName || brand.companyName,
       phone: replyAdvisor?.phone || "",
@@ -2358,6 +2394,10 @@ function InboxPanel() {
     setSelectedId(row.id);
     setReplyOpen(row.direction === "in");
     setReplyBody("");
+    setMessageFiles([]);
+    if (row.files?.length) {
+      getInboxFiles({ data: { id: row.id } }).then(result => setMessageFiles(result.files || [])).catch(() => setMessageFiles([]));
+    }
     if (!row.seen && row.direction === "in") {
       await markInboxMessageRead({
         data: {
@@ -2474,7 +2514,7 @@ function InboxPanel() {
       <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-28`} value={compose.message} onChange={event => setCompose({
           ...compose,
           message: event.target.value
-        })} required={true} /></label>
+        })} required={true} /><span className="mt-1 block text-sm text-fg">Markdown works here. A table uses the same navy header as the rate charts.</span></label>
       {composePreview ? <LetterPreview html={composePreview.html} title={composePreview.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{composePreview.from}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{composePreview.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{composePreview.subject}</p></div>} /> : null}
       <button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>Send email</button>
     </form>
@@ -2490,14 +2530,15 @@ function InboxPanel() {
           return <li key={row.id} className="border-b border-border last:border-b-0">
             <button type="button" className={"grid w-full grid-cols-1 items-center gap-1 px-4 py-3 text-left sm:grid-cols-[minmax(180px,240px)_minmax(0,1fr)_148px] sm:gap-4 " + (open ? "bg-[#f4f8fc]" : "hover:bg-[#f7f7f7]")} onClick={() => void openMessage(row)}>
               <span className="flex min-w-0 items-center gap-2"><span className={"size-2 shrink-0 rounded-full " + (row.direction === "in" && !row.seen ? "bg-[#b42318]" : "bg-transparent")} aria-hidden="true" /><span className="truncate text-sm font-semibold text-primary">{row.direction === "out" ? `To ${row.toName || row.toEmail}` : row.fromName || row.fromEmail}</span></span>
-              <span className="truncate text-sm text-fg">{row.subject || "(no subject)"}</span>
+              <span className="truncate text-sm text-fg">{row.subject || "(no subject)"}{row.files?.length ? ` · ${row.files.length} file${row.files.length === 1 ? "" : "s"}` : ""}</span>
               <span className="text-xs text-fg sm:text-right">{row.receivedAt} UTC</span>
             </button>
             {open ? <div className="border-t border-border px-4 py-4">
               <p className="text-xs font-semibold tracking-wide text-primary uppercase">{row.direction === "out" ? "Sent" : "Received"} · {row.advisorName}{row.leadName ? ` · ${row.leadName}` : ""}</p>
               <p className="mt-3 whitespace-pre-wrap text-sm text-fg">{row.body || "This message has no text."}</p>
+              {messageFiles.length ? <div className="mt-4 grid gap-3">{messageFiles.map(file => file.contentType.startsWith("image/") ? <img key={file.filename + file.content.slice(0, 24)} src={`data:${file.contentType};base64,${file.content}`} alt={file.filename} className="max-h-80 max-w-full rounded-md border border-border bg-white object-contain" /> : <button key={file.filename} type="button" className="min-h-11 w-fit rounded-md border border-border px-3 py-2 text-left text-sm font-semibold text-primary" onClick={() => downloadInboxFile(file)}>{file.filename}</button>)}</div> : row.files?.length ? <p className="mt-3 text-sm text-fg">Loading attachments…</p> : null}
               {row.direction === "in" ? <form className="mt-4 grid gap-3 border-t border-border pt-4" onSubmit={event => void sendReply(event)}>
-                <label className="block text-sm"><span className="font-semibold text-primary">Reply</span><textarea className={`${controlClass} mt-1 min-h-28`} value={replyBody} onChange={event => setReplyBody(event.target.value)} placeholder="Write the reply. The original email is not included." required={true} /></label>
+                <label className="block text-sm"><span className="font-semibold text-primary">Reply</span><textarea className={`${controlClass} mt-1 min-h-28`} value={replyBody} onChange={event => setReplyBody(event.target.value)} placeholder={"Write the reply. The original email is not included.\n\n| Amount | APY |\n| --- | ---: |\n| $100,000 | 4.50% |"} required={true} /><span className="mt-1 block text-sm text-fg">Markdown works here. A table uses the same navy header as the rate charts.</span></label>
                 {replyLetter ? <LetterPreview html={replyLetter.html} title={replySubject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{replyAdvisor?.mailbox ? `${replyAdvisor.name} <${replyAdvisor.mailbox}>` : replyAdvisor?.name || selected.advisorName}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{selected.fromName || selected.fromEmail}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{replySubject}</p></div>} /> : null}
                 {replyError ? <p className="text-sm text-danger">{replyError}</p> : null}
                 <button type="button" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={sending} onClick={event => void sendReply(event)}>{sending ? "Sending…" : "Send reply"}</button>
