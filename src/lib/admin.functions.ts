@@ -1845,6 +1845,21 @@ export const trashIntroOpen = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const restoreIntroOpen = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("That open has no email.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureOpenTrash(sql);
+    await sql`delete from open_trash where lower(email) = ${data.email}`;
+    return { ok: true as const };
+  });
+
 export const removeIntroOpen = createServerFn({ method: "POST" })
   .validator((input: { email: string }) => {
     const email = (input.email || "").trim().toLowerCase();
@@ -3494,12 +3509,9 @@ function dataFile(name: string, value: string) {
 }
 
 async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string }) {
-  try {
-    const { notifyStep } = await import("@/lib/mail.server");
-    await notifyStep(sql, input);
-  } catch {
-    // A missed note should not undo the step the client or desk just completed.
-  }
+  const { notifyStep } = await import("@/lib/mail.server");
+  const result = await notifyStep(sql, input);
+  if (result.delivery !== "sent") throw new Error(result.error || "The email was not sent. Save the SMTP2GO API key and from address in Settings.");
 }
 
 export type NotificationRow = {

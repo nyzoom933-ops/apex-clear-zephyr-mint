@@ -65,6 +65,7 @@ export async function notifyStep(
     ...(input.skipAdmin ? [] : [{ audience: "admin" as const, recipient: adminTo, mail: admin, attachments: input.attachments ?? [] }]),
   ];
   await ensureMailColumn(sql);
+  let clientDelivery: { delivery: string; messageId: string; provider: string; error?: string } = { delivery: "stored", messageId: "", provider: "" };
   for (const message of messages) {
     const subject = message.audience === "client" && input.subject?.trim() ? input.subject.trim() : message.mail.subject;
     const advisorMail = message.audience === "client" && Boolean(input.replyTo);
@@ -89,7 +90,9 @@ export async function notifyStep(
         ${input.advisorId ?? ""}
       )
     `;
+    if (message.audience === "client") clientDelivery = result;
   }
+  return clientDelivery;
 }
 
 async function portalOrigin(sql: Sql) {
@@ -349,31 +352,10 @@ function senderAddress(from: string, name: string) {
 
 async function deliver(to: string, subject: string, text: string, html: string, companyName: string, sql: Sql, attachments: MailFile[] = [], replyTo = "", replyName = "", fromAddress = "") {
   const mail = await readMailConfig(sql);
-  if (replyTo) return deliverSmtp2go(to, subject, text, html, mail.smtpKey, fromAddress, replyTo, replyName, attachments);
-  if (mail.smtpKey && mail.from) {
-    const sent = await deliverSmtp2go(to, subject, text, html, mail.smtpKey, mail.from, "", companyName, attachments);
-    if (sent.delivery === "sent") return sent;
-  }
-  if (!mail.key) return { delivery: mail.smtpKey ? "failed" : "stored", messageId: "", provider: mail.smtpKey ? "smtp2go" : "" };
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${mail.key}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        from: mail.from || `${companyName} <notifications@accountholding.com>`,
-        to: [to],
-        subject,
-        text,
-        html,
-        ...(attachments.length ? { attachments } : {}),
-      }),
-    });
-    const payload = (await response.json().catch(() => ({}))) as { id?: string };
-    return { delivery: response.ok ? "sent" : "failed", messageId: response.ok && payload.id ? String(payload.id) : "", provider: response.ok ? "resend" : "" };
-  } catch {
-    return { delivery: "failed", messageId: "", provider: "" };
-  }
+  const from = fromAddress || mail.from;
+  if (!mail.smtpKey) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Add the SMTP2GO API key in Settings." };
+  if (!from) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Add the SMTP2GO from address in Settings." };
+  return deliverSmtp2go(to, subject, text, html, mail.smtpKey, from, replyTo, replyName, attachments);
 }
 
 async function deliverSmtp2go(to: string, subject: string, text: string, html: string, apiKey: string, from: string, replyTo: string, replyName: string, attachments: MailFile[]) {

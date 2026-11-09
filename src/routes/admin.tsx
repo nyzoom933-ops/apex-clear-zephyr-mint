@@ -21,6 +21,7 @@ import {
   listIntroOpens,
   listTrashOpens,
   trashIntroOpen,
+  restoreIntroOpen,
   removeIntroOpen,
   listInboxMessages,
   syncInboxNow,
@@ -150,7 +151,7 @@ function Cabinet({
   }
   useEffect(() => {
     refresh().catch(() => setError("Applications could not be loaded."));
-    getMailSetup().then(setup => setMailReady(setup.hasKey)).catch(() => setMailReady(false));
+    getMailSetup().then(setup => setMailReady(Boolean(setup.hasSmtpKey && setup.mailFrom))).catch(() => setMailReady(false));
   }, []);
   const stats = useMemo(() => {
     const list = rows ?? [];
@@ -204,14 +205,14 @@ function Cabinet({
   return <div className="min-h-screen"><SiteHeader eyebrow="Operations desk" action={<button type="button" className={headerActionClass} onClick={() => void signOut()}>Sign out</button>} /><div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[220px_1fr]"><div className="hidden lg:block"><DeskNav tab={tab} onSelect={setTab} /></div><div className="min-w-0"><div className="mb-4 lg:hidden"><button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3" aria-expanded={menuOpen} aria-label={menuOpen ? "Close menu" : "Open menu"} onClick={() => setMenuOpen(true)}><span className="text-sm font-semibold text-primary">{DESK_MENU.flatMap(group => group.items).find(item => item.id === tab)?.label}</span><Menu className="size-5 text-primary" aria-hidden="true" /></button></div>{menuOpen ? <div className="fixed inset-0 z-40 lg:hidden"><button type="button" className="absolute inset-0 bg-primary/30" aria-label="Close menu" onClick={() => setMenuOpen(false)} /><div className="absolute inset-y-0 left-0 w-[min(100%,280px)] overflow-y-auto bg-surface p-4 shadow-xl"><div className="mb-4 flex items-center justify-between"><p className="text-sm font-semibold text-primary">Desk</p><button type="button" className="flex size-11 items-center justify-center rounded-lg border border-border" aria-label="Close menu" onClick={() => setMenuOpen(false)}><X className="size-5" /></button></div><DeskNav tab={tab} onSelect={id => {
               setTab(id);
               setMenuOpen(false);
-            }} /></div></div> : null}{mailReady ? null : <p className="mb-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">Mail is not sending yet. Open Settings and save a Resend API key and from address. Logos, the company name, and the backup email from the preview also need to be entered again on this server.</p>}{error ? <p className="mb-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mb-4 text-sm text-fg">{notice}</p> : null}{tab === "dashboard" ? <section><h1 className="text-3xl font-semibold">Dashboard</h1><p className="mt-2 text-fg">Investor applications waiting on the compliance desk.</p><div className="mt-6 grid gap-3 sm:grid-cols-3"><Stat label="Submitted" value={stats.total} /><Stat label="Pending" value={stats.pending} /><Stat label="Approved" value={stats.approved} /></div><h2 className="mt-8 text-lg font-semibold text-primary">Latest submissions</h2><ApplicationTable rows={(rows ?? []).slice(0, 5)} selectedId={selectedId} onSelect={id => {
+            }} /></div></div> : null}{mailReady ? null : <p className="mb-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">Mail is not sending yet. Open Settings and save the SMTP2GO API key and the transactional from address.</p>}{error ? <p className="mb-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mb-4 text-sm text-fg">{notice}</p> : null}{tab === "dashboard" ? <section><h1 className="text-3xl font-semibold">Dashboard</h1><p className="mt-2 text-fg">Investor applications waiting on the compliance desk.</p><div className="mt-6 grid gap-3 sm:grid-cols-3"><Stat label="Submitted" value={stats.total} /><Stat label="Pending" value={stats.pending} /><Stat label="Approved" value={stats.approved} /></div><h2 className="mt-8 text-lg font-semibold text-primary">Latest submissions</h2><ApplicationTable rows={(rows ?? []).slice(0, 5)} selectedId={selectedId} onSelect={id => {
             setSelectedId(id);
             const row = (rows ?? []).find(item => item.id === id);
             setTab(row?.status === "approved" ? "clients" : "applications");
           }} /></section> : tab === "applications" ? <section><h1 className="text-3xl font-semibold">Submitted applications</h1><p className="mt-2 text-fg">Select a row to open the full application, including the identity and address documents.</p><div className="mt-4 flex flex-wrap gap-2">{["all", "pending", "approved", "hold"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (filter === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setFilter(key)}>{key === "all" ? "All" : key === "hold" ? "On hold" : key[0].toUpperCase() + key.slice(1)}</button>)}</div><ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />{selected ? <ApplicationDetail row={selected} onStatus={status => void updateStatus(selected.id, status)} onRemove={() => void removeApplication(selected.id)} /> : null}</section> : tab === "pipeline-leads" ? <PipelineLeadsPanel /> : tab === "pipeline-opens" ? <IntroOpensPanel onApplication={lead => {
             setEmailFocus({
               lead,
-              kind: "custom"
+              kind: "promo"
             });
             setTab("leads");
           }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
@@ -781,7 +782,7 @@ function SettingsPanel({
               setError("The backup file could not be read.");
             };
             reader.readAsDataURL(file);
-          }} /></label>{restorePending ? <p className="mt-2 text-sm text-fg">Restoring the backup…</p> : null}</div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Backup only. Client mail goes through SMTP2GO first. Resend is used if SMTP2GO is not set or does not accept the message. Desk notices and database backups go to Telegram, not email. The key is stored on the server and is not shown again.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+          }} /></label>{restorePending ? <p className="mt-2 text-sm text-fg">Restoring the backup…</p> : null}</div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Not used for sending. Client mail goes through SMTP2GO. Desk notices and database backups go to Telegram.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setMailPending(true);
@@ -1344,9 +1345,11 @@ function LeadsPanel({
   const [origin, setOrigin] = useState("");
   useEffect(() => {
     if (!focus) return;
-    setKind(focus.kind || "custom");
+    setKind(focus.kind || "promo");
     setName(focus.lead.name || "");
     setEmail(focus.lead.email || "");
+    const months = String(focus.lead.term || "").match(/\d+/)?.[0] || "";
+    if (months) setTermMonths(months);
     if (focus.lead.advisorId) setAdvisorId(focus.lead.advisorId);
     setAppCopy(null);
     setEditing(false);
@@ -1572,7 +1575,18 @@ function LeadsPanel({
                 event.stopPropagation();
                 setPickedLeads(current => current.filter(item => item.id !== lead.id));
                 setPreviewIndex(0);
-              }}>×</span></button></li>)}</ul> : <span className="mt-1 block text-fg">Search the pipeline and add every lead who should get this letter.</span>}</label> : <><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "custom" || kind === "promo" ? <label className="block text-sm"><span className="font-semibold text-primary">{kind === "promo" ? "Promotional term" : "Custom term"}</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
+              }}>×</span></button></li>)}</ul> : <span className="mt-1 block text-fg">Search the pipeline and add every lead who should get this letter.</span>}</label> : <><label className="block text-sm"><span className="font-semibold text-primary">Search lead</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
+          const next = leadOptions.find(item => item.id === event.target.value);
+          if (!next) return;
+          setName(next.name || "");
+          setEmail(next.email || "");
+          if (next.advisorId) setAdvisorId(next.advisorId);
+          const months = String(next.term || "").match(/\d+/)?.[0] || "";
+          if (months) setTermMonths(months);
+          setAppCopy(null);
+          setLeadQuery("");
+          setLeadOptions([]);
+        }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "custom" || kind === "promo" ? <label className="block text-sm"><span className="font-semibold text-primary">{kind === "promo" ? "Promotional term" : "Custom term"}</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
         }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
@@ -2185,6 +2199,9 @@ function IntroOpensPanel({
   onApplication
 }) {
   const [rows, setRows] = useState(null);
+  const [advisors, setAdvisors] = useState([]);
+  const [query, setQuery] = useState("");
+  const [advisorId, setAdvisorId] = useState("");
   const [view, setView] = useState("open");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2192,6 +2209,9 @@ function IntroOpensPanel({
   function load(next = view) {
     return (next === "trash" ? listTrashOpens() : listIntroOpens()).then(setRows);
   }
+  useEffect(() => {
+    void listAdvisors().then(setAdvisors).catch(() => setAdvisors([]));
+  }, []);
   useEffect(() => {
     load(view).catch(() => setError(view === "trash" ? "Trash could not be loaded." : "Opened introductions could not be loaded."));
   }, [view]);
@@ -2220,6 +2240,41 @@ function IntroOpensPanel({
       setError(caught instanceof Error && caught.message ? caught.message : "Could not move this open to trash.");
     }
   }
+  async function restore(email) {
+    setError("");
+    setNotice("");
+    try {
+      await restoreIntroOpen({ data: { email } });
+      await load();
+      setNotice("Restored to Opens.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Could not restore this open.");
+    }
+  }
+  async function resendPromo(row) {
+    setError("");
+    setNotice("");
+    if (!row.advisorId) {
+      setError("This open has no advisor, so the promo cannot be sent.");
+      return;
+    }
+    setPending(true);
+    try {
+      await sendLeadIntro({
+        data: {
+          advisorId: row.advisorId,
+          name: row.name,
+          email: row.email
+        }
+      });
+      await load();
+      setNotice(`Promo sent again to ${row.email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The promo could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
   async function remove(email) {
     setError("");
     setNotice("");
@@ -2235,7 +2290,7 @@ function IntroOpensPanel({
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-3xl font-semibold">{view === "trash" ? "Trash" : "Opens"}</h1>
-        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Deleted opens stay here until you remove them." : "Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again."}</p>
+        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again."}</p>
       </div>
       {view === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button> : null}
     </div>
@@ -2244,8 +2299,29 @@ function IntroOpensPanel({
     </div>
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+    <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+      <label className="block text-sm">
+        <span className="font-semibold text-primary">Search lead</span>
+        <input className={`${controlClass} mt-1`} value={query} placeholder="Name, email, or phone" onChange={event => setQuery(event.target.value)} />
+      </label>
+      <label className="block text-sm">
+        <span className="font-semibold text-primary">Advisor</span>
+        <select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}>
+          <option value="">All advisors</option>
+          {advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}
+          <option value="none">No advisor</option>
+        </select>
+      </label>
+    </div>
     <ul className="mt-4 grid gap-3">
-      {(rows ?? []).map(row => {
+      {(rows ?? []).filter(row => {
+        const needle = query.trim().toLowerCase();
+        const lead = `${row.name} ${row.email} ${row.phone || ""}`.toLowerCase();
+        if (needle && !lead.includes(needle)) return false;
+        if (advisorId === "none") return !row.advisorId;
+        if (advisorId) return row.advisorId === advisorId;
+        return true;
+      }).map(row => {
         const applied = Boolean(row.applicationStatus);
         const linkExpired = !applied && row.applicationSent && row.inviteStatus !== "open";
         return <li key={row.email} className="rounded-lg border border-border bg-surface px-4 py-3">
@@ -2285,6 +2361,8 @@ function IntroOpensPanel({
               advisorId: row.advisorId,
               receivedAt: new Date().toISOString()
             })}>Application email</button> : null}
+            {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void resendPromo(row)}>Resend promo</button> : null}
+            {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void restore(row.email)}>Restore</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void remove(row.email)}>Remove</button> : <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void trash(row.email)}>Delete</button>}
           </div>
           <div className="mt-3 border-t border-border pt-3">
@@ -2293,7 +2371,14 @@ function IntroOpensPanel({
         </li>;
       })}
     </ul>
-    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">{view === "trash" ? "Trash is empty." : "No rates introductions have been sent yet."}</p> : null}
+    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">{view === "trash" ? "Trash is empty." : "No rates introductions have been sent yet."}</p> : rows && !rows.some(row => {
+      const needle = query.trim().toLowerCase();
+      const lead = `${row.name} ${row.email} ${row.phone || ""}`.toLowerCase();
+      if (needle && !lead.includes(needle)) return false;
+      if (advisorId === "none") return !row.advisorId;
+      if (advisorId) return row.advisorId === advisorId;
+      return true;
+    }) ? <p className="mt-4 text-sm text-fg">No opens match this search.</p> : null}
   </section>;
 }
 
