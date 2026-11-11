@@ -214,6 +214,18 @@ export const getLeadInvite = createServerFn({ method: "GET" })
     return readLeadInvite(await getSql(), data.token);
   });
 
+export const requestLeadInvite = createServerFn({ method: "POST" })
+  .validator((input: { token: string }) => {
+    const token = (input.token || "").trim().slice(0, 80);
+    if (!token) throw new Error("This link is not recognized.");
+    return { token };
+  })
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { requestNewLeadInvite } = await import("@/lib/lead-invites.server");
+    return requestNewLeadInvite(await getSql(), data.token);
+  });
+
 export const listApplications = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
@@ -767,21 +779,79 @@ export const saveTelegramSetup = createServerFn({ method: "POST" })
   });
 
 export const setDeskSwitch = createServerFn({ method: "POST" })
-  .validator((input: { key: "telegram" | "backup"; enabled: boolean }) => ({
-    key: input.key === "backup" ? "backup" as const : "telegram" as const,
+  .validator((input: { key: "telegram" | "backup" | "status" | "cloud"; enabled: boolean }) => ({
+    key: input.key === "backup" ? "backup" as const : input.key === "status" ? "status" as const : input.key === "cloud" ? "cloud" as const : "telegram" as const,
     enabled: Boolean(input.enabled),
   }))
   .handler(async ({ data }) => {
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const setting = data.key === "backup" ? "backup_schedule" : "telegram_enabled";
+    const setting = data.key === "backup" ? "backup_schedule" : data.key === "status" ? "mail_status_watch" : data.key === "cloud" ? "cloud_backup" : "telegram_enabled";
     await sql`
       insert into site_settings (key, value) values (${setting}, ${data.enabled ? "1" : "0"})
       on conflict (key) do update set value = excluded.value
     `;
     return { enabled: data.enabled };
   });
+
+export const getCloudSetup = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { cloudSetupView, readCloudConfig } = await import("@/lib/cloud-backup.server");
+  return cloudSetupView(await readCloudConfig(await getSql()));
+});
+
+export const saveCloudSetup = createServerFn({ method: "POST" })
+  .validator((input: { provider?: string; region?: string; bucket?: string; endpoint?: string; accessKey?: string; secretKey?: string; clear?: boolean }) => ({
+    provider: input.provider || "r2",
+    region: input.region || "",
+    bucket: input.bucket || "",
+    endpoint: input.endpoint || "",
+    accessKey: input.accessKey || "",
+    secretKey: input.secretKey || "",
+    clear: Boolean(input.clear),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { cleanCloudInput, cloudSetupView, readCloudConfig } = await import("@/lib/cloud-backup.server");
+    const sql = await getSql();
+    if (data.clear) {
+      await sql`delete from site_settings where key in ('cloud_access_key', 'cloud_secret_key', 'cloud_bucket', 'cloud_region', 'cloud_endpoint')`;
+      return cloudSetupView(await readCloudConfig(sql));
+    }
+    const cleaned = cleanCloudInput(data);
+    const current = await readCloudConfig(sql);
+    const accessKey = cleaned.accessKey || current.accessKey;
+    const secretKey = cleaned.secretKey || current.secretKey;
+    const pairs: Array<[string, string]> = [
+      ["cloud_provider", cleaned.provider],
+      ["cloud_region", cleaned.region],
+      ["cloud_bucket", cleaned.bucket],
+      ["cloud_endpoint", cleaned.endpoint],
+      ["cloud_access_key", accessKey],
+      ["cloud_secret_key", secretKey],
+    ];
+    for (const [key, value] of pairs) {
+      if (!value) {
+        await sql`delete from site_settings where key = ${key}`;
+      } else {
+        await sql`
+          insert into site_settings (key, value) values (${key}, ${value})
+          on conflict (key) do update set value = excluded.value
+        `;
+      }
+    }
+    return cloudSetupView(await readCloudConfig(sql));
+  });
+
+export const testCloudSetup = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { readCloudConfig, testCloudConnection } = await import("@/lib/cloud-backup.server");
+  return testCloudConnection(await readCloudConfig(await getSql()));
+});
 
 export const lookupTelegramChats = createServerFn({ method: "POST" })
   .validator((input: { token?: string }) => ({ token: (input.token || "").trim() }))
@@ -1830,6 +1900,30 @@ export const listTrashOpens = createServerFn({ method: "GET" }).handler(async ()
   return readIntroOpens(await getSql(), true);
 });
 
+export const downloadOpensReport = createServerFn({ method: "POST" })
+  .validator((input: { from?: string; to?: string; advisorId?: string; applicationsOnly?: boolean }) => {
+    const from = (input.from || "").trim();
+    const to = (input.to || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a start and end date.");
+    if (from > to) throw new Error("The start date is after the end date.");
+    const end = new Date(`${to}T00:00:00Z`);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { from: `${from}T00:00:00Z`, to: end.toISOString(), labelFrom: from, labelTo: to, advisorId: (input.advisorId || "").slice(0, 80), applicationsOnly: Boolean(input.applicationsOnly) };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await readIntroOpens(sql, false, { from: data.from, to: data.to, limit: 2000 });
+    const matched = data.advisorId === "none" ? rows.filter((row) => !row.advisorId) : data.advisorId ? rows.filter((row) => row.advisorId === data.advisorId) : rows;
+    const filtered = data.applicationsOnly ? matched.filter((row) => row.applicationSent) : matched;
+    const found = data.advisorId && data.advisorId !== "none" ? await sql<{ name: string }>`select name from advisors where id = ${data.advisorId}` : [];
+    const advisor = data.advisorId === "none" ? "No advisor" : found[0]?.name || "";
+    const { buildOpensReportPdf } = await import("@/lib/opens-report.server");
+    const pdf = await buildOpensReportPdf({ company: await readCompanyName(sql), from: data.labelFrom, to: data.labelTo, advisor, applicationsOnly: data.applicationsOnly, rows: filtered });
+    return { pdf: pdf.toString("base64"), filename: `opens-${data.labelFrom}-to-${data.labelTo}.pdf` };
+  });
+
 export const trashIntroOpen = createServerFn({ method: "POST" })
   .validator((input: { email: string }) => {
     const email = (input.email || "").trim().toLowerCase();
@@ -1880,9 +1974,12 @@ async function ensureOpenTrash(sql: Sql) {
   await sql`create table if not exists open_trash (email text primary key, created_at timestamptz not null default now())`;
 }
 
-async function readIntroOpens(sql: Sql, trash: boolean) {
+async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string | null; to?: string | null; limit?: number }) {
   await ensureCrmLeads(sql);
   await ensureOpenTrash(sql);
+  const from = range?.from || null;
+  const to = range?.to || null;
+  const limit = range?.limit ?? 300;
   const rows = await sql<{
     lead_id: string;
     name: string;
@@ -2026,10 +2123,12 @@ async function readIntroOpens(sql: Sql, trash: boolean) {
       left join advisors a on a.id = n.advisor_id
       where n.audience = 'client' and n.step = 'lead_intro' and n.delivery = 'sent'
         and (${trash}::boolean = exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient)))
+        and (${from}::timestamptz is null or n.created_at >= ${from}::timestamptz)
+        and (${to}::timestamptz is null or n.created_at < ${to}::timestamptz)
       order by lower(n.recipient), n.created_at desc
     ) opens
     order by sent_at desc
-    limit 300
+    limit ${limit}
   `;
   return rows.map((row) => ({
     leadId: row.lead_id,

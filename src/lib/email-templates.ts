@@ -680,11 +680,11 @@ export function defaultApplicationCopy(input: { leadName: string; company: strin
     headline: promo ? `Your promotional ${term} CD application is ready.` : months ? `Your ${term} CD application is ready.` : "Your CD application is ready.",
     hope: "I hope you're doing well.",
     ready: promo
-      ? "Your promotional certificate application is ready. This personal link expires 24 hours after this email is sent."
-      : "Your certificate application is ready. This personal link expires 24 hours after this email is sent.",
+      ? "Your promotional certificate application is ready. This personal link expires 48 hours after this email is sent."
+      : "Your certificate application is ready. This personal link expires 48 hours after this email is sent.",
     instruction: "Use the button below before the link expires.",
     codeNote: "Enter this code on the application to apply the promotional rate.",
-    followUp: "Please finish within 24 hours. If the link expires, ask your advisor for a new one.",
+    followUp: "Please finish within 48 hours. If the link expires, ask your advisor for a new one.",
     thanks: "Thank you for your prompt attention. We look forward to receiving your application.",
     promoCode: "",
   };
@@ -766,8 +766,8 @@ export function applicationLetter(input: {
           </table>`
     : "";
   const fine = input.variant === "promo"
-    ? `This personal application link expires 24 hours after it is sent. The promotional APY is for new clients, requires ${minimum} in new money${window ? `, and is available ${window}` : ""}. A penalty may be imposed for early withdrawal.`
-    : `This personal application link expires 24 hours after it is sent. Minimum to open: ${minimum}. A penalty may be imposed for early withdrawal.`;
+    ? `This personal application link expires 48 hours after it is sent. The promotional APY is for new clients, requires ${minimum} in new money${window ? `, and is available ${window}` : ""}. A penalty may be imposed for early withdrawal.`
+    : `This personal application link expires 48 hours after it is sent. Minimum to open: ${minimum}. A penalty may be imposed for early withdrawal.`;
   const text = [`Dear ${name},`, hope, ready, instruction, promoCode ? `Promotional code: ${promoCode}` : "", `${months}-month CD ${apy} APY`, followUp, thanks, link ? `${buttonLabel}: ${link}` : "", sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">

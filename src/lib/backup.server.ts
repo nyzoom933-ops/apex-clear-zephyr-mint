@@ -4,7 +4,7 @@ import { sendTelegramBackup } from "@/lib/mail.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-const KEPT_SETTINGS = ["resend_api_key", "smtp2go_api_key", "telegram_bot_token", "telegram_chat_id", "telegram_enabled", "desk_password_hash", "desk_session", "desk_email"];
+const KEPT_SETTINGS = ["resend_api_key", "smtp2go_api_key", "telegram_bot_token", "telegram_chat_id", "telegram_enabled", "desk_password_hash", "desk_session", "desk_email", "cloud_backup", "cloud_provider", "cloud_region", "cloud_bucket", "cloud_access_key", "cloud_secret_key", "cloud_endpoint"];
 
 const globalRef = globalThis as typeof globalThis & {
   __backupTimer?: ReturnType<typeof setInterval>;
@@ -25,7 +25,7 @@ export async function runBackup(options?: { scheduled?: boolean }) {
     const sql = await getSql();
     const { readMailConfig } = await import("@/lib/mail.server");
     const mail = await readMailConfig(sql);
-    if (options?.scheduled && !mail.backupSchedule) return { ok: true as const, skipped: true as const, to: "Telegram", at: "", delivery: "stored", bytes: 0, parts: 0, telegram: "skipped" as const };
+    if (options?.scheduled && !mail.backupSchedule) return { ok: true as const, skipped: true as const, to: "Telegram", at: "", delivery: "stored", bytes: 0, parts: 0, telegram: "skipped" as const, cloud: "skipped" as const, cloudError: "" };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
     const dump = await dumpDatabase(sql);
     const zip = packBackup(dump, stamp);
@@ -34,7 +34,20 @@ export async function runBackup(options?: { scheduled?: boolean }) {
     const telegram = await sendTelegramBackup(sql, `${company} database backup`, "The database backup is attached as one file.", [
       { filename, content: zip.toString("base64") },
     ]);
-    const delivery = telegram === "sent" ? "sent" : telegram === "failed" ? "failed" : "stored";
+    let cloud: "sent" | "failed" | "skipped" = "skipped";
+    let cloudError = "";
+    const { readCloudConfig, uploadCloudBackup } = await import("@/lib/cloud-backup.server");
+    const cloudConfig = await readCloudConfig(sql);
+    if (cloudConfig.enabled) {
+      try {
+        await uploadCloudBackup(cloudConfig, filename, zip);
+        cloud = "sent";
+      } catch (error) {
+        cloud = "failed";
+        cloudError = error instanceof Error ? error.message : "Cloud upload failed.";
+      }
+    }
+    const delivery = telegram === "sent" || cloud === "sent" ? "sent" : telegram === "failed" || cloud === "failed" ? "failed" : "stored";
     const at = new Date().toISOString();
     await sql`
       insert into site_settings (key, value) values ('backup_at', ${at})
@@ -44,7 +57,7 @@ export async function runBackup(options?: { scheduled?: boolean }) {
       insert into site_settings (key, value) values ('backup_status', ${delivery})
       on conflict (key) do update set value = excluded.value
     `;
-    return { ok: true as const, skipped: false as const, to: "Telegram", at, delivery, bytes: zip.length, parts: 1, telegram };
+    return { ok: true as const, skipped: false as const, to: "Telegram", at, delivery, bytes: zip.length, parts: 1, telegram, cloud, cloudError };
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : "Backup failed." };
   } finally {
@@ -95,7 +108,7 @@ async function dumpDatabase(sql: Awaited<ReturnType<(typeof import("@/lib/db"))[
     `;
     const cols = columns.map((column) => column.column_name);
     const raw = await sql.query<Record<string, unknown>>(`select * from ${quoteIdent(name)}`);
-    const hidden = new Set(["resend_api_key", "smtp2go_api_key", "telegram_bot_token", "desk_password_hash", "desk_session"]);
+    const hidden = new Set(["resend_api_key", "smtp2go_api_key", "telegram_bot_token", "desk_password_hash", "desk_session", "cloud_access_key", "cloud_secret_key"]);
     const rows = name === "site_settings" ? raw.filter((row) => !hidden.has(String(row.key))) : raw;
     parts.push(`-- ${name} (${rows.length})`);
     if (rows.length === 0) {

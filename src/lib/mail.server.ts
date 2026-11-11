@@ -135,7 +135,7 @@ async function readEmailLogo(sql: Sql) {
 
 export async function readMailConfig(sql: Sql) {
   const rows = await sql<{ key: string; value: string }>`
-    select key, value from site_settings where key in ('resend_api_key', 'mail_from', 'smtp2go_api_key', 'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled', 'backup_schedule')
+    select key, value from site_settings where key in ('resend_api_key', 'mail_from', 'smtp2go_api_key', 'telegram_bot_token', 'telegram_chat_id', 'telegram_enabled', 'backup_schedule', 'mail_status_watch')
   `;
   let key = env("RESEND_API_KEY") || "";
   let from = env("MAIL_FROM") || "";
@@ -144,6 +144,7 @@ export async function readMailConfig(sql: Sql) {
   let telegramChat = env("TELEGRAM_CHAT_ID") || "";
   let telegramEnabled = true;
   let backupSchedule = true;
+  let statusWatch = true;
   for (const row of rows) {
     if (row.key === "resend_api_key" && row.value.trim()) key = row.value.trim();
     if (row.key === "mail_from" && row.value.trim()) from = row.value.trim();
@@ -152,8 +153,9 @@ export async function readMailConfig(sql: Sql) {
     if (row.key === "telegram_chat_id" && row.value.trim()) telegramChat = row.value.trim();
     if (row.key === "telegram_enabled") telegramEnabled = row.value !== "0";
     if (row.key === "backup_schedule") backupSchedule = row.value !== "0";
+    if (row.key === "mail_status_watch") statusWatch = row.value !== "0";
   }
-  return { key, from, smtpKey, telegramToken, telegramChat, telegramEnabled, backupSchedule };
+  return { key, from, smtpKey, telegramToken, telegramChat, telegramEnabled, backupSchedule, statusWatch };
 }
 
 async function readTelegram(sql: Sql) {
@@ -174,6 +176,7 @@ export async function mailSetupView(sql: Sql) {
     telegramChat: mail.telegramChat,
     telegramEnabled: mail.telegramEnabled,
     backupSchedule: mail.backupSchedule,
+    statusWatch: mail.statusWatch,
   };
 }
 
@@ -252,7 +255,8 @@ export async function sendTelegramTest(sql: Sql) {
 }
 
 async function postTelegram(token: string, chatId: string, subject: string, text: string, attachments: MailFile[], expand = "") {
-  const chunks = telegramChunks(telegramHtml(subject, text, expand));
+  const notice = text.replace(/Please do not reply to this email\.[^\n]*/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+  const chunks = telegramChunks(telegramHtml(subject, notice, expand));
   let id = "";
   for (const chunk of chunks) {
     const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -529,8 +533,9 @@ async function searchSentMail(apiKey: string, emailIds: string[], flag?: "opened
   return { ok: false, emails: [] as SentMail[], lastError };
 }
 
-export async function syncResendStatuses(sql: Sql) {
+export async function syncResendStatuses(sql: Sql, options?: { quiet?: boolean }) {
   const mail = await readMailConfig(sql);
+  const quiet = Boolean(options?.quiet);
   await ensureMailColumn(sql);
   const rows = await sql<{ id: string; resend_id: string; mail_provider: string; recipient: string; subject: string; mail_status: string }>`
     select id, resend_id, coalesce(mail_provider, '') as mail_provider, recipient, subject, coalesce(mail_status, '') as mail_status
@@ -542,15 +547,22 @@ export async function syncResendStatuses(sql: Sql) {
   `;
   let updated = 0;
   let opened = 0;
+  const changes: Array<{ recipient: string; subject: string; status: string }> = [];
   const smtpRows = rows.filter((row) => row.mail_provider === "smtp2go");
   const resendRows = rows.filter((row) => row.mail_provider !== "smtp2go" && row.resend_id);
   if (smtpRows.length) {
-    if (!mail.smtpKey) throw new Error("Add the SMTP2GO API key in Settings before syncing advisor mail.");
+    if (!mail.smtpKey) {
+      if (quiet) return { updated, opened, checked: rows.length, changes };
+      throw new Error("Add the SMTP2GO API key in Settings before syncing advisor mail.");
+    }
     const found = await searchSmtpActivity(mail.smtpKey);
     let events = found.events;
     if (!found.sawOk) {
       const detail = found.lastError || (found.lastStatus ? `SMTP2GO activity search failed (${found.lastStatus}).` : "SMTP2GO activity search did not respond.");
-      if (!/permission/i.test(detail)) throw new Error(detail);
+      if (!/permission/i.test(detail)) {
+        if (quiet) return { updated, opened, checked: rows.length, changes };
+        throw new Error(detail);
+      }
       const ids = smtpRows.map((row) => row.resend_id);
       const [clicked, openedMail, sent] = await Promise.all([
         searchSentMail(mail.smtpKey, ids, "clicked"),
@@ -558,6 +570,7 @@ export async function syncResendStatuses(sql: Sql) {
         searchSentMail(mail.smtpKey, ids),
       ]);
       if (!clicked.ok && !openedMail.ok && !sent.ok) {
+        if (quiet) return { updated, opened, checked: rows.length, changes };
         throw new Error("Open tracking is already on. That only records opens inside SMTP2GO. Click the API key name itself, open Permissions, and turn on Reports. If that section is not there, add a new key with every permission enabled and paste it into Settings.");
       }
       events = [
@@ -566,7 +579,9 @@ export async function syncResendStatuses(sql: Sql) {
         ...sent.emails.map((email) => ({ ...email, event: email.status || "delivered" })),
       ];
     }
-    if (!events.length) throw new Error("SMTP2GO returned no events for the last 4 days.");
+    if (!events.length) {
+      if (!quiet) throw new Error("SMTP2GO returned no events for the last 4 days.");
+    } else {
     const bestById = new Map<string, string>();
     const bestByLetter = new Map<string, string>();
     const keep = (current: string, next: string) => ((STATUS_RANK[next] || 0) >= (STATUS_RANK[current] || 0) ? next : current);
@@ -584,6 +599,8 @@ export async function syncResendStatuses(sql: Sql) {
       await sql`update notifications set mail_status = ${status}, status_at = now() where id = ${row.id}`;
       updated += 1;
       if (status === "opened" || status === "clicked") opened += 1;
+      changes.push({ recipient: row.recipient, subject: row.subject, status });
+    }
     }
   }
   if (resendRows.length && mail.key) {
@@ -604,5 +621,41 @@ export async function syncResendStatuses(sql: Sql) {
       }
     }
   }
-  return { updated, opened, checked: rows.length };
+  return { updated, opened, checked: rows.length, changes };
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  sent: "Sent",
+  delivered: "Delivered",
+  opened: "Opened",
+  clicked: "Clicked",
+  bounced: "Bounced",
+  complained: "Complained",
+};
+
+export function ensureMailStatusSchedule() {
+  const globalRef = globalThis as typeof globalThis & { __mailStatusTimer?: ReturnType<typeof setInterval>; __mailStatusRunning?: boolean };
+  if (globalRef.__mailStatusTimer) return;
+  const run = async () => {
+    if (globalRef.__mailStatusRunning) return;
+    globalRef.__mailStatusRunning = true;
+    try {
+      const { getSql } = await import("@/lib/db");
+      const sql = await getSql();
+      const mail = await readMailConfig(sql);
+      if (!mail.statusWatch || !mail.smtpKey) return;
+      const result = await syncResendStatuses(sql, { quiet: true });
+      if (!result.changes.length) return;
+      const lines = result.changes.slice(0, 12).map((change) => `${STATUS_LABEL[change.status] || change.status} · ${change.recipient}\n${change.subject}`);
+      const more = result.changes.length > 12 ? `\n\n+${result.changes.length - 12} more` : "";
+      const subject = result.changes.length === 1 ? `Email ${ (STATUS_LABEL[result.changes[0].status] || result.changes[0].status).toLowerCase() }` : `${result.changes.length} email statuses changed`;
+      await sendTelegramNotice(sql, subject, `${lines.join("\n\n")}${more}`);
+    } catch (error) {
+      console.error("[mail] Status check failed:", error);
+    } finally {
+      globalRef.__mailStatusRunning = false;
+    }
+  };
+  globalRef.__mailStatusTimer = setInterval(() => void run(), 5 * 60 * 1000);
+  setTimeout(() => void run(), 60_000);
 }

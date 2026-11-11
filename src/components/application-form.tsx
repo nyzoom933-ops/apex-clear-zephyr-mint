@@ -21,7 +21,7 @@ import {
   validateStep,
   type FormState,
 } from "@/lib/application-data";
-import { getCdTerms, getInvestorSession, getLeadInvite, getPromo, investorLogout, submitApplication, type CdTerm, type InvestorSession } from "@/lib/admin.functions";
+import { getCdTerms, getInvestorSession, getLeadInvite, getPromo, investorLogout, requestLeadInvite, submitApplication, type CdTerm, type InvestorSession } from "@/lib/admin.functions";
 import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, promoMonths, type PromoOffer } from "@/lib/promo";
 import { AppCover, headerActionClass, SiteHeader } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
@@ -103,7 +103,11 @@ export function ApplicationForm() {
   const [session, setSession] = useState<InvestorSession | null | undefined>(undefined);
   const [terms, setTerms] = useState<CdTerm[]>([]);
   const [offer, setOffer] = useState<PromoOffer>(EMPTY_PROMO);
-  const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired">("none");
+  const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired" | "used">("none");
+  const [inviteToken, setInviteToken] = useState("");
+  const [inviteRequested, setInviteRequested] = useState(false);
+  const [requestPending, setRequestPending] = useState(false);
+  const [requestError, setRequestError] = useState("");
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -133,7 +137,14 @@ export function ApplicationForm() {
     setInviteGate("checking");
     void getLeadInvite({ data: { token: invite } })
       .then((result) => {
+        if (result.status === "used") {
+          setInviteGate("used");
+          setReady(true);
+          return;
+        }
         if (result.status !== "open") {
+          setInviteToken(invite);
+          setInviteRequested(result.status === "expired" && result.requested);
           setInviteGate("expired");
           setReady(true);
           return;
@@ -222,15 +233,24 @@ export function ApplicationForm() {
     );
   }
 
-  if (inviteGate === "expired") {
+  if (inviteGate === "expired" || inviteGate === "used") {
     return (
       <div className="min-h-screen">
         <SiteHeader eyebrow="Investor application" />
         <AppCover />
         <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
           <section className="rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10">
-            <h1 className="text-3xl font-semibold">This application link has expired</h1>
-            <p className="mx-auto mt-3 max-w-md text-fg">The link in your email lasts 24 hours. Ask your advisor to send a new one.</p>
+            <h1 className="text-3xl font-semibold">{inviteGate === "used" ? "Application already sent" : "Promo link expired"}</h1>
+            <p className="mx-auto mt-3 max-w-md text-fg">{inviteGate === "used" ? "This link was already used to submit an application." : "This link lasted 48 hours. Request a new one and your advisor will send it."}</p>
+            {inviteGate === "expired" ? inviteRequested ? <p className="mt-6 text-sm font-semibold text-primary">Request sent. Your advisor will send a new link.</p> : <button type="button" disabled={requestPending} className="mt-6 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+              setRequestError("");
+              setRequestPending(true);
+              void requestLeadInvite({ data: { token: inviteToken } })
+                .then(() => setInviteRequested(true))
+                .catch((caught) => setRequestError(caught instanceof Error && caught.message ? caught.message : "The request could not be sent."))
+                .finally(() => setRequestPending(false));
+            }}>{requestPending ? "Sending…" : "Request a new link"}</button> : null}
+            {requestError ? <p className="mt-3 text-sm text-danger">{requestError}</p> : null}
           </section>
         </main>
       </div>

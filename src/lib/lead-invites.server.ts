@@ -25,7 +25,7 @@ export async function createLeadInvite(
   input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo"; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
 ) {
   const token = randomBytes(24).toString("hex");
-  const expiresAt = new Date(Date.now() + 24 * HOUR).toISOString();
+  const expiresAt = new Date(Date.now() + 48 * HOUR).toISOString();
   await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
   await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
   await sql`
@@ -56,16 +56,21 @@ export function inviteApplicationUrl(origin: string, token: string) {
 }
 
 export async function readLeadInvite(sql: Sql, token: string) {
-  const rows = await sql<InviteRow & { used_at: string | Date | null }>`
-    select token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, expires_at, used_at
+  await ensureInviteColumns(sql);
+  const rows = await sql<InviteRow & { used_at: string | Date | null; renew_requested_at: string | Date | null }>`
+    select token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, expires_at, used_at, renew_requested_at
     from lead_invites
     where token = ${token}
     limit 1
   `;
   const row = rows[0];
   if (!row) return { status: "missing" as const };
+  if (row.used_at) return { status: "used" as const };
   const expiresAt = new Date(row.expires_at);
-  if (row.used_at || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) return { status: "expired" as const };
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+    await noteExpiredVisit(sql, row);
+    return { status: "expired" as const, requested: Boolean(row.renew_requested_at) };
+  }
   return {
     status: "open" as const,
     name: row.name,
@@ -74,6 +79,60 @@ export async function readLeadInvite(sql: Sql, token: string) {
     kind: row.kind,
     expiresAt: expiresAt.toISOString(),
   };
+}
+
+export async function requestNewLeadInvite(sql: Sql, token: string) {
+  await ensureInviteColumns(sql);
+  const rows = await sql<InviteRow & { used_at: string | Date | null; renew_requested_at: string | Date | null }>`
+    select token, email, name, months, advisor_name, expires_at, used_at, renew_requested_at
+    from lead_invites
+    where token = ${token}
+    limit 1
+  `;
+  const row = rows[0];
+  if (!row) throw new Error("This link is not recognized.");
+  if (row.used_at) throw new Error("This application was already submitted.");
+  if (new Date(row.expires_at).getTime() > Date.now()) throw new Error("This link is still open.");
+  const claimed = await sql<{ token: string }>`
+    update lead_invites set renew_requested_at = now()
+    where token = ${token} and renew_requested_at is null and used_at is null
+    returning token
+  `;
+  if (!claimed[0]) return { ok: true as const, already: true as const };
+  const { sendTelegramNotice } = await import("@/lib/mail.server");
+  await sendTelegramNotice(
+    sql,
+    "New application link requested",
+    [`${row.name || "A lead"} (${row.email}) asked for a new application link.`, row.months ? `Term: ${row.months} months.` : "", row.advisor_name ? `Advisor: ${row.advisor_name}` : ""].filter(Boolean).join("\n"),
+  );
+  return { ok: true as const, already: false as const };
+}
+
+async function ensureInviteColumns(sql: Sql) {
+  await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
+  await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
+  await sql`alter table lead_invites add column if not exists expired_notified_at timestamptz`;
+  await sql`alter table lead_invites add column if not exists renew_requested_at timestamptz`;
+}
+
+async function noteExpiredVisit(sql: Sql, row: { token: string; email: string; name: string; advisor_name: string; months: number }) {
+  const claimed = await sql<{ token: string }>`
+    update lead_invites set expired_notified_at = now()
+    where token = ${row.token} and expired_notified_at is null
+    returning token
+  `;
+  if (!claimed[0]) return;
+  try {
+    const { sendTelegramNotice } = await import("@/lib/mail.server");
+    await sendTelegramNotice(
+      sql,
+      "Promo link expired",
+      [`${row.name || "A lead"} (${row.email}) opened an expired application link.`, row.months ? `Term: ${row.months} months.` : "", row.advisor_name ? `Advisor: ${row.advisor_name}` : ""].filter(Boolean).join("\n"),
+    );
+  } catch (error) {
+    await sql`update lead_invites set expired_notified_at = null where token = ${row.token}`;
+    console.error("[invite] Expired-link notice failed:", error);
+  }
 }
 
 export async function consumeLeadInvite(sql: Sql, token: string) {

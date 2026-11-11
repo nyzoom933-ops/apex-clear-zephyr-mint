@@ -19,6 +19,7 @@ import {
   listCrmLeads,
   importPerfexLeads,
   listIntroOpens,
+  downloadOpensReport,
   listTrashOpens,
   trashIntroOpen,
   restoreIntroOpen,
@@ -46,6 +47,9 @@ import {
   setSiteBrand,
   runDatabaseBackup,
   restoreDatabaseBackup,
+  getCloudSetup,
+  saveCloudSetup,
+  testCloudSetup,
   saveMailSetup,
   saveSmtpSetup,
   saveTelegramSetup,
@@ -71,17 +75,28 @@ import { applicationLetter, defaultApplicationCopy, defaultExtensionCopy, defaul
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Operations · Account Holding" }] }),
+  loader: async () => {
+    try {
+      return await getAdminSession();
+    } catch {
+      return { signedIn: false, needsSetup: false };
+    }
+  },
   component: AdminPage,
 });
 
 var controlClass = "w-full rounded-md border border-border bg-surface px-3.5 py-3 text-base text-fg outline-none focus:border-primary";
 function AdminPage() {
-  const [session, setSession] = useState(null);
+  const initial = Route.useLoaderData();
+  const [session, setSession] = useState(initial);
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSession(current => current ?? { signedIn: false, needsSetup: false });
+    }, 4000);
     getAdminSession().then(next => setSession(next)).catch(() => setSession({
       signedIn: false,
       needsSetup: false
-    }));
+    })).finally(() => window.clearTimeout(timer));
   }, []);
   if (session === null) return <main className="mx-auto max-w-md px-6 py-24 text-center text-sm text-fg">Checking the desk…</main>;
   if (!session.signedIn) return <AdminLogin needsSetup={session.needsSetup} onSuccess={() => setSession({
@@ -624,6 +639,18 @@ function SettingsPanel({
   const [telegramEnabled, setTelegramEnabled] = useState(true);
   const [telegramChats, setTelegramChats] = useState([]);
   const [backupSchedule, setBackupSchedule] = useState(true);
+  const [statusWatch, setStatusWatch] = useState(true);
+  const [cloudEnabled, setCloudEnabled] = useState(false);
+  const [cloudProvider, setCloudProvider] = useState("r2");
+  const [cloudRegion, setCloudRegion] = useState("");
+  const [cloudBucket, setCloudBucket] = useState("");
+  const [cloudEndpoint, setCloudEndpoint] = useState("");
+  const [cloudAccess, setCloudAccess] = useState("");
+  const [cloudSecret, setCloudSecret] = useState("");
+  const [cloudAccessHint, setCloudAccessHint] = useState("");
+  const [cloudSecretHint, setCloudSecretHint] = useState("");
+  const [hasCloudKeys, setHasCloudKeys] = useState(false);
+  const [cloudPending, setCloudPending] = useState(false);
   const [telegramPending, setTelegramPending] = useState(false);
   const [mailPending, setMailPending] = useState(false);
   const [error, setError] = useState("");
@@ -666,6 +693,17 @@ function SettingsPanel({
       setHasTelegram(setup.hasTelegram);
       setTelegramEnabled(setup.telegramEnabled);
       setBackupSchedule(setup.backupSchedule);
+      setStatusWatch(setup.statusWatch);
+    }).catch(() => void 0);
+    getCloudSetup().then(setup => {
+      setCloudEnabled(setup.enabled);
+      setCloudProvider(setup.provider);
+      setCloudRegion(setup.region);
+      setCloudBucket(setup.bucket);
+      setCloudEndpoint(setup.endpoint);
+      setCloudAccessHint(setup.accessHint);
+      setCloudSecretHint(setup.secretHint);
+      setHasCloudKeys(setup.ready);
     }).catch(() => void 0);
   }, []);
   async function onFile(file, kind) {
@@ -739,7 +777,7 @@ function SettingsPanel({
           setNotice("");
           setPending(true);
           clearDatabase().then(() => setNotice("Database cleared. Settings and the desk login were kept.")).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The database could not be cleared.")).finally(() => setPending(false));
-        }}>{pending ? "Clearing…" : "Clear database"}</button></div></Fragment> : null}{section === "misc" ? <Fragment><p className="mt-2 text-fg">Mail delivery, the daily database backup, and site analytics.</p><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Database backup</h2><p className="mt-2 text-sm text-fg">The zip is sent only to the Telegram chat{backupSchedule ? " every day at 12:00 UTC on the published server" : ""}. It is one file and it is not emailed.{lastBackupAt ? ` Last backup: ${lastBackupAt.replace("T", " ").slice(0, 16)} UTC.` : " No backup has been sent yet."}</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={backupSchedule} onChange={event => {
+        }}>{pending ? "Clearing…" : "Clear database"}</button></div></Fragment> : null}{section === "misc" ? <Fragment><p className="mt-2 text-fg">Mail delivery, the daily database backup, and site analytics.</p><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Database backup</h2><p className="mt-2 text-sm text-fg">The zip goes to the Telegram chat{cloudEnabled ? " and to cloud storage" : ""}{backupSchedule ? " every day at 12:00 UTC on the published server" : ""}. It is one file and it is not emailed.{lastBackupAt ? ` Last backup: ${lastBackupAt.replace("T", " ").slice(0, 16)} UTC.` : " No backup has been sent yet."}</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={backupSchedule} onChange={event => {
             const enabled = event.target.checked;
             setBackupSchedule(enabled);
             setDeskSwitch({
@@ -758,7 +796,7 @@ function SettingsPanel({
           runDatabaseBackup().then(async result => {
             setLastBackupAt(result.at);
             await brand.refresh();
-            setNotice(result.telegram === "sent" ? "Backup sent to Telegram as one file." : result.telegram === "failed" ? "Telegram did not accept the backup." : "Save the Telegram bot token and chat id before sending a backup.");
+            setNotice(result.cloud === "sent" && result.telegram === "sent" ? "Backup sent to Telegram and cloud storage." : result.cloud === "sent" ? "Backup uploaded to cloud storage." : result.telegram === "sent" ? "Backup sent to Telegram as one file." : result.cloud === "failed" ? result.cloudError || "Cloud storage did not accept the backup." : result.telegram === "failed" ? "Telegram did not accept the backup." : "Save the Telegram bot token and chat id, or turn on cloud storage.");
           }).catch(() => setError("The backup could not be sent.")).finally(() => setBackupPending(false));
         }}>{backupPending ? "Preparing backup…" : "Send backup now"}</button><label className="mt-4 block text-sm"><span className="font-semibold text-primary">Restore a backup</span><input type="file" accept=".zip,.sql,application/zip,text/plain" className={`${controlClass} mt-1`} disabled={restorePending} onChange={event => {
             const file = event.target.files?.[0];
@@ -782,7 +820,72 @@ function SettingsPanel({
               setError("The backup file could not be read.");
             };
             reader.readAsDataURL(file);
-          }} /></label>{restorePending ? <p className="mt-2 text-sm text-fg">Restoring the backup…</p> : null}</div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Not used for sending. Client mail goes through SMTP2GO. Desk notices and database backups go to Telegram.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+          }} /></label>{restorePending ? <p className="mt-2 text-sm text-fg">Restoring the backup…</p> : null}</div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Cloud storage</h2><p className="mt-1 text-sm text-fg">The same daily zip is uploaded to a private backups folder. Pick the service, paste the bucket and keys, save, then test. Nothing else is installed.</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={cloudEnabled} onChange={event => {
+            const enabled = event.target.checked;
+            setCloudEnabled(enabled);
+            setDeskSwitch({
+              data: {
+                key: "cloud",
+                enabled
+              }
+            }).catch(() => {
+              setCloudEnabled(!enabled);
+              setError("Could not save the cloud backup switch.");
+            });
+          }} />Upload each backup to cloud storage</label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Service</span><select className={controlClass} value={cloudProvider} onChange={event => setCloudProvider(event.target.value)}><option value="r2">Cloudflare R2</option><option value="spaces">DigitalOcean Spaces</option><option value="s3">Amazon S3</option><option value="b2">Backblaze B2</option><option value="wasabi">Wasabi</option><option value="github">Private GitHub repo</option><option value="custom">Other S3-compatible</option></select></label><p className="mt-2 text-sm text-fg">{cloudProvider === "github" ? "Create a private repository. GitHub → Settings → Developer settings → Fine-grained tokens. Give that token Contents: Read and write on this repo only, then paste owner/name and the token." : cloudProvider === "r2" ? "R2 → Manage API tokens → Object Read & Write. Paste the Access Key ID, Secret, Account ID, and bucket name." : cloudProvider === "spaces" ? "Spaces → Create a Space, then API → Spaces keys. The region is the one in the Space URL, such as nyc3." : cloudProvider === "s3" ? "Create an IAM user that can put objects in the bucket, then paste the access key and secret." : cloudProvider === "b2" ? "Buckets → App keys. The region is the one in the endpoint, such as us-west-004." : cloudProvider === "wasabi" ? "Wasabi → Access keys. Use the region shown on the bucket, such as us-east-1." : "Use any store that accepts S3 uploads. The endpoint is the host only, like https://s3.example.com."}</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">{cloudProvider === "github" ? "Branch" : cloudProvider === "r2" ? "Account ID" : "Region"}</span><input className={controlClass} value={cloudRegion} placeholder={cloudProvider === "github" ? "main" : cloudProvider === "r2" ? "account id" : cloudProvider === "spaces" ? "nyc3" : cloudProvider === "b2" ? "us-west-004" : "us-east-1"} onChange={event => setCloudRegion(event.target.value)} /></label>{cloudProvider === "custom" ? <label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Endpoint</span><input className={controlClass} value={cloudEndpoint} placeholder="https://s3.example.com" onChange={event => setCloudEndpoint(event.target.value)} /></label> : null}<label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">{cloudProvider === "github" ? "Repository" : "Bucket"}</span><input className={controlClass} value={cloudBucket} placeholder={cloudProvider === "github" ? "owner/private-backups" : "account-holding-backups"} onChange={event => setCloudBucket(event.target.value)} /></label>{cloudProvider === "github" ? null : <label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Access key</span><input type="password" autoComplete="off" className={controlClass} value={cloudAccess} placeholder={cloudAccessHint ? `Saved ${cloudAccessHint}` : "Access key"} onChange={event => setCloudAccess(event.target.value)} /></label>}<label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">{cloudProvider === "github" ? "Personal access token" : "Secret key"}</span><input type="password" autoComplete="off" className={controlClass} value={cloudSecret} placeholder={cloudSecretHint ? `Saved ${cloudSecretHint}` : cloudProvider === "github" ? "github_pat_…" : "Secret key"} onChange={event => setCloudSecret(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={cloudPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setCloudPending(true);
+            saveCloudSetup({
+              data: {
+                provider: cloudProvider,
+                region: cloudRegion,
+                bucket: cloudBucket,
+                endpoint: cloudEndpoint,
+                accessKey: cloudAccess,
+                secretKey: cloudSecret
+              }
+            }).then(setup => {
+              setCloudProvider(setup.provider);
+              setCloudRegion(setup.region);
+              setCloudBucket(setup.bucket);
+              setCloudEndpoint(setup.endpoint);
+              setCloudAccess("");
+              setCloudSecret("");
+              setCloudAccessHint(setup.accessHint);
+              setCloudSecretHint(setup.secretHint);
+              setHasCloudKeys(setup.ready);
+              setNotice(setup.ready ? "Cloud storage saved. Test the connection before the next backup." : "Cloud storage saved. Finish the fields for this service.");
+            }).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "Could not save cloud storage.")).finally(() => setCloudPending(false));
+          }}>{cloudPending ? "Saving…" : "Save connection"}</button><button type="button" disabled={cloudPending || !hasCloudKeys} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setCloudPending(true);
+            testCloudSetup().then(() => setNotice("Connected. A test file was written to backups/connection-test.txt.")).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The connection failed.")).finally(() => setCloudPending(false));
+          }}>Test connection</button>{hasCloudKeys ? <button type="button" disabled={cloudPending} className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" onClick={() => {
+            setError("");
+            setNotice("");
+            setCloudPending(true);
+            saveCloudSetup({
+              data: {
+                provider: cloudProvider,
+                region: cloudRegion,
+                bucket: cloudBucket,
+                endpoint: cloudEndpoint,
+                clear: true
+              }
+            }).then(setup => {
+              setCloudBucket(setup.bucket);
+              setCloudRegion(setup.region);
+              setCloudEndpoint(setup.endpoint);
+              setCloudAccess("");
+              setCloudSecret("");
+              setCloudAccessHint(setup.accessHint);
+              setCloudSecretHint(setup.secretHint);
+              setHasCloudKeys(false);
+              setNotice("Cloud keys removed.");
+            }).catch(() => setError("Could not remove the cloud keys.")).finally(() => setCloudPending(false));
+          }}>Remove keys</button> : null}</div></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">Resend</h2><p className="mt-1 text-sm text-fg">Not used for sending. Client mail goes through SMTP2GO. Desk notices and database backups go to Telegram.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={resendKey} placeholder={hasKey ? `Saved ${keyHint}` : "re_..."} onChange={event => setResendKey(event.target.value)} /></label><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={mailPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setMailPending(true);
@@ -815,7 +918,19 @@ function SettingsPanel({
               setHasKey(setup.hasKey);
               setNotice("Resend API key removed.");
             }).catch(() => setError("Could not remove the Resend key.")).finally(() => setMailPending(false));
-          }}>Remove key</button> : null}</div></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">SMTP2GO</h2><p className="mt-1 text-sm text-fg">Sends advisor letters from each advisor’s verified mailbox, and transactional mail from the company address below. That address must be a verified sender in SMTP2GO. Open tracking uses the same API key.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={smtpKey} placeholder={hasSmtpKey ? `Saved ${smtpHint}` : "api-..."} onChange={event => setSmtpKey(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Transactional from address</span><input className={controlClass} value={mailFrom} placeholder="Account Holding <notifications@yourdomain.com>" onChange={event => setMailFrom(event.target.value)} /></label><p className="mt-2 text-sm text-fg">Used for application updates, invoices, payment receipts, desk copies, and the daily backup.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={smtpPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
+          }}>Remove key</button> : null}</div></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><h2 className="text-lg font-semibold text-primary">SMTP2GO</h2><p className="mt-1 text-sm text-fg">Sends advisor letters from each advisor’s verified mailbox, and transactional mail from the company address below. That address must be a verified sender in SMTP2GO. Open tracking uses the same API key.</p><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">API key</span><input type="password" autoComplete="off" className={controlClass} value={smtpKey} placeholder={hasSmtpKey ? `Saved ${smtpHint}` : "api-..."} onChange={event => setSmtpKey(event.target.value)} /></label><label className="mt-4 block"><span className="mb-1.5 block text-sm font-medium">Transactional from address</span><input className={controlClass} value={mailFrom} placeholder="Account Holding <notifications@yourdomain.com>" onChange={event => setMailFrom(event.target.value)} /></label><p className="mt-2 text-sm text-fg">Used for application updates, invoices, payment receipts, desk copies, and the daily backup.</p><label className="mt-3 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={statusWatch} onChange={event => {
+            const enabled = event.target.checked;
+            setStatusWatch(enabled);
+            setDeskSwitch({
+              data: {
+                key: "status",
+                enabled
+              }
+            }).catch(() => {
+              setStatusWatch(!enabled);
+              setError("Could not save the status check switch.");
+            });
+          }} />Check statuses every few minutes</label><p className="text-sm text-fg">SMTP2GO is checked every 5 minutes. A Telegram notice is sent only when a status changes.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={smtpPending} className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
             setError("");
             setNotice("");
             setSmtpPending(true);
@@ -1533,7 +1648,7 @@ function LeadsPanel({
             copy: applicationCopy
           }
         });
-        setNotice(`${kind === "promo" ? "Promotional" : "Custom term"} email sent to ${email.trim()}. The link expires in 24 hours.`);
+        setNotice(`${kind === "promo" ? "Promotional" : "Custom term"} email sent to ${email.trim()}. The link expires in 48 hours.`);
         setAppCopy(null);
       } else {
         await sendLeadIntro({
@@ -1556,7 +1671,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, an HTR follow-up, a custom-term application, or a promotional application. Application links expire after 24 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["htr", "HTR"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, an HTR follow-up, a custom-term application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["htr", "HTR"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -2202,6 +2317,13 @@ function IntroOpensPanel({
   const [advisors, setAdvisors] = useState([]);
   const [query, setQuery] = useState("");
   const [advisorId, setAdvisorId] = useState("");
+  const [reportFrom, setReportFrom] = useState(() => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - 30);
+    return date.toISOString().slice(0, 10);
+  });
+  const [reportTo, setReportTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reportApplications, setReportApplications] = useState(false);
   const [view, setView] = useState("open");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -2313,6 +2435,36 @@ function IntroOpensPanel({
         </select>
       </label>
     </div>
+    {view === "open" ? <div className="mt-3 flex flex-wrap items-end gap-3">
+      <label className="block text-sm"><span className="font-semibold text-primary">From</span><input type="date" className={`${controlClass} mt-1`} value={reportFrom} onChange={event => setReportFrom(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">To</span><input type="date" className={`${controlClass} mt-1`} value={reportTo} onChange={event => setReportTo(event.target.value)} /></label>
+      <label className="mb-2 flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={reportApplications} onChange={event => setReportApplications(event.target.checked)} />Application email sent</label>
+      <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => {
+        setError("");
+        setNotice("");
+        setPending(true);
+        downloadOpensReport({
+          data: {
+            from: reportFrom,
+            to: reportTo,
+            advisorId,
+            applicationsOnly: reportApplications
+          }
+        }).then(({
+          pdf,
+          filename
+        }) => {
+          const bytes = Uint8Array.from(atob(pdf), char => char.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = filename;
+          link.click();
+          URL.revokeObjectURL(url);
+          setNotice("Opens report downloaded.");
+        }).catch(caught => setError(caught instanceof Error && caught.message ? caught.message : "The report could not be created.")).finally(() => setPending(false));
+      }}>{pending ? "Preparing…" : "Download PDF"}</button>
+    </div> : null}
     <ul className="mt-4 grid gap-3">
       {(rows ?? []).filter(row => {
         const needle = query.trim().toLowerCase();

@@ -234,6 +234,7 @@ if (typeof window === "undefined" && dbSource === "pglite") {
     .then(() => {
       startBackupSchedule();
       startInviteReminders();
+      startMailStatusSchedule();
     })
     .catch((err) => {
       globalBoot.__pgBootstrapPromise__ = undefined;
@@ -244,6 +245,7 @@ if (typeof window === "undefined" && dbSource === "pglite") {
   startBackupSchedule();
   startInviteReminders();
   startInboxSchedule();
+  startMailStatusSchedule();
 }
 
 function startInviteReminders() {
@@ -255,6 +257,18 @@ function startInviteReminders() {
     .catch((err) => {
       boot.__inviteBoot = false;
       console.error("[db] Invite reminder schedule failed:", err);
+    });
+}
+
+function startMailStatusSchedule() {
+  const boot = globalThis as typeof globalThis & { __mailStatusBoot?: boolean };
+  if (boot.__mailStatusBoot) return;
+  boot.__mailStatusBoot = true;
+  void import("@/lib/mail.server")
+    .then((mod) => mod.ensureMailStatusSchedule())
+    .catch((err) => {
+      boot.__mailStatusBoot = false;
+      console.error("[db] Mail status schedule failed:", err);
     });
 }
 
