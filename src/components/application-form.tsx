@@ -104,6 +104,7 @@ export function ApplicationForm() {
   const [terms, setTerms] = useState<CdTerm[]>([]);
   const [offer, setOffer] = useState<PromoOffer>(EMPTY_PROMO);
   const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired" | "used">("none");
+  const [inviteKind, setInviteKind] = useState("");
   const [inviteToken, setInviteToken] = useState("");
   const [inviteRequested, setInviteRequested] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
@@ -128,8 +129,8 @@ export function ApplicationForm() {
     const draft = loadDraft();
     if (!invite) {
       const term = params.get("term")?.replace(/\D/g, "") || "";
-      const code = params.get("code")?.trim().slice(0, 40) || "";
-      setForm({ ...draft, preferredTerm: term || draft.preferredTerm, promoCode: code || draft.promoCode || "", inviteToken: "" });
+      setForm({ ...draft, preferredTerm: term || draft.preferredTerm, promoCode: "", inviteToken: "" });
+      setInviteKind("");
       setInviteGate("none");
       setReady(true);
       return;
@@ -157,6 +158,7 @@ export function ApplicationForm() {
           inviteToken: invite,
           firstName: draft.firstName || first,
         });
+        setInviteKind(result.kind || "");
         setInviteGate("open");
         setReady(true);
       })
@@ -399,7 +401,7 @@ export function ApplicationForm() {
             {step === 2 ? <Address form={form} patch={patch} /> : null}
             {step === 3 ? (
               <div className="grid min-w-0 gap-10">
-                <Preference form={form} patch={patch} terms={terms} offer={offer} locked={inviteGate === "open"} />
+                <Preference form={form} patch={patch} terms={terms} offer={offer} locked={inviteGate === "open"} showPromo={inviteGate === "open" && inviteKind === "promo"} />
                 <Financial form={form} patch={patch} />
                 <Funding form={form} patch={patch} />
               </div>
@@ -605,16 +607,18 @@ function Preference({
   terms,
   offer,
   locked = false,
+  showPromo = false,
 }: {
   form: FormState;
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   terms: CdTerm[];
   offer: PromoOffer;
   locked?: boolean;
+  showPromo?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
-  const promo = new Set(promoMonths(offer));
+  const promo = new Set(showPromo ? promoMonths(offer) : []);
   const ordered = locked
     ? terms.filter((term) => String(term.months) === form.preferredTerm)
     : [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
@@ -632,7 +636,7 @@ function Preference({
 
   return (
     <div className="grid min-w-0 max-w-full gap-5">
-      <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : "Choose a term and the amount you expect to invest. Promotional terms are shown first."} />
+      <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : "Choose a term and the amount you expect to invest."} />
       {shown.length === 0 ? (
         <p className="text-sm text-fg">No certificate terms are available right now.</p>
       ) : locked ? (
@@ -708,9 +712,9 @@ function Preference({
           </div>
         </div>
       )}
-      <Field label="Promotional code">
+      {showPromo ? <Field label="Promotional code">
         <input className={controlClass} value={form.promoCode} placeholder="Optional" readOnly={locked} onChange={(event) => patch("promoCode", event.target.value)} />
-      </Field>
+      </Field> : null}
       <Field label="Preferred investment amount">
         <input
           className={controlClass}
@@ -720,7 +724,7 @@ function Preference({
           onChange={(event) => patch("preferredAmount", event.target.value)}
         />
       </Field>
-      {tiers.length > 0 ? (
+      {showPromo && tiers.length > 0 ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white text-sm">
           <div className="border-b border-border px-4 py-3 font-semibold text-primary">{months}-month promo bonus</div>
           {offer.startsOn && offer.endsOn ? (

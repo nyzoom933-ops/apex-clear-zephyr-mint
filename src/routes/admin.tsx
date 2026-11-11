@@ -63,6 +63,9 @@ import {
   sendLeadApplication,
   updateFunding,
   downloadInvoicePdf,
+  previewAdvisorInvoice,
+  sendAdvisorInvoice,
+  listInvoiceMail,
   saveInvoiceBilling,
   approveInvoice,
   getCdTerms,
@@ -1073,13 +1076,20 @@ function ImageSetting({
   return <div className="rounded-lg border border-border bg-surface p-4"><p className="text-sm font-semibold text-primary">{label}</p>{hint ? <p className="mt-1 text-sm text-fg">{hint}</p> : null}<div className={"mt-3 flex items-center justify-center overflow-hidden rounded-md border border-border bg-bg " + (wide ? "h-36" : "h-16")}>{value ? <img src={value} alt="" className={"max-w-full " + (wide ? "h-full w-full object-cover" : "max-h-12 object-contain")} /> : <span className="text-sm text-fg">No image</span>}</div><input type="file" accept={accept} className="mt-3 block w-full text-sm" onChange={event => onFile(event.target.files?.[0])} /><button type="button" className="mt-3 text-sm font-semibold text-primary" onClick={onClear}>Remove</button></div>;
 }
 function InvoicesDesk() {
+  const [view, setView] = useState("open");
   const [rows, setRows] = useState(null);
+  const [sent, setSent] = useState(null);
+  const [openId, setOpenId] = useState("");
   const [error, setError] = useState("");
   function load() {
     return listFundings().then(next => setRows(next.filter(row => row.signed && (row.status === "approved_phone" || row.status === "instructions_sent")))).catch(() => setError("Invoices could not be loaded."));
   }
+  function loadSent() {
+    return listInvoiceMail().then(next => setSent(next)).catch(() => setError("Sent invoice emails could not be loaded."));
+  }
   useEffect(() => {
     load();
+    loadSent();
   }, []);
   async function removeInvoice(id) {
     if (!window.confirm("Remove this invoice and its investment? No email will be sent.")) return;
@@ -1095,7 +1105,7 @@ function InvoicesDesk() {
       setError(caught instanceof Error ? caught.message : "The invoice could not be removed.");
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Invoices</h1><p className="mt-2 text-fg">Signed certificates approved by phone. Approve an invoice here to generate it for the client.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{!rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.length === 0 ? <p className="mt-4 text-sm text-fg">No certificates are waiting for an invoice.</p> : <ul className="mt-4 grid gap-4">{rows.map(row => <InvoiceCard key={row.id} row={row} onApproved={() => void load()} onRemove={() => void removeInvoice(row.id)} />)}</ul>}</section>;
+  return <section><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Invoices</h1><p className="mt-2 max-w-2xl text-fg">Approve an invoice to generate it and send the transactional email. Preview the advisor letter before it is sent from the advisor mailbox.</p></div><div className="flex gap-2"><button type="button" className={"min-h-11 rounded-md border px-4 py-2 text-sm font-semibold " + (view === "open" ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setView("open")}>To send</button><button type="button" className={"min-h-11 rounded-md border px-4 py-2 text-sm font-semibold " + (view === "sent" ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => { setView("sent"); void loadSent(); }}>Sent{sent ? ` (${sent.length})` : ""}</button></div></div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{view === "sent" ? !sent ? <p className="mt-4 text-sm text-fg">Loading…</p> : sent.length === 0 ? <p className="mt-4 text-sm text-fg">No invoice emails have been sent yet.</p> : <ul className="mt-4 grid gap-3">{sent.map(item => <li key={item.id} className="rounded-lg border border-border bg-surface p-4"><button type="button" className="flex w-full flex-wrap items-baseline justify-between gap-2 text-left" onClick={() => setOpenId(current => current === item.id ? "" : item.id)}><span><span className="block font-semibold text-primary">{item.subject || "Invoice email"}</span><span className="text-sm text-fg">{item.recipient} · {item.createdAt} UTC</span></span><span className="text-xs font-semibold tracking-wide text-primary uppercase">{item.step === "invoice_advisor" ? "Advisor letter" : "Transactional"} · {item.delivery === "sent" ? item.mailStatus || "Sent" : item.delivery || "Logged"}</span></button>{openId === item.id && item.html ? <iframe title={item.subject || "Sent letter"} sandbox="allow-same-origin" className="mt-4 h-[720px] w-full rounded-md border border-border bg-[#f2f5f8]" srcDoc={item.html} /> : null}</li>)}</ul> : !rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.length === 0 ? <p className="mt-4 text-sm text-fg">No certificates are waiting for an invoice.</p> : <ul className="mt-4 grid gap-4">{rows.map(row => <InvoiceCard key={row.id} row={row} onApproved={() => { void load(); void loadSent(); }} onRemove={() => void removeInvoice(row.id)} />)}</ul>}</section>;
 }
 var BILLING_FIELDS = [{
   key: "brand",
@@ -1142,6 +1152,7 @@ function InvoiceCard({
   onRemove
 }) {
   const [billing, setBilling] = useState(row.billing);
+  const [letter, setLetter] = useState(null);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -1224,7 +1235,45 @@ function InvoiceCard({
       setPending("");
     }
   }
-  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
+  async function emailAdvisor() {
+    setError("");
+    setNotice("");
+    setPending("preview");
+    try {
+      const next = await previewAdvisorInvoice({
+        data: {
+          id: row.id,
+          billing
+        }
+      });
+      setLetter(next);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The letter could not be prepared.");
+    } finally {
+      setPending("");
+    }
+  }
+  async function sendAdvisorLetter() {
+    setError("");
+    setNotice("");
+    setPending("advisor");
+    try {
+      await sendAdvisorInvoice({
+        data: {
+          id: row.id,
+          billing
+        }
+      });
+      setLetter(null);
+      setNotice("The advisor letter was sent with a link to the invoice PDF.");
+      onApproved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The advisor letter could not be sent.");
+    } finally {
+      setPending("");
+    }
+  }
+  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4 overflow-hidden rounded-xl border border-border bg-[#e8e8e8]"><div className="border-b border-border bg-white px-5 py-4 text-sm"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><p className="mt-2 text-fg">To {letter.to}</p><p className="text-fg">From {letter.fromName} · {letter.fromEmail}</p><p className="mt-1 font-semibold text-primary">{letter.subject}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div><iframe title="Advisor invoice letter" sandbox="allow-same-origin" className="h-[720px] w-full bg-[#f2f5f8]" srcDoc={letter.html} /></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
 }
 function ActiveCdsDesk() {
   const [rows, setRows] = useState(null);

@@ -3387,6 +3387,51 @@ export const downloadInvoicePdf = createServerFn({ method: "POST" })
     return { pdf };
   });
 
+export async function invoicePdfForToken(sql: Sql, token: string) {
+  if (!/^[a-f0-9]{32,80}$/i.test(token)) return null;
+  await ensureInvoiceBillingColumn(sql);
+  await sql`alter table fundings add column if not exists invoice_token text not null default ''`;
+  const rows = await sql<{
+    status: string;
+    email: string;
+    amount: string;
+    reference_number: string;
+    applicant_name: string | null;
+    payload: ApplicationPayload | string | null;
+    invoice_billing: unknown;
+  }>`
+    select f.status, f.email, f.amount, f.reference_number, app.applicant_name, app.payload, f.invoice_billing
+    from fundings f
+    left join lateral (
+      select applicant_name, payload from applications
+      where lower(email) = lower(f.email)
+      order by submitted_at desc nulls last
+      limit 1
+    ) app on true
+    where f.invoice_token = ${token}
+    limit 1
+  `;
+  const row = rows[0];
+  if (!row || (row.status !== "instructions_sent" && row.status !== "payment_approved")) return null;
+  const payload = row.payload ? (typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload) : null;
+  const clientName = row.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || row.email;
+  const address = [
+    [payload?.street, payload?.apt].filter(Boolean).join(" "),
+    [payload?.city, payload?.region, payload?.postal].filter(Boolean).join(", "),
+    payload?.country ?? "",
+  ].filter(Boolean);
+  const { buildInvoicePdf } = await import("@/lib/investment-pdf.server");
+  const brand = await readPdfBrand(sql);
+  return buildInvoicePdf({
+    clientName,
+    address,
+    amount: row.amount,
+    billing: resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number),
+    logo: brand.logo,
+    companyAddress: brand.companyAddress,
+  });
+}
+
 export const saveInvoiceBilling = createServerFn({ method: "POST" })
   .validator((input: { id: string; billing: InvoiceBilling }) => {
     const billing = { ...input.billing };
@@ -3440,6 +3485,164 @@ export const approveInvoice = createServerFn({ method: "POST" })
     }
     return { ok: true as const };
   });
+
+async function advisorInvoiceLetter(sql: Sql, id: string) {
+  const { invoiceAdvisorLetter } = await import("@/lib/email-templates");
+  await ensureInvoiceBillingColumn(sql);
+  await sql`alter table fundings add column if not exists invoice_token text not null default ''`;
+  const rows = await sql<{
+    id: string;
+    status: string;
+    email: string;
+    amount: string;
+    term_label: string;
+    reference_number: string;
+    promo_apy: string;
+    final_apy: string;
+    advisor_id: string;
+    invoice_billing: unknown;
+    invoice_token: string;
+    applicant_name: string | null;
+  }>`
+    select f.id, f.status, f.email, f.amount, f.term_label, f.reference_number, f.promo_apy, f.final_apy,
+           coalesce(f.advisor_id, '') as advisor_id, f.invoice_billing, coalesce(f.invoice_token, '') as invoice_token,
+           app.applicant_name
+    from fundings f
+    left join lateral (
+      select applicant_name from applications
+      where lower(email) = lower(f.email)
+      order by submitted_at desc nulls last
+      limit 1
+    ) app on true
+    where f.id = ${id}
+  `;
+  const row = rows[0];
+  if (!row || row.status !== "instructions_sent") throw new Error("Generate the invoice before sending this letter.");
+  if (!row.advisor_id) throw new Error("Assign an advisor on the investment before sending this letter.");
+  const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`
+    select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone
+    from advisors where id = ${row.advisor_id}
+  `;
+  const found = advisors[0];
+  if (!found) throw new Error("Assign an advisor on the investment before sending this letter.");
+  if (!found.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+  const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_name', 'company_phone')`;
+  const origin = (settings.find((item) => item.key === "public_domain")?.value || "").trim().replace(/\/$/, "");
+  if (!/^https?:\/\//i.test(origin)) throw new Error("Set the public domain in Settings before sending this email.");
+  let token = row.invoice_token.trim();
+  if (!token) {
+    token = randomBytes(24).toString("hex");
+    await sql`update fundings set invoice_token = ${token} where id = ${row.id}`;
+  }
+  const clientName = row.applicant_name || row.email;
+  const billing = resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number);
+  if (!billing.crn) throw new Error("Add the CRN on the invoice before sending this letter.");
+  const rates = row.final_apy ? { promo: row.promo_apy || "—", final: row.final_apy } : ratesFor(row.term_label, row.amount, (await loadPromo(sql)).tiers);
+  const amountNumber = Number(row.amount.replace(/[^0-9.]/g, ""));
+  const amount = row.amount.trim().startsWith("$") ? row.amount.trim() : Number.isFinite(amountNumber) ? amountNumber.toLocaleString("en-US", { style: "currency", currency: "USD" }) : row.amount;
+  const months = row.term_label.match(/(\d+)-month/)?.[1] || "";
+  const link = `${origin}/invoice/${token}`;
+  const company = settings.find((item) => item.key === "company_name")?.value || "";
+  const companyPhone = settings.find((item) => item.key === "company_phone")?.value || "";
+  const advisor = { ...found, personalPhone: found.personal_phone };
+  const letter = invoiceAdvisorLetter({
+    clientName,
+    company,
+    amount,
+    finalApy: rates.final,
+    term: months ? `${months}-month` : "",
+    crn: billing.crn,
+    promo: Boolean(rates.promo && rates.promo !== "—"),
+    link,
+    advisor,
+    logo: settings.find((item) => item.key === "email_logo")?.value || null,
+    portalUrl: origin,
+    companyPhone,
+  });
+  return { row, clientName, amount, rates, billing, link, advisor, letter };
+}
+
+function cleanInvoiceBilling(billing: InvoiceBilling) {
+  const next = { ...billing };
+  (Object.keys(next) as Array<keyof InvoiceBilling>).forEach((key) => {
+    next[key] = String(next[key] ?? "").trim();
+  });
+  if (!next.bankName || !next.accountName || !next.beneficiaryAddress || !next.accountNumber || !next.routingNumber || !next.crn || !next.purpose) {
+    throw new Error("Fill in every billing field.");
+  }
+  return next;
+}
+
+export const previewAdvisorInvoice = createServerFn({ method: "POST" })
+  .validator((input: { id: string; billing: InvoiceBilling }) => ({ id: (input.id || "").trim(), billing: cleanInvoiceBilling(input.billing) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureInvoiceBillingColumn(sql);
+    await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
+    const prepared = await advisorInvoiceLetter(sql, data.id);
+    return {
+      subject: prepared.letter.subject,
+      html: prepared.letter.html,
+      to: prepared.row.email,
+      fromName: prepared.advisor.name,
+      fromEmail: prepared.advisor.mailbox,
+    };
+  });
+
+export const sendAdvisorInvoice = createServerFn({ method: "POST" })
+  .validator((input: { id: string; billing: InvoiceBilling }) => ({ id: (input.id || "").trim(), billing: cleanInvoiceBilling(input.billing) }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureInvoiceBillingColumn(sql);
+    await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
+    const prepared = await advisorInvoiceLetter(sql, data.id);
+    const { row, clientName, amount, rates, billing, link, advisor, letter } = prepared;
+    await sendStep(sql, {
+      step: "invoice_advisor",
+      clientEmail: row.email,
+      clientName,
+      detail: letter.text,
+      adminDetail: [clientName, row.email, `${amount} @ ${rates.final}`, billing.crn ? `CRN ${billing.crn}` : "", "Invoice", link].filter(Boolean).join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: row.id,
+      advisorId: row.advisor_id,
+    });
+    return { ok: true as const };
+  });
+
+export const listInvoiceMail = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { ensureMailColumn } = await import("@/lib/mail.server");
+  const sql = await getSql();
+  await ensureMailColumn(sql);
+  const rows = await sql<{ id: string; created_at: string; recipient: string; step: string; subject: string; html: string; delivery: string; mail_status: string }>`
+    select id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at,
+           recipient, step, subject, html, delivery, mail_status
+    from notifications
+    where audience = 'client' and step in ('invoice_advisor', 'instructions_sent')
+    order by created_at desc
+    limit 200
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    recipient: row.recipient,
+    step: row.step,
+    subject: row.subject,
+    html: row.html || "",
+    delivery: row.delivery,
+    mailStatus: row.mail_status || "",
+  }));
+});
 
 function usDate(iso: string) {
   const [year, month, day] = iso.split("-");

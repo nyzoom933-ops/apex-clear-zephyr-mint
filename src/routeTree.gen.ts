@@ -16,6 +16,7 @@ import { Route as EmailLogoRouteImport } from './routes/email-logo'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as InvoiceTokenRouteImport } from './routes/invoice/$token'
 import { Route as ApiCronBackupRouteImport } from './routes/api/cron/backup'
 import { Route as ApiCronLeadRemindersRouteImport } from './routes/api/cron/lead-reminders'
 
@@ -54,6 +55,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InvoiceTokenRoute = InvoiceTokenRouteImport.update({
+  id: '/invoice/$token',
+  path: '/invoice/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCronBackupRoute = ApiCronBackupRouteImport.update({
   id: '/api/cron/backup',
   path: '/api/cron/backup',
@@ -73,6 +79,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/invoice/$token': typeof InvoiceTokenRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
   '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
 }
@@ -84,6 +91,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/invoice/$token': typeof InvoiceTokenRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
   '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
 }
@@ -96,6 +104,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/invoice/$token': typeof InvoiceTokenRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
   '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
 }
@@ -109,6 +118,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/portal'
     | '/reset-password'
+    | '/invoice/$token'
     | '/api/cron/backup'
     | '/api/cron/lead-reminders'
   fileRoutesByTo: FileRoutesByTo
@@ -120,6 +130,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/portal'
     | '/reset-password'
+    | '/invoice/$token'
     | '/api/cron/backup'
     | '/api/cron/lead-reminders'
   id:
@@ -131,6 +142,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/portal'
     | '/reset-password'
+    | '/invoice/$token'
     | '/api/cron/backup'
     | '/api/cron/lead-reminders'
   fileRoutesById: FileRoutesById
@@ -143,6 +155,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   PortalRoute: typeof PortalRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  InvoiceTokenRoute: typeof InvoiceTokenRoute
   ApiCronBackupRoute: typeof ApiCronBackupRoute
   ApiCronLeadRemindersRoute: typeof ApiCronLeadRemindersRoute
 }
@@ -198,6 +211,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/invoice/$token': {
+      id: '/invoice/$token'
+      path: '/invoice/$token'
+      fullPath: '/invoice/$token'
+      preLoaderRoute: typeof InvoiceTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cron/backup': {
       id: '/api/cron/backup'
       path: '/api/cron/backup'
@@ -223,6 +243,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   PortalRoute: PortalRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  InvoiceTokenRoute: InvoiceTokenRoute,
   ApiCronBackupRoute: ApiCronBackupRoute,
   ApiCronLeadRemindersRoute: ApiCronLeadRemindersRoute,
 }

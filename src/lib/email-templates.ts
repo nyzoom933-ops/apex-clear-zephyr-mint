@@ -19,7 +19,8 @@ export type MailStep =
   | "lead_promo"
   | "lead_invite_reminder"
   | "lead_extension"
-  | "lead_htr";
+  | "lead_htr"
+  | "invoice_advisor";
 
 export type MailAudience = "client" | "admin";
 
@@ -186,6 +187,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminSubject: "HTR follow-up sent to {{name}}",
     adminLead: "A follow-up was sent to {{name}} ({{email}}) after they could not be reached.",
   },
+  invoice_advisor: {
+    label: "Advisor invoice letter",
+    clientSubject: "Your CD is ready for funding",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Advisor invoice letter sent to {{name}}",
+    adminLead: "An advisor sent {{name}} ({{email}}) a personal invoice letter.",
+  },
 };
 
 export const SAMPLE_EMAIL = {
@@ -217,7 +226,7 @@ export function renderStep(
   const lead = fill(audience === "client" ? item.clientLead : item.adminLead, name, input.email, company);
   const subject = fill(audience === "client" ? item.clientSubject : item.adminSubject, name, input.email, company);
   const next = audience === "client" && item.clientNext ? fill(item.clientNext, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -232,7 +241,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   return {
     step,
     audience,
@@ -285,16 +294,34 @@ function companyCredit(company: string) {
   return `${escapeHtml(company)}. © ${new Date().getFullYear()}`;
 }
 
-function advisorSignature(advisor: MailAdvisor | undefined, company: string) {
+function advisorSignature(advisor: MailAdvisor | undefined, company: string, extra?: { closing?: string }) {
   const name = advisor?.name?.trim() || company;
   const direct = advisor?.personalPhone?.trim() || advisor?.phone?.trim() || "";
-  const email = advisor?.email?.trim() || "";
+  const email = advisor?.email?.trim() || advisor?.mailbox?.trim() || "";
   const role = advisor?.role?.trim() || "";
-  const mailbox = advisor?.mailbox?.trim() && advisor.mailbox.trim().toLowerCase() !== email.toLowerCase() ? advisor.mailbox.trim() : "";
   const firm = company.trim() && company.trim().toLowerCase() !== name.toLowerCase() ? company.trim() : "";
-  const html = `Best regards,<br><strong>${escapeHtml(name)}</strong>${role ? `<br>${escapeHtml(role)}` : ""}${direct ? `<br>${escapeHtml(direct)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}${mailbox ? `<br>${escapeHtml(mailbox)}` : ""}${firm ? `<br>${escapeHtml(firm)}` : ""}`;
-  const text = ["Best regards", name, role, direct, email, mailbox, firm].filter(Boolean).join("\n");
+  const closing = extra?.closing?.trim() || "Best regards";
+  const row = (label: string, value: string) => `<tr><td style="padding:1px 12px 1px 0; font-family:Arial, Helvetica, sans-serif; font-size:13px; line-height:18px; color:#5a6a7a; vertical-align:top;">${label}</td><td style="padding:1px 0; font-family:Arial, Helvetica, sans-serif; font-size:13px; line-height:18px; color:#1a1a1a;">${value}</td></tr>`;
+  const phone = direct ? signatureTextLink(direct, `tel:${direct.replace(/[^\d+]/g, "")}`) : "";
+  const mail = email ? signatureTextLink(email, `mailto:${email}`) : "";
+  const rows = [phone ? row("Direct", phone) : "", mail ? row("Email", mail) : ""].join("");
+  const html = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+    <tr><td style="padding:0 0 10px 0; font-size:15px; line-height:22px;">${escapeHtml(closing)},</td></tr>
+    <tr><td style="border-left:3px solid #006fcf; padding:0 0 0 12px;">
+      <p style="margin:0; font-size:16px; line-height:22px; font-weight:700; color:#12315c;">${escapeHtml(name)}</p>
+      ${role ? `<p style="margin:2px 0 0 0; font-size:13px; line-height:18px; color:#3d3d3d;">${escapeHtml(role)}</p>` : ""}
+      ${firm ? `<p style="margin:1px 0 0 0; font-size:13px; line-height:18px; color:#3d3d3d;">${escapeHtml(firm)}</p>` : ""}
+      ${rows ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:8px;">${rows}</table>` : ""}
+    </td></tr>
+  </table>`;
+  const text = [closing + ",", "", name, role, firm, direct ? `Direct: ${direct}` : "", email ? `Email: ${email}` : ""].filter(Boolean).join("\n");
   return { html, text };
+}
+
+function signatureTextLink(label: string, href: string) {
+  const safe = escapeHtml(label);
+  if (!href) return safe;
+  return `<a href="${escapeHtml(href)}" style="color:#1a1a1a; text-decoration:none;">${safe}</a>`;
 }
 
 export function advisorNoteLetter(input: { company: string; companyPhone?: string; logo?: string | null; advisor: MailAdvisor; greeting: string; message: string; quote?: string; pageUrl?: string; logoCid?: string }) {
@@ -1143,11 +1170,10 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
-  const sign = advisorSignature(input.advisor, company);
-  const signed = sign.html.replace("Best regards,", "Sincerely,");
+  const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
   const help = companyHelp(input.companyPhone);
   const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(value)}</p>`;
-  const text = [`Dear ${name},`, stripMarks(opening), stripMarks(offer), stripMarks(decline), stripMarks(closing), sign.text.replace("Best regards", "Sincerely"), input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
+  const text = [`Dear ${name},`, stripMarks(opening), stripMarks(offer), stripMarks(decline), stripMarks(closing), sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1171,7 +1197,7 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
           ${paragraph(offer)}
           ${paragraph(decline)}
           ${paragraph(closing)}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${signed}</p>
+          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -1189,6 +1215,97 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
 
 function sampleHtrLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
   return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone }).html;
+}
+
+export function invoiceAdvisorLetter(input: {
+  clientName: string;
+  company: string;
+  amount: string;
+  finalApy: string;
+  term: string;
+  crn: string;
+  promo: boolean;
+  link: string;
+  advisor?: MailAdvisor;
+  logo?: string | null;
+  portalUrl?: string;
+  companyPhone?: string;
+}) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.clientName.trim() || "Client";
+  const rate = input.finalApy.includes("%") ? input.finalApy : `${input.finalApy}%`;
+  const term = input.term ? ` (${input.term})` : "";
+  const subject = "Your CD is ready for funding";
+  const ready = `Thank you for choosing ${company} for your financial needs. We are pleased to inform you that your Certificate of Deposit (CD) for ${input.amount} @ ${rate} APY${term} is now ready for funding.`;
+  const crnNote = input.promo
+    ? `When making the payment, kindly pay extra attention to the Customer Reference Number (CRN). This number is the same as your Customer ID: ${input.crn} and is unique to you. It is crucial that this CRN is used correctly, as it will be used to confirm that the funds are allocated to the correct CD with your chosen promotional offer for new customers.`
+    : `When making the payment, kindly pay extra attention to the Customer Reference Number (CRN). This number is the same as your Customer ID: ${input.crn} and is unique to you. It is crucial that this CRN is used correctly, as it will be used to confirm that the funds are allocated to the correct CD.`;
+  const penalty = "Please note that after the first 90 days from the date your funds are credited to your CD account, there are no early-withdrawal penalties.";
+  const proof = "Once you have made payment into your CD, kindly reply to this email with proof of payment so I can follow it up with the accounts department.";
+  const questions = "If you have any questions or need further assistance, please do not hesitate to reach out.";
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
+  const mark = logo
+    ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
+    : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
+  const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
+  const help = companyHelp(input.companyPhone);
+  const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(value)}</p>`;
+  const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:18px 0 0 0;"><tr><td style="background:#006fcf;"><a href="${escapeHtml(input.link || "#")}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">CD Payment Invoice</a></td></tr></table>`;
+  const text = [`Dear ${name},`, ready, "Please find the link to your invoice below:", input.link ? `CD Payment Invoice\n${input.link}` : "", crnNote, penalty, proof, questions, sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">Your certificate is ready for funding.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;">
+    <tr><td align="center" style="padding:20px 10px;">
+      <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
+        <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
+        <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:28px 36px 8px 36px;">
+          <p style="margin:0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
+          ${paragraph(ready)}
+          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Please find the link to your invoice below:</p>
+          ${button}
+          ${paragraph(crnNote)}
+          ${paragraph(penalty)}
+          ${paragraph(proof)}
+          ${paragraph(questions)}
+          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        </td></tr>
+        <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+          <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+          <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
+        </td></tr>
+        <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
+          <p style="margin:0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+  return { subject, text, html };
+}
+
+function sampleInvoiceAdvisorLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  return invoiceAdvisorLetter({
+    clientName: "Jonah Hale",
+    company: DEFAULT_COMPANY_NAME,
+    amount: "$250,000.00",
+    finalApy: "5.525%",
+    term: "22-month",
+    crn: "AH-004821",
+    promo: true,
+    link: portalUrl ? `${portalUrl.replace(/\/$/, "")}/invoice/sample` : "",
+    advisor,
+    portalUrl,
+    companyPhone,
+  }).html;
 }
 
 function richText(value: string) {
