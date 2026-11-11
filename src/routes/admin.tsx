@@ -2237,12 +2237,13 @@ function pipelineView(row) {
   const paymentIn = Boolean(row.paymentUploaded) || row.certificateActive;
   const packageSent = Boolean(row.confirmationMailStatus) || row.certificateActive;
   const investmentDone = applied && (signed || invoiceApproved || row.certificateActive);
-  const done = [true, applied, investmentDone, investmentDone && invoiceApproved, investmentDone && invoiceApproved && paymentIn, investmentDone && invoiceApproved && paymentIn && packageSent, row.certificateActive];
+  const promoSent = Boolean(row.mailStatus);
+  const done = [promoSent || row.applicationSent || applied, applied, investmentDone, investmentDone && invoiceApproved, investmentDone && invoiceApproved && paymentIn, investmentDone && invoiceApproved && paymentIn && packageSent, row.certificateActive];
   const current = done.findIndex(flag => !flag);
-  const promo = [mailBadge(row.mailStatus) || {
+  const promo = promoSent ? [mailBadge(row.mailStatus) || {
     text: "Sent",
     tone: "info"
-  }];
+  }] : [];
   const application = [];
   if (applied) application.push({
     text: "Applied",
@@ -2461,7 +2462,7 @@ function IntroOpensPanel({
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-3xl font-semibold">{view === "trash" ? "Trash" : "Opens"}</h1>
-        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "Each lead starts with the promo email. Status badges sit under the step. An expired application link can be sent again."}</p>
+        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "A lead appears after a promo email or an application email. Status badges sit under the step. An expired application link can be sent again."}</p>
       </div>
       {view === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button> : null}
     </div>
@@ -2572,7 +2573,7 @@ function IntroOpensPanel({
         </li>;
       })}
     </ul>
-    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">{view === "trash" ? "Trash is empty." : "No rates introductions have been sent yet."}</p> : rows && !rows.some(row => {
+    {rows && rows.length === 0 ? <p className="mt-4 text-sm text-fg">{view === "trash" ? "Trash is empty." : "No promo or application emails have been sent yet."}</p> : rows && !rows.some(row => {
       const needle = query.trim().toLowerCase();
       const lead = `${row.name} ${row.email} ${row.phone || ""}`.toLowerCase();
       if (needle && !lead.includes(needle)) return false;

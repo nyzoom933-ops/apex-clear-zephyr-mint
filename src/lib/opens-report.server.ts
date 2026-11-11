@@ -108,7 +108,7 @@ export async function buildOpensReportPdf(input: { company: string; from: string
       row.email,
       row.advisorName || "No advisor",
       openStage(row),
-      statusLabel(row.mailStatus),
+      row.mailStatus ? statusLabel(row.mailStatus) : "Not sent",
       applicationLabel(row),
     ];
     let x = left + 4;
@@ -141,6 +141,7 @@ function openStage(row: OpenRow) {
   if (invoiceApproved) return "Invoice";
   if (row.fundingStatus || row.investmentSigned) return "Investment";
   if (row.applicationStatus) return "Application";
+  if (row.applicationSent) return "Application";
   return "Promo";
 }
 

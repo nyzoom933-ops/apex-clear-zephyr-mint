@@ -1401,6 +1401,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
       relatedId: data.advisorId,
       advisorId: data.advisorId,
     });
+    await releaseOpen(sql, data.email);
     return { ok: true as const };
   });
 
@@ -1603,6 +1604,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       relatedId: token,
       advisorId: data.advisorId,
     });
+    await releaseOpen(sql, data.email);
     return { ok: true as const };
   });
 
@@ -1965,13 +1967,18 @@ export const removeIntroOpen = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureOpenTrash(sql);
-    await sql`delete from notifications where audience = 'client' and step = 'lead_intro' and lower(recipient) = ${data.email}`;
+    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo') and lower(recipient) = ${data.email}`;
     await sql`delete from open_trash where lower(email) = ${data.email}`;
     return { ok: true as const };
   });
 
 async function ensureOpenTrash(sql: Sql) {
   await sql`create table if not exists open_trash (email text primary key, created_at timestamptz not null default now())`;
+}
+
+async function releaseOpen(sql: Sql, email: string) {
+  await ensureOpenTrash(sql);
+  await sql`delete from open_trash where lower(email) = ${email.trim().toLowerCase()}`;
 }
 
 async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string | null; to?: string | null; limit?: number }) {
@@ -2015,7 +2022,16 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
         coalesce(n.advisor_id, '') as advisor_id,
         coalesce(a.name, '') as advisor_name,
         to_char(n.created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as sent_at,
-        coalesce(n.mail_status, '') as mail_status,
+        (
+          select coalesce(intro.mail_status, '')
+          from notifications intro
+          where intro.audience = 'client'
+            and lower(intro.recipient) = lower(n.recipient)
+            and intro.step = 'lead_intro'
+            and intro.delivery = 'sent'
+          order by intro.created_at desc
+          limit 1
+        ) as mail_status,
         exists (
           select 1 from notifications later
           where later.audience = 'client'
@@ -2121,8 +2137,18 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
-      where n.audience = 'client' and n.step = 'lead_intro' and n.delivery = 'sent'
-        and (${trash}::boolean = exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient)))
+      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo') and n.delivery = 'sent'
+        and (${trash}::boolean = (
+          exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient))
+          and not exists (
+            select 1 from notifications newer
+            where newer.audience = 'client'
+              and lower(newer.recipient) = lower(n.recipient)
+              and newer.delivery = 'sent'
+              and newer.step in ('lead_intro', 'lead_application', 'lead_promo')
+              and newer.created_at > (select t.created_at from open_trash t where lower(t.email) = lower(n.recipient))
+          )
+        ))
         and (${from}::timestamptz is null or n.created_at >= ${from}::timestamptz)
         and (${to}::timestamptz is null or n.created_at < ${to}::timestamptz)
       order by lower(n.recipient), n.created_at desc
