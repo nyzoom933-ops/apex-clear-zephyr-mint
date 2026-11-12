@@ -3749,7 +3749,7 @@ export const saveInvoiceBilling = createServerFn({ method: "POST" })
   });
 
 export const approveInvoice = createServerFn({ method: "POST" })
-  .validator((input: { id: string; billing: InvoiceBilling }) => {
+  .validator((input: { id: string; billing: InvoiceBilling; skipEmail?: boolean }) => {
     const billing = { ...input.billing };
     (Object.keys(billing) as Array<keyof InvoiceBilling>).forEach((key) => {
       billing[key] = String(billing[key] ?? "").trim();
@@ -3757,7 +3757,7 @@ export const approveInvoice = createServerFn({ method: "POST" })
     if (!billing.bankName || !billing.accountName || !billing.beneficiaryAddress || !billing.accountNumber || !billing.routingNumber || !billing.crn || !billing.purpose) {
       throw new Error("Fill in every billing field.");
     }
-    return { id: input.id, billing };
+    return { id: input.id, billing, skipEmail: Boolean(input.skipEmail) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -3771,13 +3771,15 @@ export const approveInvoice = createServerFn({ method: "POST" })
     await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
     if (current.status === "approved_phone") {
       await sql`update fundings set status = 'instructions_sent' where id = ${data.id}`;
-      await sendStep(sql, {
-        step: "instructions_sent",
-        clientEmail: current.email,
-        clientName: await investorName(sql, current.email),
-        detail: await detailText(sql, { ...current, status: "instructions_sent" }),
-        relatedId: data.id,
-      });
+      if (!data.skipEmail) {
+        await sendStep(sql, {
+          step: "instructions_sent",
+          clientEmail: current.email,
+          clientName: await investorName(sql, current.email),
+          detail: await detailText(sql, { ...current, status: "instructions_sent" }),
+          relatedId: data.id,
+        });
+      }
     }
     return { ok: true as const };
   });
