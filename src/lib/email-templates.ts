@@ -22,6 +22,12 @@ export type MailStep =
   | "lead_htr"
   | "invoice_advisor";
 
+export function mailStepLabel(step: string) {
+  return STEPS[step as MailStep]?.label || step;
+}
+
+export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "invoice_advisor"]);
+
 export type MailAudience = "client" | "admin";
 
 export type RenderedEmail = {
@@ -204,6 +210,151 @@ export const SAMPLE_EMAIL = {
   companyName: DEFAULT_COMPANY_NAME,
 };
 
+export const EMAIL_STYLES = [
+  { id: "classic", label: "Classic blue", note: "Blue bar, blue buttons, the current letter." },
+  { id: "letterhead", label: "Letterhead", note: "White letterhead, black rule, serif type." },
+  { id: "ledger", label: "Ledger", note: "Charcoal header, square corners, gray paper." },
+  { id: "counsel", label: "Counsel", note: "Navy header, serif type, ivory paper." },
+] as const;
+
+export type EmailStyle = (typeof EMAIL_STYLES)[number]["id"];
+
+export function normalizeEmailStyle(value: string | null | undefined): EmailStyle {
+  return EMAIL_STYLES.some((item) => item.id === value) ? (value as EmailStyle) : "classic";
+}
+
+export const EMAIL_COLOR_FIELDS = [
+  { id: "header", label: "Header" },
+  { id: "button", label: "Buttons" },
+  { id: "heading", label: "Headings and footer" },
+  { id: "accent", label: "Labels" },
+  { id: "paper", label: "Paper" },
+  { id: "card", label: "Cards" },
+  { id: "text", label: "Text" },
+  { id: "border", label: "Borders" },
+  { id: "muted", label: "Muted text" },
+] as const;
+
+export type EmailColorKey = (typeof EMAIL_COLOR_FIELDS)[number]["id"];
+export type EmailColors = Record<EmailColorKey, string>;
+
+export const DEFAULT_EMAIL_COLORS: EmailColors = {
+  header: "#006fcf",
+  button: "#006fcf",
+  heading: "#12315c",
+  accent: "#1d8ece",
+  paper: "#f2f5f8",
+  card: "#f7fbfe",
+  text: "#3d3d3d",
+  border: "#d6e4ef",
+  muted: "#8c8c8c",
+};
+
+const STYLE_PALETTES: Record<EmailStyle, EmailColors> = {
+  classic: { ...DEFAULT_EMAIL_COLORS },
+  letterhead: { ...DEFAULT_EMAIL_COLORS, header: "#ffffff", button: "#1a1a1a", accent: "#5c5c5c", text: "#1a1a1a", muted: "#5c5c5c" },
+  ledger: { ...DEFAULT_EMAIL_COLORS, header: "#2a2a2a", button: "#2a2a2a", heading: "#1f1f1f", accent: "#4a4a4a", paper: "#f3f3f3", card: "#f7f7f7", border: "#d0d0d0" },
+  counsel: { ...DEFAULT_EMAIL_COLORS, header: "#0e2744", button: "#0e2744", heading: "#0e2744", accent: "#0e2744", paper: "#f6f3ec", card: "#fbf8f2", border: "#ddd6c8" },
+};
+
+export function normalizeEmailHex(value: string | null | undefined) {
+  const raw = (value || "").trim();
+  const match = raw.match(/^#?([0-9a-fA-F]{6})$/);
+  return match ? `#${match[1].toLowerCase()}` : "";
+}
+
+export function normalizeEmailColors(value: Partial<EmailColors> | null | undefined): EmailColors {
+  const next = { ...DEFAULT_EMAIL_COLORS };
+  for (const field of EMAIL_COLOR_FIELDS) {
+    const hex = normalizeEmailHex(value?.[field.id]);
+    if (hex) next[field.id] = hex;
+  }
+  return next;
+}
+
+export function applyEmailStyle(html: string, style: EmailStyle | string | null | undefined, colors?: Partial<EmailColors> | null) {
+  if (!html) return html;
+  const chosen = normalizeEmailStyle(style);
+  const palette = paletteFor(chosen, colors);
+  let next = paintEmailRoles(html, palette);
+  const headerInk = inkOn(palette.header);
+  const buttonInk = inkOn(palette.button);
+  const headingInk = inkOn(palette.heading);
+  next = next
+    .replaceAll("letter-spacing:1px; color:#ffffff;", `letter-spacing:1px; color:${headerInk};`)
+    .replaceAll("letter-spacing:0.14em;color:#ffffff;", `letter-spacing:0.14em;color:${headerInk};`)
+    .replaceAll("color:#ffffff; text-decoration:none;", `color:${buttonInk}; text-decoration:none;`)
+    .replaceAll("color:#ffffff;text-decoration:none;", `color:${buttonInk}; text-decoration:none;`)
+    .replaceAll("color:#ffffff; font-weight:700;", `color:${headerInk}; font-weight:700;`)
+    .replaceAll("color:#fff; font-size:12px;", `color:${headerInk}; font-size:12px;`)
+    .replaceAll("color:#d6ebff;", `color:${headerInk === "#ffffff" ? "#d6ebff" : palette.muted};`)
+    .replaceAll(`background:${palette.heading}; padding:18px 32px; color:#ffffff;`, `background:${palette.heading}; padding:18px 32px; color:${headingInk};`)
+    .replaceAll("font-weight:700; color:#ffffff;\">We’re here to help.", `font-weight:700; color:${headingInk};">We’re here to help.`)
+    .replaceAll("line-height:21px; color:#ffffff;\">For assistance", `line-height:21px; color:${headingInk};">For assistance`);
+  if (chosen === "letterhead" || chosen === "counsel") {
+    next = next
+      .replaceAll("Arial, Helvetica, sans-serif", "Georgia, 'Times New Roman', serif")
+      .replaceAll("Arial,sans-serif", "Georgia, 'Times New Roman', serif");
+  }
+  if (chosen !== "classic") {
+    next = next
+      .replaceAll("border-radius:12px", "border-radius:0")
+      .replaceAll("border-radius:8px", "border-radius:0")
+      .replaceAll("border-radius:6px", "border-radius:0")
+      .replaceAll("border-radius:2px", "border-radius:0");
+  }
+  if (chosen === "letterhead") {
+    next = next
+      .replaceAll(`background:${palette.header}; padding:16px 32px;`, `background:${palette.header};border-bottom:1px solid ${palette.button};padding:16px 32px;`)
+      .replaceAll(`background:${palette.header};padding:18px 32px;`, `background:${palette.header};border-bottom:1px solid ${palette.button};padding:18px 32px;`)
+      .replaceAll(`background:${palette.heading}; height:4px; font-size:0; line-height:0;`, `background:${palette.button}; height:1px; font-size:0; line-height:0;`);
+  }
+  return next;
+}
+
+function paletteFor(style: EmailStyle, colors?: Partial<EmailColors> | null): EmailColors {
+  const next = { ...STYLE_PALETTES[style] };
+  if (!colors) return next;
+  for (const field of EMAIL_COLOR_FIELDS) {
+    const hex = normalizeEmailHex(colors[field.id]);
+    if (hex && hex !== DEFAULT_EMAIL_COLORS[field.id]) next[field.id] = hex;
+  }
+  return next;
+}
+
+function paintEmailRoles(html: string, palette: EmailColors) {
+  return html
+    .replaceAll("background:#006fcf; padding:16px 32px;", `background:${palette.header}; padding:16px 32px;`)
+    .replaceAll("background:#006fcf;padding:18px 32px;", `background:${palette.header};padding:18px 32px;`)
+    .replaceAll("background:#006fcf; padding:10px;", `background:${palette.header}; padding:10px;`)
+    .replaceAll("background:#006fcf; padding:8px;", `background:${palette.header}; padding:8px;`)
+    .replaceAll("background:#006fcf;", `background:${palette.button};`)
+    .replaceAll("background:#006fcf", `background:${palette.button}`)
+    .replaceAll("#006fcf", palette.button)
+    .replaceAll("#12315c", palette.heading)
+    .replaceAll("#1d8ece", palette.accent)
+    .replaceAll("#f2f5f8", palette.paper)
+    .replaceAll("#fbfbfb", palette.paper)
+    .replaceAll("#f7fbfe", palette.card)
+    .replaceAll("#f7f7f7", palette.card)
+    .replaceAll("#e7f3fb", palette.card)
+    .replaceAll("#d6e4ef", palette.border)
+    .replaceAll("#e0e0e0", palette.border)
+    .replaceAll("#3d3d3d", palette.text)
+    .replaceAll("#262626", palette.text)
+    .replaceAll("#8c8c8c", palette.muted)
+    .replaceAll("#5a6a7a", palette.muted);
+}
+
+function inkOn(hex: string) {
+  const raw = hex.replace("#", "");
+  const red = Number.parseInt(raw.slice(0, 2), 16);
+  const green = Number.parseInt(raw.slice(2, 4), 16);
+  const blue = Number.parseInt(raw.slice(4, 6), 16);
+  if (![red, green, blue].every((part) => Number.isFinite(part))) return "#ffffff";
+  return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255 > 0.62 ? "#1a1a1a" : "#ffffff";
+}
+
 const CERTIFICATE_STEPS = new Set<MailStep>([
   "investment_submitted",
   "terms_accepted",
@@ -218,14 +369,15 @@ const CERTIFICATE_STEPS = new Set<MailStep>([
 export function renderStep(
   step: MailStep,
   audience: MailAudience,
-  input: { name: string; email: string; detail: string; companyName?: string; companyPhone?: string; emailLogo?: string | null; portalUrl?: string; extraHtml?: string; advisor?: MailAdvisor },
+  input: { name: string; email: string; detail: string; companyName?: string; companyPhone?: string; emailLogo?: string | null; portalUrl?: string; extraHtml?: string; advisor?: MailAdvisor; advisorStyle?: string | null; transactionalStyle?: string | null; emailColors?: Partial<EmailColors> | null; copy?: { subject?: string; lead?: string; next?: string } },
 ): RenderedEmail {
   const item = STEPS[step];
   const company = input.companyName?.trim() || DEFAULT_COMPANY_NAME;
   const name = input.name.trim() || "Investor";
-  const lead = fill(audience === "client" ? item.clientLead : item.adminLead, name, input.email, company);
-  const subject = fill(audience === "client" ? item.clientSubject : item.adminSubject, name, input.email, company);
-  const next = audience === "client" && item.clientNext ? fill(item.clientNext, name, input.email, company) : "";
+  const lead = fill(input.copy?.lead ?? (audience === "client" ? item.clientLead : item.adminLead), name, input.email, company);
+  const subject = fill(input.copy?.subject ?? (audience === "client" ? item.clientSubject : item.adminSubject), name, input.email, company);
+  const nextRaw = input.copy?.next ?? item.clientNext;
+  const next = audience === "client" && nextRaw ? fill(nextRaw, name, input.email, company) : "";
   const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
@@ -242,13 +394,26 @@ export function renderStep(
     ? ""
     : input.extraHtml ||
       (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+  const chosenStyle = isFullLetter ? input.advisorStyle : input.transactionalStyle;
   return {
     step,
     audience,
     label: item.label,
     subject,
     text,
-    html: fullLetter || layout({ eyebrow: item.label, greeting, lead, lines, next, audience, company, companyPhone: input.companyPhone, logo: input.emailLogo, portalUrl, portalLabel: "Open the investor portal", extraHtml: fullLetterStep ? "" : input.extraHtml || "" }),
+    html: applyEmailStyle(fullLetter || layout({ eyebrow: item.label, greeting, lead, lines, next, audience, company, companyPhone: input.companyPhone, logo: input.emailLogo, portalUrl, portalLabel: "Open the investor portal", extraHtml: fullLetterStep ? "" : input.extraHtml || "" }), chosenStyle, input.emailColors),
+  };
+}
+
+export function applicationApprovedDefaults(name: string, email: string, company = DEFAULT_COMPANY_NAME) {
+  const item = STEPS.application_approved;
+  const investor = name.trim() || "Investor";
+  const address = email.trim();
+  const firm = company.trim() || DEFAULT_COMPANY_NAME;
+  return {
+    subject: fill(item.clientSubject, investor, address, firm),
+    lead: fill(item.clientLead, investor, address, firm),
+    next: fill(item.clientNext, investor, address, firm),
   };
 }
 
@@ -259,8 +424,8 @@ export function renderPair(step: MailStep, input: { name: string; email: string;
   };
 }
 
-export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "") {
-  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone };
+export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "", styles?: { advisor?: string | null; transactional?: string | null; colors?: Partial<EmailColors> | null }) {
+  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone, advisorStyle: styles?.advisor, transactionalStyle: styles?.transactional, emailColors: styles?.colors };
   return (Object.keys(STEPS) as MailStep[]).flatMap((step) => [
     renderStep(step, "client", sample),
     renderStep(step, "admin", sample),
@@ -1320,7 +1485,7 @@ function stripMarks(value: string) {
 }
 
 function sampleExtensionLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
-  return extensionLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone });
+  return extensionLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone }).html;
 }
 
 function sampleLeadLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
@@ -1379,7 +1544,7 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
     ? `<tr><td style="padding:0 32px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f7f7;border:1px solid #e0e0e0;border-radius:8px;"><tr><td style="padding:14px 16px;">${facts}</td></tr></table></td></tr>`
     : "";
   const next = input.next
-    ? `<tr><td style="padding:0 32px 8px;font-family:Arial,sans-serif;"><p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#1d8ece;">What happens next</p><p style="margin:0;font-size:15px;line-height:1.5;color:#3d3d3d;">${escapeHtml(input.next)}</p></td></tr>`
+    ? `<tr><td style="padding:0 32px 8px;font-family:Arial,sans-serif;"><p style="margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#1d8ece;">What happens next</p><p style="margin:0;font-size:15px;line-height:1.5;color:#3d3d3d;">${textBlock(input.next)}</p></td></tr>`
     : "";
   const extra = input.extraHtml
     ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;">${input.extraHtml}</td></tr>`
@@ -1396,7 +1561,7 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
     ? `<tr><td style="padding:28px 32px 8px;font-family:Arial,sans-serif;">
           ${input.eyebrow ? `<p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#1d8ece;">${escapeHtml(input.eyebrow)}</p>` : ""}
           ${input.greeting ? `<p style="margin:0 0 12px;font-size:16px;color:#262626;">${escapeHtml(input.greeting)}</p>` : ""}
-          ${input.lead ? `<p style="margin:0;font-size:15px;line-height:1.5;color:#3d3d3d;">${escapeHtml(input.lead)}</p>` : ""}
+          ${input.lead ? `<p style="margin:0;font-size:15px;line-height:1.5;color:#3d3d3d;">${textBlock(input.lead)}</p>` : ""}
         </td></tr>`
     : "";
   return `<!doctype html>
@@ -1450,6 +1615,10 @@ function logoVersion(value: string) {
 function safeImage(value: string | null | undefined) {
   if (!value || !/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/.test(value)) return "";
   return value.replace(/\s/g, "");
+}
+
+function textBlock(value: string) {
+  return escapeHtml(value).replaceAll("\n", "<br>");
 }
 
 function escapeHtml(value: string) {

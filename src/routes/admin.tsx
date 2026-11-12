@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
-import { advisorNoteLetter } from "@/lib/email-templates";
+import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, defaultApplicationCopy, defaultExtensionCopy, defaultHtrCopy, defaultLeadCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, extensionLetter, htrLetter, leadLetter, mailStepLabel, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
 import {
   adminLogin,
   adminLogout,
@@ -39,6 +39,7 @@ import {
   saveInvestmentType,
   savePromo,
   setApplicationStatus,
+  sendApplicationApproved,
   deleteApplication,
   deleteCrmLead,
   deleteFunding,
@@ -56,6 +57,8 @@ import {
   lookupTelegramChats,
   setDeskSwitch,
   sendTelegramTest,
+  getEmailStyles,
+  saveEmailStyles,
   saveDeskLogin,
   sendLeadIntro,
   sendLeadExtension,
@@ -74,7 +77,6 @@ import {
   DEFAULT_THEME,
 } from "@/lib/admin.functions";
 import { formatBonus, matchTier, parseApy, promoMonths } from "@/lib/promo";
-import { applicationLetter, defaultApplicationCopy, defaultExtensionCopy, defaultHtrCopy, defaultLeadCopy, extensionLetter, htrLetter, leadLetter, renderStep, templateCatalog } from "@/lib/email-templates";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Operations · Account Holding" }] }),
@@ -204,6 +206,10 @@ function Cabinet({
       setError(caught instanceof Error ? caught.message : "The application could not be removed.");
     }
   }
+  function noteApproval(email, mode, already) {
+    setNotice(already ? `Letter sent to ${email}.` : `Sign-in created for ${email}. ${mode === "advisor" ? "Sent from the advisor." : "Transactional email sent."}`);
+    void refresh();
+  }
   async function updateStatus(id, status) {
     setError("");
     setNotice("");
@@ -227,13 +233,13 @@ function Cabinet({
             setSelectedId(id);
             const row = (rows ?? []).find(item => item.id === id);
             setTab(row?.status === "approved" ? "clients" : "applications");
-          }} /></section> : tab === "applications" ? <section><h1 className="text-3xl font-semibold">Submitted applications</h1><p className="mt-2 text-fg">Select a row to open the full application, including the identity and address documents.</p><div className="mt-4 flex flex-wrap gap-2">{["all", "pending", "approved", "hold"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (filter === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setFilter(key)}>{key === "all" ? "All" : key === "hold" ? "On hold" : key[0].toUpperCase() + key.slice(1)}</button>)}</div><ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />{selected ? <ApplicationDetail row={selected} onStatus={status => void updateStatus(selected.id, status)} onRemove={() => void removeApplication(selected.id)} /> : null}</section> : tab === "pipeline-leads" ? <PipelineLeadsPanel /> : tab === "pipeline-opens" ? <IntroOpensPanel onApplication={lead => {
+          }} /></section> : tab === "applications" ? <section><h1 className="text-3xl font-semibold">Submitted applications</h1><p className="mt-2 text-fg">Select a row to open the full application, including the identity and address documents.</p><div className="mt-4 flex flex-wrap gap-2">{["all", "pending", "approved", "hold"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (filter === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setFilter(key)}>{key === "all" ? "All" : key === "hold" ? "On hold" : key[0].toUpperCase() + key.slice(1)}</button>)}</div><ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />{selected ? <ApplicationDetail row={selected} onStatus={status => void updateStatus(selected.id, status)} onMailed={(email, mode, already) => noteApproval(email, mode, already)} onRemove={() => void removeApplication(selected.id)} /> : null}</section> : tab === "pipeline-leads" ? <PipelineLeadsPanel /> : tab === "pipeline-opens" ? <IntroOpensPanel onApplication={lead => {
             setEmailFocus({
               lead,
               kind: "promo"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
 }
 function LetterPreview({
   html,
@@ -294,27 +300,46 @@ async function copyLetterImage(frame, setStatus) {
   }
 }
 function EmailsPanel() {
-  const [rows, setRows] = useState(null);
   const [advisors, setAdvisors] = useState([]);
   const [signatureId, setSignatureId] = useState("");
-  const [error, setError] = useState("");
   const [audience, setAudience] = useState("all");
   const [origin, setOrigin] = useState("");
   const brand = useBrand();
+  const [emailStyles, setEmailStyles] = useState({ advisor: "classic", transactional: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
+  const [styleStatus, setStyleStatus] = useState("");
   const signature = advisors.find(item => item.id === signatureId) ?? advisors[0];
-  const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin, signature, brand.companyPhone).filter(item => audience === "all" || item.audience === audience);
+  const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin, signature, brand.companyPhone, emailStyles).filter(item => audience === "all" || item.audience === audience);
   useEffect(() => {
     setOrigin(window.location.origin);
   }, []);
   useEffect(() => {
-    listNotifications().then(setRows).catch(() => setError("Emails could not be loaded."));
+    getEmailStyles().then(setEmailStyles).catch(() => undefined);
+  }, []);
+  function chooseStyle(key, value) {
+    const next = { ...emailStyles, [key]: value };
+    setEmailStyles(next);
+    setStyleStatus("Saving…");
+    saveEmailStyles({ data: next }).then(() => setStyleStatus("Saved.")).catch(() => setStyleStatus("Could not save the letter style."));
+  }
+  function chooseColor(id, value) {
+    const next = { ...emailStyles, colors: { ...emailStyles.colors, [id]: value } };
+    setEmailStyles(next);
+    setStyleStatus("Saving…");
+    saveEmailStyles({ data: next }).then(() => setStyleStatus("Saved.")).catch(() => setStyleStatus("Could not save the letter colors."));
+  }
+  function resetColors() {
+    const next = { ...emailStyles, colors: { ...DEFAULT_EMAIL_COLORS } };
+    setEmailStyles(next);
+    setStyleStatus("Saving…");
+    saveEmailStyles({ data: next }).then(() => setStyleStatus("Email colors reset.")).catch(() => setStyleStatus("Could not save the letter colors."));
+  }
+  useEffect(() => {
     listAdvisors().then(people => {
       setAdvisors(people);
       setSignatureId(current => current || people[people.length - 1]?.id || "");
     }).catch(() => void 0);
   }, []);
-  const visible = (rows ?? []).filter(row => audience === "all" || row.audience === audience);
-  return <section><h1 className="text-3xl font-semibold">Email templates</h1><p className="mt-2 max-w-2xl text-fg">Client letters are email. Desk copies of those steps are sent to Telegram. Lead letters sign off with the advisor you select.</p><label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Signature</span><select className={`${controlClass} mt-1`} value={signature?.id ?? ""} onChange={event => setSignatureId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><div className="mt-4 flex flex-wrap gap-2">{["all", "client", "admin"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (audience === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setAudience(key)}>{key === "all" ? "All" : key === "client" ? "Client" : "Admin"}</button>)}</div><ul className="mt-4 grid gap-4">{templates.map(item => <li key={`${item.step}-${item.audience}`} className="rounded-md border border-border bg-surface px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-action">{item.audience === "admin" ? "Desk" : "Client"} · {item.label}</p><p className="mt-1 font-semibold text-primary">{item.subject}</p><LetterPreview html={item.html} title={item.subject} height="h-[640px]" /></li>)}</ul><h2 className="mt-8 text-lg font-semibold text-primary">Sent</h2>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{rows && visible.length === 0 ? <p className="mt-4 text-sm text-fg">No emails yet. They appear as applications and certificates move forward.</p> : null}<ul className="mt-4 grid gap-3">{visible.map(row => <li key={row.id} className="rounded-md border border-border bg-surface px-4 py-3"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.subject}</p><p className="text-xs text-fg">{row.createdAt} UTC · {row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Not delivered" : "Logged"}</p></div><p className="mt-1 text-sm text-fg">{row.audience === "admin" ? "Admin" : "Client"} · {row.recipient}</p>{row.html ? <LetterPreview html={row.html} title={row.subject} height="h-72" /> : <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{row.body}</p>}</li>)}</ul></section>;
+  return <section><h1 className="text-3xl font-semibold">Email templates</h1><p className="mt-2 max-w-2xl text-fg">Client letters are email. Desk copies of those steps are sent to Telegram. Lead letters sign off with the advisor you select.</p><label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Signature</span><select className={`${controlClass} mt-1`} value={signature?.id ?? ""} onChange={event => setSignatureId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor letters</span><select className={`${controlClass} mt-1`} value={emailStyles.advisor} onChange={event => chooseStyle("advisor", event.target.value)}>{EMAIL_STYLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">{EMAIL_STYLES.find(item => item.id === emailStyles.advisor)?.note}</span></label><label className="block text-sm"><span className="font-semibold text-primary">Transactional notes</span><select className={`${controlClass} mt-1`} value={emailStyles.transactional} onChange={event => chooseStyle("transactional", event.target.value)}>{EMAIL_STYLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">{EMAIL_STYLES.find(item => item.id === emailStyles.transactional)?.note}</span></label></div><div className="mt-4 grid max-w-3xl gap-3 sm:grid-cols-2">{EMAIL_COLOR_FIELDS.map(field => <ColorSetting key={field.id} label={field.label} value={emailStyles.colors?.[field.id] || DEFAULT_EMAIL_COLORS[field.id]} onChange={value => chooseColor(field.id, value)} />)}</div><button type="button" className="mt-3 text-sm font-semibold text-primary" onClick={resetColors}>Reset email colors</button><p className="mt-1 max-w-2xl text-xs text-fg">A color left at its starting value follows the letter style. Change it to use that color in every letter.</p>{styleStatus ? <p className="mt-2 text-sm text-fg">{styleStatus}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{["all", "client", "admin"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (audience === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setAudience(key)}>{key === "all" ? "All" : key === "client" ? "Client" : "Admin"}</button>)}</div><ul className="mt-4 grid gap-4">{templates.map(item => <li key={`${item.step}-${item.audience}`} className="rounded-md border border-border bg-surface px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-action">{item.audience === "admin" ? "Desk" : "Client"} · {item.label}</p><p className="mt-1 font-semibold text-primary">{item.subject}</p><LetterPreview html={item.html} title={item.subject} height="h-[640px]" /></li>)}</ul></section>;
 }
 var MAIL_STATUS_LABEL = {
   opened: "Opened",
@@ -1507,6 +1532,7 @@ function LeadsPanel({
     return `CD${Array.from(bytes, byte => alphabet[byte % 32]).join("")}`;
   });
   const [origin, setOrigin] = useState("");
+  const [emailStyles, setEmailStyles] = useState({ advisor: "classic", transactional: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
   useEffect(() => {
     if (!focus) return;
     setKind(focus.kind || "promo");
@@ -1521,6 +1547,7 @@ function LeadsPanel({
   }, [focus]);
   useEffect(() => {
     setOrigin(window.location.origin);
+    getEmailStyles().then(setEmailStyles).catch(() => undefined);
     Promise.all([listAdvisors(), getCdTerms(), getPromo()]).then(([people, nextTerms, promo]) => {
       setAdvisors(people);
       setTerms(nextTerms);
@@ -1638,7 +1665,9 @@ function LeadsPanel({
     companyName: brand.companyName,
     emailLogo: brand.emailLogo,
     portalUrl: brand.publicDomain,
-    extraHtml: letter.html
+    extraHtml: letter.html,
+    advisorStyle: emailStyles.advisor,
+    emailColors: emailStyles.colors
   }) : null;
   const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "htr" ? htrText.subject : applicationCopy.subject;
   async function send(event) {
@@ -2182,6 +2211,7 @@ function PipelineLeadsPanel() {
 function ClientsPanel({
   rows,
   onStatus,
+  onMailed,
   onRemove
 }) {
   const [pendingId, setPendingId] = useState(null);
@@ -2207,7 +2237,7 @@ function ClientsPanel({
   return <section><h1 className="text-3xl font-semibold">Clients</h1><p className="mt-2 text-fg">Approved investors. Select a row to open the full application. Sign in as a client to open their portal.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[640px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">Client</th><th className="px-4 py-3 font-semibold">Account</th><th className="px-4 py-3 font-semibold">Approved</th><th className="px-4 py-3 font-semibold" /></tr></thead><tbody>{rows.map(row => <tr key={row.id} className={"cursor-pointer border-b border-border last:border-0 " + (row.id === selectedId ? "bg-step-idle" : "")} onClick={() => setSelectedId(row.id)}><td className="px-4 py-3"><span className="block font-semibold text-primary">{row.applicantName}</span><span className="text-fg">{row.email}</span></td><td className="px-4 py-3">{row.accountType}</td><td className="px-4 py-3">{row.submittedAt} UTC</td><td className="px-4 py-3 text-right"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pendingId === row.id} onClick={event => {
                 event.stopPropagation();
                 openAs(row.id);
-              }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>{selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onRemove={() => onRemove(selected.id)} /> : null}</section>;
+              }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>{selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onMailed={onMailed} onRemove={() => onRemove(selected.id)} /> : null}</section>;
 }
 const PIPELINE_STEPS = ["Promo", "Application", "Investment", "Invoice", "Payment receipt", "Confirmation package", "CD active"];
 
@@ -2869,6 +2899,54 @@ function InboxPanel() {
   </section>;
 }
 
+function SentMailPanel() {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+  const [kind, setKind] = useState("transactional");
+  const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState("");
+  useEffect(() => {
+    listNotifications().then(setRows).catch(() => setError("Sent emails could not be loaded."));
+  }, []);
+  const visible = (rows ?? []).filter(row => {
+    if (kind === "desk") return row.audience === "admin";
+    if (row.audience !== "client") return false;
+    const advisor = ADVISOR_MAIL_STEPS.has(row.step);
+    if (kind === "transactional") return !advisor;
+    if (kind === "advisor") return advisor;
+    return true;
+  }).filter(row => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return `${row.recipient} ${row.subject} ${mailStepLabel(row.step)}`.toLowerCase().includes(needle);
+  });
+  return <section>
+    <h1 className="text-3xl font-semibold">Sent</h1>
+    <p className="mt-2 max-w-2xl text-fg">Every letter the desk has sent. Open a row to preview the email the client received.</p>
+    <div className="mt-4 flex flex-wrap gap-2">{[["transactional", "Transactional"], ["advisor", "Advisor letters"], ["all", "All client"], ["desk", "Desk copies"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => { setKind(id); setOpenId(""); }}>{label}</button>)}</div>
+    <label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Search</span><input className={`${controlClass} mt-1`} value={query} placeholder="Name, email, or subject" onChange={event => setQuery(event.target.value)} /></label>
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {!rows ? <p className="mt-4 text-sm text-fg">Loading sent emails…</p> : null}
+    <ul className="mt-4 grid gap-3">
+      {visible.map(row => {
+        const open = openId === row.id;
+        const delivered = row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Not delivered" : "Logged";
+        return <li key={row.id} className="rounded-lg border border-border bg-surface">
+          <button type="button" className="flex w-full flex-wrap items-baseline justify-between gap-2 px-4 py-3 text-left" onClick={() => setOpenId(open ? "" : row.id)}>
+            <span className="min-w-0">
+              <span className="block font-semibold text-primary">{row.subject || "(no subject)"}</span>
+              <span className="mt-1 block text-sm text-fg">{row.recipient} · {mailStepLabel(row.step)}</span>
+            </span>
+            <span className="text-xs text-fg">{row.createdAt} UTC · {delivered}</span>
+          </button>
+          {open ? <div className="border-t border-border px-4 py-4">{row.html ? <LetterPreview html={row.html} title={row.subject} height="h-[720px]" /> : <p className="whitespace-pre-wrap text-sm text-fg">{row.body || "This email has no preview."}</p>}</div> : null}
+        </li>;
+      })}
+    </ul>
+    {rows && visible.length === 0 ? <p className="mt-4 text-sm text-fg">No emails in this view yet.</p> : null}
+  </section>;
+}
+
 var DESK_MENU = [{
   label: "Pipeline",
   items: [{
@@ -2913,6 +2991,9 @@ var DESK_MENU = [{
   }, {
     id: "mail-status",
     label: "Email status"
+  }, {
+    id: "sent",
+    label: "Sent"
   }]
 }, {
   label: "Settings",
@@ -2990,12 +3071,123 @@ function openStoredFile(file, name, download) {
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 6e4);
 }
+function ApprovalMail({
+  row,
+  onSent,
+  actions
+}) {
+  const brand = useBrand();
+  const defaults = applicationApprovedDefaults(row.applicantName, row.email, brand.companyName);
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState(defaults.subject);
+  const [lead, setLead] = useState(defaults.lead);
+  const [next, setNext] = useState(defaults.next);
+  const [advisors, setAdvisors] = useState([]);
+  const [advisorId, setAdvisorId] = useState("");
+  const [styles, setStyles] = useState({ advisor: "classic", transactional: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
+  const [previewAs, setPreviewAs] = useState("transactional");
+  const [origin, setOrigin] = useState("");
+  const [pending, setPending] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    listAdvisors().then(people => {
+      setAdvisors(people);
+      setAdvisorId(current => current || [...people].reverse().find(item => item.mailbox?.trim())?.id || people[people.length - 1]?.id || "");
+    }).catch(() => undefined);
+    getEmailStyles().then(setStyles).catch(() => undefined);
+  }, []);
+  const advisor = advisors.find(item => item.id === advisorId) ?? advisors[0];
+  const portal = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
+  const detail = `${row.accountType || row.payload?.accountType || "Individual"} account\nSign-in email ${row.email}`;
+  const transactional = renderStep("application_approved", "client", {
+    name: row.applicantName,
+    email: row.email,
+    detail,
+    companyName: brand.companyName,
+    companyPhone: brand.companyPhone,
+    emailLogo: brand.emailLogo,
+    portalUrl: portal,
+    transactionalStyle: styles.transactional,
+    emailColors: styles.colors,
+    copy: { subject, lead, next }
+  });
+  const loginUrl = portal ? `${portal.replace(/\/$/, "")}/login` : "";
+  const advisorMessage = [lead, next, `Sign-in email: ${row.email}`, loginUrl ? `Investor portal\n${loginUrl}` : ""].filter(Boolean).join("\n\n");
+  const advisorLetter = advisor ? applyEmailStyle(advisorNoteLetter({
+    company: brand.companyName,
+    companyPhone: brand.companyPhone,
+    logo: brand.emailLogo,
+    pageUrl: portal,
+    advisor,
+    greeting: `Dear ${row.applicantName},`,
+    message: advisorMessage
+  }).html, styles.advisor, styles.colors) : "";
+  const ready = Boolean(subject.trim() && lead.trim());
+  const mailboxReady = Boolean(advisor?.mailbox?.trim());
+  const previewSubject = previewAs === "advisor" ? subject : transactional.subject;
+  async function send(mode) {
+    setError("");
+    setPending(mode);
+    try {
+      const result = await sendApplicationApproved({
+        data: {
+          id: row.id,
+          mode,
+          advisorId: advisor?.id || "",
+          subject,
+          lead,
+          next
+        }
+      });
+      setOpen(false);
+      onSent(result.loginEmail, mode);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The approval email was not sent.");
+    } finally {
+      setPending("");
+    }
+  }
+  return <>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 className="text-xl font-semibold text-primary">{row.applicantName}</h2>
+        <p className="text-sm text-fg">{row.email}</p>
+        <p className="mt-1 text-sm text-fg">{row.status === "approved" ? "Sign-in is active. The investor portal opens with this email and the application password." : "Approving creates a sign-in and opens the investor portal with this email and the application password."}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {open ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => setOpen(false)}>Close letter</button> : <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => setOpen(true)}>{row.status === "approved" ? "Email the client" : "Approve"}</button>}
+        {actions}
+      </div>
+    </div>
+    {open ? <div className="mt-4 rounded-lg border border-border p-4">
+      <p className="font-semibold text-primary">Application approved</p>
+      <p className="mt-1 text-sm text-fg">{row.status === "approved" ? "The portal is already open. Edit the letter, preview it, then send another copy." : "Nothing is sent until you choose a letter. Sending approves the application and opens the portal."}</p>
+      <div className="mt-4 grid gap-3">
+        <label className="block text-sm"><span className="font-semibold text-primary">Subject</span><input className={`${controlClass} mt-1`} value={subject} onChange={event => setSubject(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-24`} value={lead} onChange={event => setLead(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">What happens next</span><textarea className={`${controlClass} mt-1 min-h-20`} value={next} onChange={event => setNext(event.target.value)} /></label>
+        <label className="block max-w-md text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisor?.id ?? ""} onChange={event => setAdvisorId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">{[["transactional", "Transactional"], ["advisor", "Advisor letter"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (previewAs === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAs(id)}>{label}</button>)}</div>
+      <div className="mt-3">{previewAs === "advisor" && !advisorLetter ? <p className="text-sm text-fg">Add an advisor to preview this letter.</p> : <LetterPreview html={previewAs === "advisor" ? advisorLetter : transactional.html} title={previewSubject} height="h-[640px]" meta={<p className="mt-3 text-sm text-fg"><span className="font-semibold text-primary">Subject.</span> {previewSubject}</p>} />}</div>
+      {previewAs === "advisor" && advisor && !mailboxReady ? <p className="mt-3 text-sm text-fg">{advisor.name} has no mailbox. Choose another advisor, or send the transactional letter.</p> : null}
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !ready} onClick={() => void send("transactional")}>{pending === "transactional" ? "Sending…" : "Send transactional"}</button>
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={Boolean(pending) || !ready || !mailboxReady} onClick={() => void send("advisor")}>{pending === "advisor" ? "Sending…" : "Send from advisor"}</button>
+      </div>
+    </div> : null}
+  </>;
+}
+
 function ApplicationDetail({
   row,
   onStatus,
+  onMailed,
   onRemove
 }) {
   const form = row.payload;
   const fields = [["Account", form.accountType], ["Phone", `${form.phoneCountry} ${form.phone}`], ["Date of birth", [form.dobDay, form.dobMonth, form.dobYear].filter(Boolean).join(" ")], ["Nationality", form.nationality], ["Residence", form.residence], ["Occupation", form.occupation], ["Address", [form.street, form.apt, form.city, form.region, form.postal, form.country].filter(Boolean).join(", ")], ["Tax residence", form.taxResidence], ["Tax ID", form.taxId], ["Source of wealth", form.sourceOfWealth], ["Source of funds", form.sourceOfFunds], ["Purpose", form.investmentPurpose], ["Net worth", form.netWorth], ["Preferred amount", form.preferredAmount], ["Preferred term", form.preferredTerm ? `${form.preferredTerm}-month` : ""], ["Promotional code", form.promoCode], ["Identity document", `${form.idType}${form.idFileName ? ` · ${form.idFileName}` : ""}`], ["Address document", `${form.addressDocType}${form.addressFileName ? ` · ${form.addressFileName}` : ""}`], ["Bank", form.bankName], ["Account holder", form.accountHolder], ["Bank address", [form.bankStreet, form.bankLine2, form.bankCity, form.bankState, form.bankZip].filter(Boolean).join(", ")], ["Routing number", form.routingNumber], ["Account number", form.accountNumber]];
-  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold text-primary">{row.applicantName}</h2><p className="text-sm text-fg">{row.email}</p><p className="mt-1 text-sm text-fg">{row.status === "approved" ? "Sign-in is active. The investor portal opens with this email and the application password." : "Approving creates a sign-in and opens the investor portal with this email and the application password."}</p></div><div className="flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onStatus("approved")}>Approve</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></div></div><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}</article>;
+  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode) => onMailed(email, mode, row.status === "approved")} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}</article>;
 }

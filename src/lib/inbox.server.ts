@@ -2,8 +2,8 @@ import { lookup } from "node:dns/promises";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import type { Sql } from "@/lib/db";
-import { advisorNoteLetter } from "@/lib/email-templates";
-import { emailLogoFile, sendFromMailbox, type MailFile } from "@/lib/mail.server";
+import { advisorNoteLetter, applyEmailStyle } from "@/lib/email-templates";
+import { emailLogoFile, sendFromMailbox, type MailFile, readEmailStyles } from "@/lib/mail.server";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -503,8 +503,9 @@ export async function previewInboxLetter(
     message: (input.message || "").trim() || " ",
     quote: input.quote,
   });
+  const styles = await readEmailStyles(sql);
   return {
-    html: letter.html,
+    html: applyEmailStyle(letter.html, styles.advisor, styles.colors),
     from: advisor.mailbox ? `${advisor.name} <${advisor.mailbox}>` : advisor.name,
     to: toEmail ? `${toName || "Lead"} <${toEmail}>` : toName || "Lead",
     subject: (input.subject || "").trim() || "(no subject)",
@@ -542,12 +543,13 @@ export async function sendInboxMail(
     greeting: input.toName.trim() ? `Dear ${input.toName.trim()},` : "Hello,",
     message,
   });
+  const styles = await readEmailStyles(sql);
   const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox;
   const sent = await sendFromMailbox(sql, {
     to,
     subject,
     text: letter.text,
-    html: letter.html,
+    html: applyEmailStyle(letter.html, styles.advisor, styles.colors),
     fromAddress: advisor.mailbox,
     replyTo,
     replyName: advisor.name,

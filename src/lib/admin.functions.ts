@@ -6,6 +6,7 @@ import type { Sql } from "@/lib/db";
 import { isWorkspacePreview } from "@/lib/env.server";
 import type { MailStep } from "@/lib/mail.server";
 import type { LeadCopy, ApplicationCopy } from "@/lib/email-templates";
+import { normalizeEmailStyle, normalizeEmailColors } from "@/lib/email-templates";
 import { formatBonus, matchTier, type PromoOffer, type PromoTier } from "@/lib/promo";
 import { resolveInvoiceBilling, type InvoiceBilling } from "@/lib/invoice-billing";
 
@@ -297,6 +298,105 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
     return { ok: true as const, loginEmail: null };
   });
 
+export const sendApplicationApproved = createServerFn({ method: "POST" })
+  .validator((input: { id: string; mode?: string; advisorId?: string; subject?: string; lead?: string; next?: string }) => {
+    const subject = (input.subject || "").trim().slice(0, 200);
+    const lead = (input.lead || "").trim().slice(0, 4000);
+    const next = (input.next || "").trim().slice(0, 2000);
+    if (!subject || !lead) throw new Error("Add a subject and a message.");
+    const mode = input.mode === "advisor" ? "advisor" as const : "transactional" as const;
+    const advisorId = (input.advisorId || "").trim();
+    if (mode === "advisor" && !advisorId) throw new Error("Choose an advisor.");
+    return { id: (input.id || "").trim(), mode, advisorId, subject, lead, next };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ email: string; applicant_name: string; account_type: string; password_hash: string | null; status: string }>`
+      select email, applicant_name, account_type, password_hash, status from applications where id = ${data.id}
+    `;
+    if (!rows[0]) throw new Error("Application not found.");
+    if (!rows[0].password_hash) throw new Error("This application has no password, so a login cannot be created.");
+    const email = String(rows[0].email).trim().toLowerCase();
+    const detail = [`${rows[0].account_type} account`, `Sign-in email ${email}`].join("\n");
+    const copy = { subject: data.subject, lead: data.lead, next: data.next };
+    let advisor: { name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string } | undefined;
+    if (data.mode === "advisor") {
+      const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`
+        select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone
+        from advisors where id = ${data.advisorId}
+      `;
+      advisor = advisors[0];
+      if (!advisor?.mailbox.trim()) throw new Error("This advisor has no verified mailbox.");
+    }
+    if (rows[0].status !== "approved") {
+      await sql`update applications set status = 'approved' where id = ${data.id}`;
+      await sql`
+        insert into investor_users (email, password_hash, application_id)
+        values (${email}, ${rows[0].password_hash}, ${data.id})
+        on conflict (email) do update
+        set password_hash = excluded.password_hash, application_id = excluded.application_id
+      `;
+    }
+    if (data.mode === "transactional") {
+      const delivery = await sendStep(sql, {
+        step: "application_approved",
+        clientEmail: email,
+        clientName: rows[0].applicant_name,
+        detail,
+        relatedId: data.id,
+        subject: data.subject,
+        copy,
+      });
+      if (delivery.delivery !== "sent") throw new Error(delivery.error || "The approval email was not sent.");
+      return { ok: true as const, loginEmail: email, mode: data.mode };
+    }
+    if (!advisor) throw new Error("Choose an advisor.");
+    const { advisorNoteLetter, applyEmailStyle } = await import("@/lib/email-templates");
+    const { readEmailStyles, sendFromMailbox, emailLogoFile, sendTelegramNotice, ensureMailColumn, readPortalOrigin } = await import("@/lib/mail.server");
+    const { DEFAULT_COMPANY_NAME } = await import("@/lib/company");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo', 'public_domain')`;
+    const company = settings.find((row) => row.key === "company_name")?.value?.trim() || DEFAULT_COMPANY_NAME;
+    const companyPhone = settings.find((row) => row.key === "company_phone")?.value?.trim() || "";
+    const logo = settings.find((row) => row.key === "email_logo")?.value || null;
+    const origin = (await readPortalOrigin(sql)).replace(/\/$/, "");
+    const portal = origin ? `${origin}/login` : "";
+    const message = [data.lead, data.next, `Sign-in email: ${email}`, portal ? `Investor portal\n${portal}` : ""].filter(Boolean).join("\n\n");
+    const logoFile = emailLogoFile(logo);
+    const letter = advisorNoteLetter({
+      company,
+      companyPhone,
+      logo,
+      pageUrl: origin,
+      logoCid: logoFile?.filename || "",
+      advisor: { name: advisor.name, phone: advisor.phone, email: advisor.email, mailbox: advisor.mailbox, role: advisor.role, personalPhone: advisor.personal_phone },
+      greeting: `Dear ${rows[0].applicant_name},`,
+      message,
+    });
+    const styles = await readEmailStyles(sql);
+    const html = applyEmailStyle(letter.html, styles.advisor, styles.colors);
+    const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox;
+    const sent = await sendFromMailbox(sql, {
+      to: email,
+      subject: data.subject,
+      text: letter.text,
+      html,
+      fromAddress: advisor.mailbox,
+      replyTo,
+      replyName: advisor.name,
+      attachments: logoFile ? [logoFile] : [],
+    });
+    if (sent.delivery !== "sent") throw new Error(sent.error || "The advisor letter was not sent.");
+    await ensureMailColumn(sql);
+    await sql`
+      insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
+      values (${crypto.randomUUID()}, 'client', ${email}, 'application_approved', ${data.subject}, ${letter.text}, ${html}, ${data.id}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${data.advisorId})
+    `;
+    await sendTelegramNotice(sql, `Application approved for ${rows[0].applicant_name}`, `${rows[0].applicant_name} (${email}) was approved. ${advisor.name} sent the portal letter.`).catch(() => undefined);
+    return { ok: true as const, loginEmail: email, mode: data.mode };
+  });
+
 export const deleteApplication = createServerFn({ method: "POST" })
   .validator((input: { id: string }) => input)
   .handler(async ({ data }) => {
@@ -376,8 +476,8 @@ export const investorLogin = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ensureDemoApplications(sql);
     const email = data.email.trim().toLowerCase();
-    const rows = await sql<{ status: ApplicationRow["status"]; password_hash: string | null }>`
-      select status, password_hash from applications
+    const rows = await sql<{ status: ApplicationRow["status"]; password_hash: string | null; applicant_name: string }>`
+      select status, password_hash, applicant_name from applications
       where email = ${email}
       order by submitted_at desc
       limit 1
@@ -386,9 +486,17 @@ export const investorLogin = createServerFn({ method: "POST" })
     if (!hash || !(await verifyPassword(data.password, hash))) {
       throw new Error("Those credentials are not recognized.");
     }
+    const destination = rows[0].status === "approved" ? ("portal" as const) : ("application" as const);
+    if (destination === "portal") {
+      const { sendTelegramNotice } = await import("@/lib/mail.server");
+      const name = rows[0].applicant_name?.trim() || email;
+      await sendTelegramNotice(sql, `Portal sign-in · ${name}`, `${name} (${email}) signed in to the investor portal.`).catch((error) => {
+        console.error("[portal] Sign-in notice failed:", error);
+      });
+    }
     const { setCookie } = await import("@tanstack/react-start/server");
     setCookie("ah_investor", email, cookieOptions(60 * 60 * 12));
-    return { destination: rows[0].status === "approved" ? ("portal" as const) : ("application" as const) };
+    return { destination };
   });
 
 export const DEFAULT_THEME = {
@@ -776,6 +884,40 @@ export const saveTelegramSetup = createServerFn({ method: "POST" })
     }
     const { mailSetupView } = await import("@/lib/mail.server");
     return mailSetupView(sql);
+  });
+
+export const getEmailStyles = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { readEmailStyles } = await import("@/lib/mail.server");
+  return readEmailStyles(await getSql());
+});
+
+export const saveEmailStyles = createServerFn({ method: "POST" })
+  .validator((input: { advisor?: string; transactional?: string; colors?: Partial<Record<"header" | "button" | "heading" | "accent" | "paper" | "card" | "text" | "border" | "muted", string>> }) => ({
+    advisor: normalizeEmailStyle(input.advisor),
+    transactional: normalizeEmailStyle(input.transactional),
+    colors: normalizeEmailColors(input.colors),
+  }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`
+      insert into site_settings (key, value) values ('email_style_advisor', ${data.advisor})
+      on conflict (key) do update set value = excluded.value
+    `;
+    await sql`
+      insert into site_settings (key, value) values ('email_style_transactional', ${data.transactional})
+      on conflict (key) do update set value = excluded.value
+    `;
+    for (const [id, value] of Object.entries(data.colors)) {
+      await sql`
+        insert into site_settings (key, value) values (${`email_color_${id}`}, ${value})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    return data;
   });
 
 export const setDeskSwitch = createServerFn({ method: "POST" })
@@ -3608,9 +3750,12 @@ export const previewAdvisorInvoice = createServerFn({ method: "POST" })
     await ensureInvoiceBillingColumn(sql);
     await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
     const prepared = await advisorInvoiceLetter(sql, data.id);
+    const { readEmailStyles } = await import("@/lib/mail.server");
+    const { applyEmailStyle } = await import("@/lib/email-templates");
+    const styles = await readEmailStyles(sql);
     return {
       subject: prepared.letter.subject,
-      html: prepared.letter.html,
+      html: applyEmailStyle(prepared.letter.html, styles.advisor, styles.colors),
       to: prepared.row.email,
       fromName: prepared.advisor.name,
       fromEmail: prepared.advisor.mailbox,
@@ -3836,10 +3981,11 @@ function dataFile(name: string, value: string) {
   return { filename, content };
 }
 
-async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string }) {
+async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string; copy?: { subject?: string; lead?: string; next?: string } }) {
   const { notifyStep } = await import("@/lib/mail.server");
   const result = await notifyStep(sql, input);
   if (result.delivery !== "sent") throw new Error(result.error || "The email was not sent. Save the SMTP2GO API key and from address in Settings.");
+  return result;
 }
 
 export type NotificationRow = {

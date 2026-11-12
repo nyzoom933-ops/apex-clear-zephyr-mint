@@ -1,6 +1,6 @@
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
 import type { Sql } from "@/lib/db";
-import { renderStep, type MailStep } from "@/lib/email-templates";
+import { renderStep, type MailStep, normalizeEmailStyle, normalizeEmailColors, type EmailStyle, type EmailColors } from "@/lib/email-templates";
 import { env } from "@/lib/env.server";
 
 export type { MailStep };
@@ -33,12 +33,14 @@ export async function notifyStep(
     fromAddress?: string;
     subject?: string;
     advisorId?: string;
+    copy?: { subject?: string; lead?: string; next?: string };
   },
 ) {
   const companyName = await readCompanyName(sql);
   const companyPhone = await readCompanyPhone(sql);
   const emailLogo = await readEmailLogo(sql);
   const origin = await portalOrigin(sql);
+  const styles = await readEmailStyles(sql);
   const client = renderStep(input.step, "client", {
     name: input.clientName,
     email: input.clientEmail,
@@ -48,6 +50,10 @@ export async function notifyStep(
     emailLogo,
     portalUrl: origin,
     extraHtml: input.extraHtml,
+    advisorStyle: styles.advisor,
+    transactionalStyle: styles.transactional,
+    emailColors: styles.colors,
+    copy: input.copy,
   });
   const deskDetail = input.adminDetail ?? (input.extraHtml ? "" : input.detail);
   const admin = renderStep(input.step, "admin", {
@@ -95,6 +101,10 @@ export async function notifyStep(
   return clientDelivery;
 }
 
+export function readPortalOrigin(sql: Sql) {
+  return portalOrigin(sql);
+}
+
 async function portalOrigin(sql: Sql) {
   const rows = await sql<{ value: string }>`select value from site_settings where key = 'public_domain'`;
   const configured = rows[0]?.value?.trim().replace(/\/$/, "") || "";
@@ -131,6 +141,25 @@ async function readCompanyName(sql: Sql) {
 async function readEmailLogo(sql: Sql) {
   const rows = await sql<{ value: string }>`select value from site_settings where key = 'email_logo'`;
   return rows[0]?.value || null;
+}
+
+export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; transactional: EmailStyle; colors: EmailColors }> {
+  const rows = await sql<{ key: string; value: string }>`
+    select key, value from site_settings where key in (
+      'email_style_advisor', 'email_style_transactional',
+      'email_color_header', 'email_color_button', 'email_color_heading', 'email_color_accent',
+      'email_color_paper', 'email_color_card', 'email_color_text', 'email_color_border', 'email_color_muted'
+    )
+  `;
+  const stored: Partial<EmailColors> = {};
+  const advisor = rows.find((row) => row.key === "email_style_advisor")?.value;
+  const transactional = rows.find((row) => row.key === "email_style_transactional")?.value;
+  for (const row of rows) {
+    if (!row.key.startsWith("email_color_")) continue;
+    const id = row.key.slice("email_color_".length) as keyof EmailColors;
+    stored[id] = row.value;
+  }
+  return { advisor: normalizeEmailStyle(advisor), transactional: normalizeEmailStyle(transactional), colors: normalizeEmailColors(stored) };
 }
 
 export async function readMailConfig(sql: Sql) {
