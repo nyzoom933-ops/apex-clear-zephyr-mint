@@ -5,9 +5,9 @@ import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
-import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, downloadPaymentReceipt, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
+import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, downloadPaymentReceipt, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, updatePreparedAmount, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
-import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, promoMonths, type PromoOffer } from "@/lib/promo";
+import { amountRange, dollarInputError, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, parseDollarAmount, PROMO_MINIMUM, promoMonths, type PromoOffer } from "@/lib/promo";
 
 export const Route = createFileRoute("/portal")({
   head: () => ({ meta: [{ title: "Portal · Account Holding" }] }),
@@ -205,7 +205,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
           <PortalMenu tab={tab} onChange={setTab} />
           {notice ? <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">{notice}</p> : null}
           <CelebrationBanners holdings={holdings} onActive={() => setTab("active")} />
-          <PreparedBanners pipeline={pipeline} onReview={() => setTab("investments")} />
+          <PreparedBanners pipeline={pipeline} onReview={() => setTab("investments")} onChanged={() => void refresh()} />
           <div key={tab} className="step-enter">
           {tab === "dashboard" ? (
             <Dashboard
@@ -340,9 +340,9 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
 
   function openSummary() {
     if (!selected) return;
-    const value = Number(amount.replace(/[^0-9.]/g, ""));
-    if (!Number.isFinite(value) || value <= 0) {
-      setError("Enter an amount.");
+    const message = dollarInputError(amount, promoMonths(offer).includes(selected.months));
+    if (message) {
+      setError(message);
       return;
     }
     setError("");
@@ -354,14 +354,14 @@ function FundingPanel({ onSubmitted, preferredTerm = "", preferredAmount = "" }:
     setError("");
     setPending(true);
     try {
-      await submitFunding({ data: { typeId: "cd", termId: selected.id, amount } });
+      await submitFunding({ data: { typeId: "cd", termId: selected.id, amount: String(parseDollarAmount(amount) ?? "") } });
       setAmount("");
       setError("");
       setPending(false);
       setSummaryOpen(false);
       onSubmitted();
-    } catch {
-      setError("Check the amount.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Check the amount.");
       setPending(false);
     }
   }
@@ -540,7 +540,7 @@ function InvestmentSummary({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const numeric = Number(amount.replace(/[^0-9.]/g, ""));
+  const numeric = parseDollarAmount(amount) ?? 0;
   const shown = Number.isFinite(numeric)
     ? numeric.toLocaleString("en-US", { style: "currency", currency: "USD" })
     : amount;
@@ -621,8 +621,8 @@ function SummaryFact({ label, value }: { label: string; value: string }) {
 }
 
 function moneyLabel(amount: string) {
-  const value = Number(amount.replace(/[^0-9.]/g, ""));
-  return Number.isFinite(value) && value > 0 ? value.toLocaleString("en-US", { style: "currency", currency: "USD" }) : "Enter an amount";
+  const value = parseDollarAmount(amount);
+  return value ? value.toLocaleString("en-US", { style: "currency", currency: "USD" }) : "Enter an amount";
 }
 
 function PromoRates({ offer, term }: { offer: PromoOffer; term: CdTerm }) {
@@ -672,9 +672,12 @@ function offerNotes(offer: PromoOffer): Array<{ icon: LucideIcon; text: string; 
 function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; selected: CdTerm | null; onApply: (months: number, amount: string) => void }) {
   const [deposit, setDeposit] = useState("100000");
   const months = selected?.months ?? 0;
-  const amount = Number(deposit.replace(/[^0-9.]/g, ""));
+  const parsed = parseDollarAmount(deposit);
+  const amount = parsed ?? Number.NaN;
   const tiers = offer.tiers.filter((tier) => tier.months.includes(months));
-  const bonus = selected && Number.isFinite(amount) ? matchTier(offer, months, amount) : null;
+  const promo = tiers.length > 0;
+  const amountError = deposit.trim() ? dollarInputError(deposit, promo) : "";
+  const bonus = selected && parsed != null ? matchTier(offer, months, parsed) : null;
   const base = parseApy(selected?.apy ?? "");
   const apy = base + (bonus ? bonus.bonusPercent / 100 : 0);
   const future = Number.isFinite(amount) && amount > 0 && selected ? amount * Math.pow(1 + apy, months / 12) : 0;
@@ -683,7 +686,14 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
 
   function apply(nextDeposit: string) {
     setDeposit(nextDeposit);
-    if (selected) onApply(months, nextDeposit.replace(/[^0-9.]/g, ""));
+    if (!selected) return;
+    const next = parseDollarAmount(nextDeposit);
+    const nextPromo = offer.tiers.some((tier) => tier.months.includes(months));
+    if (next == null || (nextPromo && next < PROMO_MINIMUM)) {
+      onApply(months, "");
+      return;
+    }
+    onApply(months, String(next));
   }
 
   return (
@@ -706,6 +716,7 @@ function PromoCalculator({ offer, selected, onApply }: { offer: PromoOffer; sele
                   onChange={(event) => apply(event.target.value)}
                 />
               </label>
+              {amountError ? <p className="mt-2 text-sm text-[#8a2a2a]">{amountError}</p> : null}
               {tiers.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {tiers.map((tier) => {
@@ -947,7 +958,7 @@ function CelebrationBanners({ holdings, onActive }: { holdings: FundingPosition[
   );
 }
 
-function PreparedBanners({ pipeline, onReview }: { pipeline: FundingPosition[]; onReview: () => void }) {
+function PreparedBanners({ pipeline, onReview, onChanged }: { pipeline: FundingPosition[]; onReview: () => void; onChanged: () => void }) {
   const [hidden, setHidden] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -979,26 +990,80 @@ function PreparedBanners({ pipeline, onReview }: { pipeline: FundingPosition[]; 
             dismiss(position.id);
             onReview();
           }}
+          onChanged={onChanged}
         />
       ))}
     </div>
   );
 }
 
-function PreparedBanner({ position, onOpen }: { position: FundingPosition; onOpen: () => void }) {
+function PreparedBanner({ position, onOpen, onChanged }: { position: FundingPosition; onOpen: () => void; onChanged: () => void }) {
+  const offer = usePromo();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
+  function startEdit() {
+    setDraft(position.amount.replace(/[^0-9.]/g, ""));
+    setError("");
+    setEditing(true);
+  }
+
+  async function save() {
+    const months = Number(position.termLabel.match(/(\d+)-month/)?.[1] ?? 0);
+    const message = dollarInputError(draft, promoMonths(offer).includes(months));
+    if (message) {
+      setError(message);
+      return;
+    }
+    setPending(true);
+    setError("");
+    try {
+      await updatePreparedAmount({ data: { id: position.id, amount: draft } });
+      setEditing(false);
+      onChanged();
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The amount could not be updated.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl bg-[#0c2348] px-5 py-5 text-white sm:px-6">
       <p className="text-xs font-semibold tracking-widest text-white/70 uppercase">From your application</p>
       <h2 className="confirm-title mt-1 text-2xl font-semibold text-white">Your certificate is ready</h2>
       <p className="mt-2 text-sm text-white/90">We opened this certificate from the term and amount on your application. Accept the terms to continue. Nothing is taken from your bank until the invoice is ready.</p>
-      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/15 pb-4">
+        <div>
+          <p className="text-xs font-semibold tracking-widest text-white/70 uppercase">Selected amount</p>
+          {editing ? (
+            <input
+              inputMode="decimal"
+              className="mt-2 w-48 rounded-md border border-white/30 bg-white px-3 py-2 text-lg font-semibold text-primary outline-none"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              aria-label="Selected amount"
+            />
+          ) : (
+            <p className="mt-1 text-3xl font-semibold">{position.amount}</p>
+          )}
+        </div>
+        {editing ? (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="min-h-11 rounded-md bg-white px-4 py-2 text-sm font-semibold text-action disabled:opacity-60" disabled={pending} onClick={() => void save()}>{pending ? "Saving…" : "Save"}</button>
+            <button type="button" className="min-h-11 rounded-md border border-white/40 px-4 py-2 text-sm font-semibold text-white" disabled={pending} onClick={() => { setEditing(false); setError(""); }}>Cancel</button>
+          </div>
+        ) : (
+          <button type="button" className="min-h-11 rounded-md border border-white/40 px-4 py-2 text-sm font-semibold text-white" onClick={startEdit}>Edit</button>
+        )}
+      </div>
+      {error ? <p className="mt-3 text-sm text-red-200">{error}</p> : null}
+      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <div>
           <dt className="text-white/70">Certificate</dt>
           <dd className="font-semibold">{position.termLabel || "Certificate"}</dd>
-        </div>
-        <div>
-          <dt className="text-white/70">Amount</dt>
-          <dd className="font-semibold">{position.amount}</dd>
         </div>
         <div>
           <dt className="text-white/70">Final APY</dt>

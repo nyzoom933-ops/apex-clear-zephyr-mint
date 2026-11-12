@@ -7,7 +7,7 @@ import { isWorkspacePreview } from "@/lib/env.server";
 import type { MailStep } from "@/lib/mail.server";
 import type { LeadCopy, ApplicationCopy } from "@/lib/email-templates";
 import { normalizeEmailStyle, normalizeEmailColors } from "@/lib/email-templates";
-import { formatBonus, matchTier, type PromoOffer, type PromoTier } from "@/lib/promo";
+import { dollarInputError, formatBonus, matchTier, parseDollarAmount, PROMO_MINIMUM, promoMonths, type PromoOffer, type PromoTier } from "@/lib/promo";
 import { resolveInvoiceBilling, type InvoiceBilling } from "@/lib/invoice-billing";
 
 export type ApplicationPayload = Omit<FormState, "password" | "confirmPassword">;
@@ -187,6 +187,10 @@ export const submitApplication = createServerFn({ method: "POST" })
       stored.preferredTerm = String(invited.months);
       stored.promoCode = invited.promoCode;
     }
+    const months = Number(stored.preferredTerm);
+    const offer = await loadPromo(sql);
+    const amountError = dollarInputError(stored.preferredAmount || "", promoMonths(offer).includes(months));
+    if (amountError) throw new Error(amountError);
     const name = [stored.firstName, stored.middleName, stored.surname].filter(Boolean).join(" ");
     const passwordHash = await hashPassword(data.password);
     await sql`
@@ -1423,9 +1427,11 @@ export const submitFunding = createServerFn({ method: "POST" })
     const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms where id = ${data.termId}`;
     const term = terms[0];
     if (!term) throw new Error("Choose a certificate term.");
+    const offer = await loadPromo(sql);
+    const amountError = dollarInputError(data.amount, promoMonths(offer).includes(Number(term.months)));
+    if (amountError) throw new Error(amountError);
+    const amount = parseDollarAmount(data.amount) ?? 0;
     const minimum = Number(type.minimum_investment.replace(/[^0-9.]/g, ""));
-    const amount = Number(data.amount.replace(/[^0-9.]/g, ""));
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter an investment amount.");
     if (Number.isFinite(minimum) && minimum > 0 && amount < minimum) {
       throw new Error(`Minimum investment is ${type.minimum_investment}.`);
     }
@@ -1434,7 +1440,6 @@ export const submitFunding = createServerFn({ method: "POST" })
     const label = `${Number(term.months)}-month · ${term.apy} APY`;
     const { nextFundingCodes } = await import("@/lib/funding-codes.server");
     const codes = await nextFundingCodes(sql);
-    const offer = await loadPromo(sql);
     const rates = ratesFor(label, formatted, offer.tiers);
     await sql`
       insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy)
@@ -1449,6 +1454,121 @@ export const submitFunding = createServerFn({ method: "POST" })
       skipAdmin: true,
     });
     return { id };
+  });
+
+export const createClientFunding = createServerFn({ method: "POST" })
+  .validator((input: { email: string; termId: string; amount: string; advisorId?: string; skipEmail?: boolean }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    const termId = (input.termId || "").trim();
+    const advisorId = (input.advisorId || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Choose a client.");
+    if (!termId) throw new Error("Choose a certificate term.");
+    const amount = parseDollarAmount(input.amount || "");
+    if (amount == null) throw new Error(dollarInputError(input.amount || ""));
+    return { email, termId, amount: String(amount), advisorId, skipEmail: Boolean(input.skipEmail) };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureFundingExtras(sql);
+    await ensureContactColumns(sql);
+    const clients = await sql<{ email: string; applicant_name: string; payload: ApplicationPayload | string }>`
+      select email, applicant_name, payload from applications
+      where lower(email) = ${data.email} and status = 'approved'
+      order by submitted_at desc
+      limit 1
+    `;
+    const client = clients[0];
+    if (!client) throw new Error("That client is not approved.");
+    const payload = typeof client.payload === "string" ? (JSON.parse(client.payload) as ApplicationPayload) : client.payload;
+    const signature = payload?.signature || "";
+    if (!signature.startsWith("data:image/png;base64,")) throw new Error("This client has no signature on the application.");
+    const signerName = client.applicant_name?.trim() || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || client.email;
+    const contactPhone = [payload?.phoneCountry, payload?.phone].filter(Boolean).join(" ").trim();
+    if (data.advisorId) {
+      const advisors = await sql<{ id: string }>`select id from advisors where id = ${data.advisorId}`;
+      if (!advisors[0]) throw new Error("Choose an advisor.");
+    }
+    const types = await sql<InvestmentRow>`select * from investment_types where id = 'cd'`;
+    const type = types[0];
+    if (!type) throw new Error("Certificates are not available.");
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms where id = ${data.termId}`;
+    const term = terms[0];
+    if (!term) throw new Error("Choose a certificate term.");
+    const offer = await loadPromo(sql);
+    const amountError = dollarInputError(data.amount, promoMonths(offer).includes(Number(term.months)));
+    if (amountError) throw new Error(amountError);
+    const amount = parseDollarAmount(data.amount) ?? 0;
+    const minimum = Number(String(type.minimum_investment || "").replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(minimum) && minimum > 0 && amount < minimum) {
+      throw new Error(`Minimum investment is ${type.minimum_investment}.`);
+    }
+    const id = crypto.randomUUID();
+    const formatted = amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
+    const label = `${Number(term.months)}-month · ${term.apy.includes("APY") ? term.apy : `${term.apy} APY`}`;
+    const { nextFundingCodes } = await import("@/lib/funding-codes.server");
+    const codes = await nextFundingCodes(sql);
+    const rates = ratesFor(label, formatted, offer.tiers);
+    await sql`
+      insert into fundings (id, email, type_id, amount, frequency, term_label, status, advisor_id, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy, origin, signer_name, signature, signed_at, contact_phone, contact_by)
+      values (${id}, ${client.email}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"approved_phone"}, ${data.advisorId || null}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber}, ${rates.promo}, ${rates.final}, ${"desk"}, ${signerName}, ${signature}, now(), ${contactPhone}, ${"call"})
+    `;
+    if (!data.skipEmail) {
+      await sendStep(sql, {
+        step: "approved_phone",
+        clientEmail: client.email,
+        clientName: signerName,
+        detail: [`${label}`, formatted, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`].join("\n"),
+        relatedId: id,
+        skipAdmin: true,
+      });
+    }
+    return { id, amount: formatted, term: label, email: client.email, emailed: !data.skipEmail };
+  });
+
+export const updatePreparedAmount = createServerFn({ method: "POST" })
+  .validator((input: { id: string; amount: string }) => {
+    const id = (input.id || "").trim();
+    const amount = parseDollarAmount(input.amount || "");
+    if (!id) throw new Error("Certificate not found.");
+    if (amount == null) throw new Error(dollarInputError(input.amount || ""));
+    return { id, amount };
+  })
+  .handler(async ({ data }) => {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    const email = getCookie("ah_investor")?.trim().toLowerCase();
+    if (!email) throw new Error("Sign in required.");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureFundingExtras(sql);
+    const rows = await sql<{ id: string; term_label: string; status: string; signed_at: string | null; origin: string }>`
+      select id, term_label, status, signed_at, coalesce(origin, '') as origin
+      from fundings
+      where id = ${data.id} and lower(email) = ${email}
+    `;
+    const row = rows[0];
+    if (!row || row.origin !== "application" || row.status !== "pending" || row.signed_at) {
+      throw new Error("This amount can no longer be changed.");
+    }
+    const types = await sql<{ minimum_investment: string }>`select minimum_investment from investment_types where id = 'cd'`;
+    const minimum = Number(String(types[0]?.minimum_investment || "").replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(minimum) && minimum > 0 && data.amount < minimum) {
+      throw new Error(`Minimum investment is ${types[0]?.minimum_investment}.`);
+    }
+    const offer = await loadPromo(sql);
+    const months = Number(row.term_label.match(/(\d+)-month/)?.[1] ?? 0);
+    if (promoMonths(offer).includes(months) && data.amount < PROMO_MINIMUM) {
+      throw new Error("A promotional certificate starts at $100,000.");
+    }
+    const formatted = data.amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
+    const rates = ratesFor(row.term_label, formatted, offer.tiers);
+    await sql`
+      update fundings
+      set amount = ${formatted}, promo_apy = ${rates.promo}, final_apy = ${rates.final}
+      where id = ${data.id} and lower(email) = ${email} and status = 'pending' and signed_at is null
+    `;
+    return { amount: formatted, promoApy: rates.promo, finalApy: rates.final };
   });
 
 export const cancelFunding = createServerFn({ method: "POST" })
@@ -2989,6 +3109,7 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
     contact_phone: string;
     contact_by: string;
     created_at: string;
+    origin: string;
   }>`
     select f.id, f.email, f.type_id, t.name, t.issuer, t.structure, t.currency, t.jurisdiction,
            t.coupon_type, t.minimum_investment, t.credit_rating, t.capital_protection,
@@ -3000,7 +3121,8 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
            to_char(f.payment_approved_at at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
            f.deposit_code, f.deposit_number, f.account_number, f.reference_number,
            f.payment_file_name, f.promo_apy, f.final_apy, f.invoice_billing, f.contact_phone, f.contact_by,
-           to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at
+           to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at,
+           coalesce(f.origin, '') as origin
     from fundings f
     join investment_types t on t.id = f.type_id
     left join advisors a on a.id = f.advisor_id
@@ -3040,6 +3162,7 @@ export const listFundings = createServerFn({ method: "GET" }).handler(async () =
     contactPhone: row.contact_phone ?? "",
     contactBy: row.contact_by ?? "call",
     createdAt: row.created_at,
+    origin: row.origin ?? "",
     billing: resolveInvoiceBilling(row.invoice_billing, row.signer_name || row.email, row.reference_number ?? ""),
   }));
 });
@@ -3847,8 +3970,10 @@ async function openPreferredFunding(sql: Sql, email: string) {
   if (!app || app.status !== "approved") return;
   const payload = typeof app.payload === "string" ? (JSON.parse(app.payload) as ApplicationPayload) : app.payload;
   const months = Number(payload?.preferredTerm);
-  const amount = Number(String(payload?.preferredAmount || "").replace(/[^0-9.]/g, ""));
-  if (!Number.isFinite(months) || months <= 0 || !Number.isFinite(amount) || amount <= 0) return;
+  const amount = parseDollarAmount(String(payload?.preferredAmount || ""));
+  if (!Number.isFinite(months) || months <= 0 || amount == null) return;
+  const offer = await loadPromo(sql);
+  if (promoMonths(offer).includes(months) && amount < PROMO_MINIMUM) return;
   const types = await sql<InvestmentRow>`select * from investment_types where id = 'cd'`;
   const type = types[0];
   if (!type) return;
@@ -3864,7 +3989,6 @@ async function openPreferredFunding(sql: Sql, email: string) {
   const label = `${Number(term.months)}-month · ${term.apy.includes("APY") ? term.apy : `${term.apy} APY`}`;
   const { nextFundingCodes } = await import("@/lib/funding-codes.server");
   const codes = await nextFundingCodes(sql);
-  const offer = await loadPromo(sql);
   const rates = ratesFor(label, formatted, offer.tiers);
   const inserted = await sql<{ id: string }>`
     insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy, origin)

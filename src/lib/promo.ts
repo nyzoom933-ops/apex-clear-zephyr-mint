@@ -28,6 +28,24 @@ export function promoMonths(offer: PromoOffer) {
   return [...new Set(offer.tiers.flatMap((tier) => tier.months))].sort((a, b) => a - b);
 }
 
+export const PROMO_MINIMUM = 100_000;
+
+export function parseDollarAmount(raw: string) {
+  const cleaned = raw.trim().replace(/[$\s]/g, "");
+  if (!cleaned) return null;
+  const grouped = cleaned.includes(",") ? /^\d{1,3}(,\d{3})+(\.\d{1,2})?$/ : /^\d+(\.\d{1,2})?$/;
+  if (!grouped.test(cleaned)) return null;
+  const value = Number(cleaned.replace(/,/g, ""));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export function dollarInputError(raw: string, promo = false) {
+  const amount = parseDollarAmount(raw);
+  if (amount == null) return "Enter the amount in dollars, such as 200,000. A comma must separate thousands, so 200,00 is not accepted.";
+  if (promo && amount < PROMO_MINIMUM) return "A promotional certificate starts at $100,000.";
+  return "";
+}
+
 export function matchTier(offer: PromoOffer, months: number, amount: number) {
   if (!Number.isFinite(amount)) return null;
   return offer.tiers.find((tier) => tier.months.includes(months) && amount >= tier.minAmount && (tier.maxAmount == null || amount <= tier.maxAmount)) ?? null;

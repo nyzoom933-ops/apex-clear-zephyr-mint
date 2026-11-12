@@ -43,6 +43,7 @@ import {
   deleteApplication,
   deleteCrmLead,
   deleteFunding,
+  createClientFunding,
   clearDatabase,
   signInAsClient,
   setSiteBrand,
@@ -76,7 +77,7 @@ import {
   getPromo,
   DEFAULT_THEME,
 } from "@/lib/admin.functions";
-import { formatBonus, matchTier, parseApy, promoMonths } from "@/lib/promo";
+import { dollarInputError, formatBonus, matchTier, parseApy, promoMonths } from "@/lib/promo";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "Operations · Account Holding" }] }),
@@ -1339,6 +1340,63 @@ function addMonths(iso, months) {
   if (!year || !month || !day || !months) return "—";
   return new Date(Date.UTC(year, month - 1 + months, day)).toISOString().slice(0, 10);
 }
+function CreateClientInvestment({ advisors, onCreated }) {
+  const [clients, setClients] = useState([]);
+  const [terms, setTerms] = useState([]);
+  const [offer, setOffer] = useState(null);
+  const [email, setEmail] = useState("");
+  const [termId, setTermId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [advisorId, setAdvisorId] = useState("");
+  const [skipEmail, setSkipEmail] = useState(false);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    Promise.all([listApplications(), getCdTerms(), getPromo()]).then(([applications, nextTerms, promo]) => {
+      const approved = [];
+      const seen = new Set();
+      for (const row of applications) {
+        if (row.status !== "approved") continue;
+        const address = (row.email || "").trim().toLowerCase();
+        if (!address || seen.has(address)) continue;
+        seen.add(address);
+        approved.push(row);
+      }
+      approved.sort((a, b) => (a.applicantName || "").localeCompare(b.applicantName || ""));
+      setClients(approved);
+      setTerms(nextTerms);
+      setOffer(promo);
+    }).catch(() => setError("Clients and terms could not be loaded."));
+  }, []);
+  const promoSet = new Set(promoMonths(offer || { tiers: [] }));
+  const selected = terms.find(term => term.id === termId);
+  async function create() {
+    setError("");
+    if (!email) {
+      setError("Choose a client.");
+      return;
+    }
+    if (!selected) {
+      setError("Choose a certificate term.");
+      return;
+    }
+    const message = dollarInputError(amount, promoSet.has(selected.months));
+    if (message) {
+      setError(message);
+      return;
+    }
+    setPending(true);
+    try {
+      const result = await createClientFunding({ data: { email, termId, amount, advisorId, skipEmail } });
+      setAmount("");
+      onCreated(`${result.term} · ${result.amount} opened for ${result.email}. Signed with the application signature and ready for an invoice. ${result.emailed ? "The client was emailed." : "No email was sent."}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The investment could not be created.");
+    }
+    setPending(false);
+  }
+  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void create(); }}><h2 className="text-lg font-semibold text-primary">Create an investment</h2><p className="mt-1 text-sm text-fg">Opens a signed certificate, using the signature on the application. It is ready for an invoice.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Client</span><select className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)}><option value="">Choose a client</option>{clients.map(client => <option key={client.id} value={client.email}>{client.applicantName} · {client.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Term</span><select className={`${controlClass} mt-1`} value={termId} onChange={event => setTermId(event.target.value)}><option value="">Choose a term</option>{terms.map(term => <option key={term.id} value={term.id}>{term.months}-month · {term.apy}{promoSet.has(term.months) ? " · promotional" : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} inputMode="decimal" placeholder="100,000" value={amount} onChange={event => setAmount(event.target.value)} />{selected && promoSet.has(selected.months) ? <span className="mt-1 block text-xs text-fg">Promotional certificates start at $100,000. Enter 100000 or 100,000.</span> : <span className="mt-1 block text-xs text-fg">Enter 100000 or 100,000. A comma must separate thousands.</span>}</label><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label></div><label className="mt-3 flex items-start gap-2 text-sm text-fg"><input type="checkbox" className="mt-1" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} /><span>Do not send transactional emails</span></label>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Creating…" : "Create investment"}</button></form>;
+}
 function FundingDesk() {
   const [rows, setRows] = useState(null);
   const [advisors, setAdvisors] = useState([]);
@@ -1395,7 +1453,7 @@ function FundingDesk() {
       setError(caught instanceof Error ? caught.message : "Investments could not be loaded.");
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Client investments</h1><p className="mt-2 text-fg">A certificate appears here after the client accepts the terms. Pending call/email means the advisor still needs to reach them.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}{!rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.filter(row => row.signed && row.status !== "payment_approved").length === 0 ? <p className="mt-4 text-sm text-fg">No investments in progress. A certificate appears here after the client accepts the terms.</p> : <ul className="mt-4 grid gap-3">{rows.filter(row => row.signed && row.status !== "payment_approved").map(row => <FundingRow key={row.id} row={row} advisors={advisors} onSave={save} onReload={() => void reload()} onRemove={() => void remove(row.id)} />)}</ul>}</section>;
+  return <section><h1 className="text-3xl font-semibold">Client investments</h1><p className="mt-2 text-fg">Create a signed certificate for an approved client, or update one already in progress.</p><CreateClientInvestment advisors={advisors} onCreated={message => { setNotice(message); void load(); }} />{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}{!rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.filter(row => row.status !== "payment_approved" && row.status !== "cancelled" && (row.signed || row.origin === "desk")).length === 0 ? <p className="mt-4 text-sm text-fg">No investments in progress.</p> : <ul className="mt-4 grid gap-3">{rows.filter(row => row.status !== "payment_approved" && row.status !== "cancelled" && (row.signed || row.origin === "desk")).map(row => <FundingRow key={row.id} row={row} advisors={advisors} onSave={save} onReload={() => void reload()} onRemove={() => void remove(row.id)} />)}</ul>}</section>;
 }
 function FundingRow({
   row,
@@ -1422,7 +1480,7 @@ function FundingRow({
     setAmount(row.amount);
     setOpenedOn(row.createdAt);
   }, [row]);
-  return <li className="rounded-md border border-border bg-surface p-4"><p className="font-semibold text-primary">{row.email} · {row.termLabel || row.name}</p><p className="mt-1 text-sm text-fg">{row.amount} · {row.createdAt}{row.status === "pending" ? " · Pending call/email" : " · Terms signed"}{row.contactBy === "email" ? " · Do not call. Use email." : ""}</p>{row.contactBy === "email" ? <p className="mt-1 text-sm font-semibold text-primary">Do not call. Use email.</p> : <p className="mt-1 text-sm text-fg">Call {row.contactPhone || "the number on the application"}</p>}<div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}{advisor.phone ? ` · ${advisor.phone}` : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Status</span><select className={`${controlClass} mt-1`} value={status} onChange={event => setStatus(event.target.value)}>{row.status === "instructions_sent" ? <option value="instructions_sent">Invoice created</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="pending">Pending call/email</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="approved_phone">Approved by phone</option> : null}<option value="cancelled">Cancelled</option></select></label></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><AdminField label="Amount" value={amount} onChange={setAmount} /><label className="block"><span className="mb-1.5 block text-sm font-medium">Date</span><input className={controlClass} type="date" value={openedOn} onChange={event => setOpenedOn(event.target.value)} /></label><AdminField label="Deposit code" value={depositCode} onChange={setDepositCode} /><AdminField label="Deposit number" value={depositNumber} onChange={setDepositNumber} /><AdminField label="Account number" value={accountNumber} onChange={setAccountNumber} /><AdminField label="Reference number" value={referenceNumber} onChange={setReferenceNumber} /></div><p className="mt-2 text-xs text-fg">Deposit code is CD- plus 4 letters and 4 digits. Deposit number is DN, the date, and 4 letters. Account number is 12 digits. Reference is W plus 4 letters and 3 digits.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary" onClick={() => onSave(row, status, advisorId, {
+  return <li className="rounded-md border border-border bg-surface p-4"><p className="font-semibold text-primary">{row.email} · {row.termLabel || row.name}</p><p className="mt-1 text-sm text-fg">{row.amount} · {row.createdAt}{row.origin === "desk" ? " · Opened from the desk" : ""}{!row.signed ? " · Terms not signed" : row.status === "pending" ? " · Pending call/email" : " · Terms signed"}{row.contactBy === "email" ? " · Do not call. Use email." : ""}</p>{row.contactBy === "email" ? <p className="mt-1 text-sm font-semibold text-primary">Do not call. Use email.</p> : <p className="mt-1 text-sm text-fg">Call {row.contactPhone || "the number on the application"}</p>}<div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}{advisor.phone ? ` · ${advisor.phone}` : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Status</span><select className={`${controlClass} mt-1`} value={status} onChange={event => setStatus(event.target.value)}>{row.status === "instructions_sent" ? <option value="instructions_sent">Invoice created</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="pending">Pending call/email</option> : null}{row.status === "pending" || row.status === "approved_phone" ? <option value="approved_phone">Approved by phone</option> : null}<option value="cancelled">Cancelled</option></select></label></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><AdminField label="Amount" value={amount} onChange={setAmount} /><label className="block"><span className="mb-1.5 block text-sm font-medium">Date</span><input className={controlClass} type="date" value={openedOn} onChange={event => setOpenedOn(event.target.value)} /></label><AdminField label="Deposit code" value={depositCode} onChange={setDepositCode} /><AdminField label="Deposit number" value={depositNumber} onChange={setDepositNumber} /><AdminField label="Account number" value={accountNumber} onChange={setAccountNumber} /><AdminField label="Reference number" value={referenceNumber} onChange={setReferenceNumber} /></div><p className="mt-2 text-xs text-fg">Deposit code is CD- plus 4 letters and 4 digits. Deposit number is DN, the date, and 4 letters. Account number is 12 digits. Reference is W plus 4 letters and 3 digits.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary" onClick={() => onSave(row, status, advisorId, {
         depositCode,
         depositNumber,
         accountNumber,

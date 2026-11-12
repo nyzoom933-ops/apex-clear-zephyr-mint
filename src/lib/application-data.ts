@@ -1,14 +1,8 @@
-export const STEP_NAMES = [
-  "Before you begin",
-  "About you",
-  "Address and tax",
-  "Financial and funding",
-  "Verification",
-  "Declarations",
-] as const;
+import { dollarInputError } from "@/lib/promo";
 
-export const ACCOUNT_TYPES = ["Individual", "Joint", "Business", "Trust"] as const;
-export const CURRENCIES = ["USD"] as const;
+export const STEP_NAMES = ["Before you begin", "About you", "Address and tax", "Financial and funding", "Verification", "Declarations"];
+
+export const ACCOUNT_TYPES = ["Individual", "Joint", "Business", "Trust"];
 
 export const PHONE_COUNTRIES = [
   "United States / Canada (+1)",
@@ -31,7 +25,7 @@ export const PHONE_COUNTRIES = [
   "South Korea (+82)",
   "India (+91)",
   "Other international code",
-] as const;
+];
 
 export const COUNTRIES = [
   "United States",
@@ -62,7 +56,7 @@ export const COUNTRIES = [
   "Mexico",
   "Brazil",
   "South Africa",
-] as const;
+];
 
 export const US_STATES = [
   "Alabama",
@@ -116,7 +110,7 @@ export const US_STATES = [
   "Wisconsin",
   "Wyoming",
   "District of Columbia",
-] as const;
+];
 
 export const OCCUPATIONS = [
   "Executive or senior management",
@@ -134,117 +128,27 @@ export const OCCUPATIONS = [
   "Student",
   "Unemployed",
   "Other",
-] as const;
+];
 
-export const WEALTH_SOURCES = [
-  "Employment income",
-  "Business ownership",
-  "Sale of a business",
-  "Investment returns",
-  "Inheritance",
-  "Other",
-] as const;
+export const WEALTH_SOURCES = ["Employment income", "Business ownership", "Sale of a business", "Investment returns", "Inheritance", "Other"];
 
-export const FUND_SOURCES = [
-  "Personal savings",
-  "Employment income",
-  "Brokerage or investment liquidation",
-  "Business proceeds",
-  "Other",
-] as const;
+export const FUND_SOURCES = ["Personal savings", "Employment income", "Brokerage or investment liquidation", "Business proceeds", "Other"];
 
-export const PURPOSES = [
-  "Capital preservation",
-  "Income generation",
-  "Long-term growth",
-  "Retirement planning",
-  "Other",
-] as const;
+export const PURPOSES = ["Capital preservation", "Income generation", "Long-term growth", "Retirement planning", "Other"];
 
-export const NET_WORTH = [
-  "Under $100,000",
-  "$100,000 – $500,000",
-  "$500,000 – $1,000,000",
-  "$1,000,000 – $5,000,000",
-  "Over $5,000,000",
-] as const;
+export const NET_WORTH = ["Under $100,000", "$100,000 – $500,000", "$500,000 – $1,000,000", "$1,000,000 – $5,000,000", "Over $5,000,000"];
 
-export const ID_TYPES = [
-  "Passport",
-  "Driver’s license",
-  "Government-issued identification card",
-  "Permanent Resident Card",
-] as const;
+export const ID_TYPES = ["Passport", "Driver's license", "Government-issued identification card", "Permanent Resident Card"];
 
-export const ADDRESS_DOCS = [
-  "Bank or credit-card statement",
-  "Utility bill",
-  "Government correspondence or tax statement",
-  "Mortgage statement",
-  "Current lease agreement",
-] as const;
+export const ADDRESS_DOCS = ["Bank or credit-card statement", "Utility bill", "Government correspondence or tax statement", "Mortgage statement", "Current lease agreement"];
 
-export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export const YEARS = Array.from({ length: 109 }, (_, i) => String(2008 - i));
-export const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1));
+export const YEARS = Array.from({ length: 109 }, (_, index) => String(2008 - index));
 
-export type FormState = {
-  accountType: (typeof ACCOUNT_TYPES)[number];
-  currency: (typeof CURRENCIES)[number];
-  firstName: string;
-  middleName: string;
-  surname: string;
-  email: string;
-  phoneCountry: (typeof PHONE_COUNTRIES)[number];
-  phone: string;
-  password: string;
-  confirmPassword: string;
-  dobYear: string;
-  dobMonth: string;
-  dobDay: string;
-  nationality: string;
-  residence: string;
-  occupation: string;
-  street: string;
-  apt: string;
-  city: string;
-  region: string;
-  postal: string;
-  country: string;
-  taxResidence: string;
-  taxId: string;
-  sourceOfWealth: string;
-  sourceOfFunds: string;
-  investmentPurpose: string;
-  netWorth: string;
-  preferredAmount: string;
-  preferredTerm: string;
-  promoCode: string;
-  inviteToken: string;
-  idType: (typeof ID_TYPES)[number];
-  addressDocType: (typeof ADDRESS_DOCS)[number];
-  idFileName: string;
-  idFile: string;
-  addressFileName: string;
-  addressFile: string;
-  bankName: string;
-  accountHolder: string;
-  bankStreet: string;
-  bankLine2: string;
-  bankCity: string;
-  bankState: string;
-  bankZip: string;
-  routingNumber: string;
-  accountNumber: string;
-  d1: boolean;
-  d2: boolean;
-  d3: boolean;
-  d4: boolean;
-  signature: string;
-};
+export const DAYS = Array.from({ length: 31 }, (_, index) => String(index + 1));
 
-export const EMPTY_FORM: FormState = {
+export const EMPTY_FORM = {
   accountType: "Individual",
   currency: "USD",
   firstName: "",
@@ -299,9 +203,11 @@ export const EMPTY_FORM: FormState = {
   signature: "",
 };
 
+export type FormState = typeof EMPTY_FORM;
+
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function validateStep(step: number, form: FormState): string[] {
+export function validateStep(step: number, form: FormState, promo = false): string[] {
   const errors: string[] = [];
   if (step === 1) {
     if (!form.firstName.trim()) errors.push("Enter a first name.");
@@ -328,14 +234,12 @@ export function validateStep(step: number, form: FormState): string[] {
     if (!form.accountHolder.trim()) errors.push("Enter the account holder's name.");
     if (!/^\d{9}$/.test(form.routingNumber.replace(/\D/g, ""))) errors.push("Enter a 9-digit routing number.");
     if (form.accountNumber.replace(/\D/g, "").length < 4) errors.push("Enter the account number.");
-    const preferred = Number(form.preferredAmount.replace(/[^0-9.]/g, ""));
-    if (!Number.isFinite(preferred) || preferred <= 0) errors.push("Enter a preferred investment amount.");
+    const amountError = dollarInputError(form.preferredAmount, promo);
+    if (amountError) errors.push(amountError);
     if (!form.preferredTerm) errors.push("Choose a promotional term.");
   }
   if (step === 5) {
-    if (!form.d1 || !form.d2 || !form.d3 || !form.d4) {
-      errors.push("Confirm every declaration before submitting.");
-    }
+    if (!form.d1 || !form.d2 || !form.d3 || !form.d4) errors.push("Confirm every declaration before submitting.");
     if (!form.signature.startsWith("data:image/png;base64,")) errors.push("Draw your signature.");
   }
   return errors;

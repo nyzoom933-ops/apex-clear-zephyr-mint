@@ -199,7 +199,7 @@ export function ApplicationForm() {
   }
 
   async function onContinue() {
-    const nextErrors = validateStep(step, form);
+    const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)));
     if (nextErrors.length) {
       setErrors(nextErrors);
       cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -715,7 +715,7 @@ function Preference({
       {showPromo ? <Field label="Promotional code">
         <input className={controlClass} value={form.promoCode} placeholder="Optional" readOnly={locked} onChange={(event) => patch("promoCode", event.target.value)} />
       </Field> : null}
-      <Field label="Preferred investment amount">
+      <Field label="Preferred investment amount" hint={promo.has(months) ? "Promotional certificates start at $100,000. Enter 100000 or 100,000." : "Enter 100000 or 100,000. A comma must separate thousands."}>
         <input
           className={controlClass}
           inputMode="decimal"
