@@ -205,6 +205,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
           <PortalMenu tab={tab} onChange={setTab} />
           {notice ? <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">{notice}</p> : null}
           <CelebrationBanners holdings={holdings} onActive={() => setTab("active")} />
+          <PreparedBanners pipeline={pipeline} onReview={() => setTab("investments")} />
           <div key={tab} className="step-enter">
           {tab === "dashboard" ? (
             <Dashboard
@@ -946,6 +947,75 @@ function CelebrationBanners({ holdings, onActive }: { holdings: FundingPosition[
   );
 }
 
+function PreparedBanners({ pipeline, onReview }: { pipeline: FundingPosition[]; onReview: () => void }) {
+  const [hidden, setHidden] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("ah-prepared-seen") || "[]");
+      setHidden(Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : []);
+    } catch {
+      setHidden([]);
+    }
+  }, []);
+
+  if (!hidden) return null;
+  const fresh = pipeline.filter((position) => position.origin === "application" && !position.signed && position.status === "pending" && !hidden.includes(position.id));
+  if (fresh.length === 0) return null;
+
+  function dismiss(id: string) {
+    const next = [...hidden!, id];
+    setHidden(next);
+    localStorage.setItem("ah-prepared-seen", JSON.stringify(next));
+  }
+
+  return (
+    <div className="mt-4 grid gap-3">
+      {fresh.map((position) => (
+        <PreparedBanner
+          key={position.id}
+          position={position}
+          onOpen={() => {
+            dismiss(position.id);
+            onReview();
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PreparedBanner({ position, onOpen }: { position: FundingPosition; onOpen: () => void }) {
+  return (
+    <div className="overflow-hidden rounded-2xl bg-[#0c2348] px-5 py-5 text-white sm:px-6">
+      <p className="text-xs font-semibold tracking-widest text-white/70 uppercase">From your application</p>
+      <h2 className="confirm-title mt-1 text-2xl font-semibold text-white">Your certificate is ready</h2>
+      <p className="mt-2 text-sm text-white/90">We opened this certificate from the term and amount on your application. Accept the terms to continue. Nothing is taken from your bank until the invoice is ready.</p>
+      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
+        <div>
+          <dt className="text-white/70">Certificate</dt>
+          <dd className="font-semibold">{position.termLabel || "Certificate"}</dd>
+        </div>
+        <div>
+          <dt className="text-white/70">Amount</dt>
+          <dd className="font-semibold">{position.amount}</dd>
+        </div>
+        <div>
+          <dt className="text-white/70">Final APY</dt>
+          <dd className="font-semibold">{position.finalApy || "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-white/70">Promo APY</dt>
+          <dd className="font-semibold">{position.promoApy || "—"}</dd>
+        </div>
+      </dl>
+      <button type="button" className="mt-5 min-h-11 rounded-md bg-white px-5 py-2 text-sm font-semibold text-action" onClick={onOpen}>
+        Review the certificate
+      </button>
+    </div>
+  );
+}
+
 function Celebration({ position, onOpen }: { position: FundingPosition; onOpen: () => void }) {
   const rates = investmentRates(position, usePromo());
   const matures = maturityOn(position.createdAt, rates.months);
@@ -1035,7 +1105,7 @@ function Dashboard({
               ? "A certificate becomes active only after your advisor confirms the payment. Figures below use active CDs."
               : "Figures below use active CDs."}
       </p>
-      {account.payload.preferredTerm ? (
+      {account.payload.preferredTerm && holdings.length === 0 && pipeline.length === 0 ? (
         <p className="mt-2 text-sm text-fg">
           From your application: {account.payload.preferredTerm}-month
           {account.payload.preferredAmount ? ` · ${account.payload.preferredAmount}` : ""}. Add investment opens with this choice.

@@ -1339,6 +1339,7 @@ export type FundingPosition = {
   promoApy: string;
   finalApy: string;
   createdAt: string;
+  origin?: string;
 };
 
 export const getMyFundings = createServerFn({ method: "GET" }).handler(async () => {
@@ -1352,7 +1353,8 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
   await restyleLegacyFundingCodes(sql);
   const { ensureDemoApplications } = await import("@/lib/seed-applications.server");
   await ensureDemoApplications(sql);
-  const rows = await sql<{ id: string; type_id: string; name: string; issuer: string; structure: string; currency: string; jurisdiction: string; coupon_type: string; minimum_investment: string; credit_rating: string; capital_protection: string; amount: string; frequency: string; term_label: string; status: FundingPosition["status"]; advisor_name: string | null; advisor_phone: string | null; signed: boolean; signer_name: string; signed_on: string | null; confirmed_on: string | null; deposit_code: string; deposit_number: string; account_number: string; reference_number: string; payment_file_name: string; promo_apy: string; final_apy: string; created_at: string }>`
+  await openPreferredFunding(sql, email);
+  const rows = await sql<{ id: string; type_id: string; name: string; issuer: string; structure: string; currency: string; jurisdiction: string; coupon_type: string; minimum_investment: string; credit_rating: string; capital_protection: string; amount: string; frequency: string; term_label: string; status: FundingPosition["status"]; advisor_name: string | null; advisor_phone: string | null; signed: boolean; signer_name: string; signed_on: string | null; confirmed_on: string | null; deposit_code: string; deposit_number: string; account_number: string; reference_number: string; payment_file_name: string; promo_apy: string; final_apy: string; created_at: string; origin: string }>`
     select f.id, f.type_id, t.name, t.issuer, t.structure, t.currency, t.jurisdiction, t.coupon_type,
            t.minimum_investment, t.credit_rating, t.capital_protection,
            f.amount, f.frequency, f.term_label, f.status,
@@ -1363,7 +1365,8 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
            to_char(f.payment_approved_at at time zone 'UTC', 'YYYY-MM-DD') as confirmed_on,
            f.deposit_code, f.deposit_number, f.account_number, f.reference_number,
            f.payment_file_name, f.promo_apy, f.final_apy,
-           to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at
+           to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as created_at,
+           coalesce(f.origin, '') as origin
     from fundings f
     join investment_types t on t.id = f.type_id
     left join advisors a on a.id = f.advisor_id
@@ -1400,6 +1403,7 @@ export const getMyFundings = createServerFn({ method: "GET" }).handler(async () 
     promoApy: row.promo_apy ?? "",
     finalApy: row.final_apy ?? "",
     createdAt: row.created_at,
+    origin: row.origin ?? "",
   }));
 });
 
@@ -2910,6 +2914,7 @@ export const deleteAdvisor = createServerFn({ method: "POST" })
   });
 
 async function ensureFundingExtras(sql: Sql) {
+  await sql`alter table fundings add column if not exists origin text not null default ''`;
   await sql`alter table fundings add column if not exists promo_apy text not null default ''`;
   await sql`alter table fundings add column if not exists final_apy text not null default ''`;
   await sql`alter table fundings add column if not exists payment_approved_at timestamptz`;
@@ -3826,6 +3831,59 @@ function plusMonths(iso: string, months: number) {
   if (!year || !month || !day || !months) return iso;
   const date = new Date(Date.UTC(year, month - 1 + months, day));
   return `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
+}
+
+async function openPreferredFunding(sql: Sql, email: string) {
+  const address = email.trim().toLowerCase();
+  const existing = await sql<{ id: string }>`select id from fundings where lower(email) = ${address} limit 1`;
+  if (existing[0]) return;
+  const apps = await sql<{ payload: ApplicationPayload | string; status: string; applicant_name: string }>`
+    select payload, status, applicant_name from applications
+    where lower(email) = ${address}
+    order by submitted_at desc
+    limit 1
+  `;
+  const app = apps[0];
+  if (!app || app.status !== "approved") return;
+  const payload = typeof app.payload === "string" ? (JSON.parse(app.payload) as ApplicationPayload) : app.payload;
+  const months = Number(payload?.preferredTerm);
+  const amount = Number(String(payload?.preferredAmount || "").replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(months) || months <= 0 || !Number.isFinite(amount) || amount <= 0) return;
+  const types = await sql<InvestmentRow>`select * from investment_types where id = 'cd'`;
+  const type = types[0];
+  if (!type) return;
+  const minimum = Number(String(type.minimum_investment || "").replace(/[^0-9.]/g, ""));
+  if (Number.isFinite(minimum) && minimum > 0 && amount < minimum) return;
+  const terms = await sql<{ apy: string; months: number }>`
+    select apy, months from cd_terms where months = ${months} order by featured desc, sort_order asc limit 1
+  `;
+  const term = terms[0];
+  if (!term?.apy) return;
+  const id = crypto.randomUUID();
+  const formatted = amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const label = `${Number(term.months)}-month · ${term.apy.includes("APY") ? term.apy : `${term.apy} APY`}`;
+  const { nextFundingCodes } = await import("@/lib/funding-codes.server");
+  const codes = await nextFundingCodes(sql);
+  const offer = await loadPromo(sql);
+  const rates = ratesFor(label, formatted, offer.tiers);
+  const inserted = await sql<{ id: string }>`
+    insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy, origin)
+    select ${id}, ${address}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"pending"}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber}, ${rates.promo}, ${rates.final}, ${"application"}
+    where not exists (select 1 from fundings where lower(email) = ${address})
+    returning id
+  `;
+  if (!inserted[0]) return;
+  const notice = sendStep(sql, {
+    step: "investment_submitted",
+    clientEmail: address,
+    clientName: app.applicant_name?.trim() || (await investorName(sql, address)),
+    detail: [`${label}`, formatted, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`].join("\n"),
+    relatedId: id,
+    skipAdmin: true,
+  }).catch((error) => {
+    console.error("[portal] Prepared certificate notice failed:", error);
+  });
+  await Promise.race([notice, new Promise((resolve) => setTimeout(resolve, 2000))]);
 }
 
 function ratesFor(termLabel: string, amount: string, tiers: PromoTier[]) {
