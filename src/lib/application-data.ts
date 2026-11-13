@@ -207,15 +207,15 @@ export type FormState = typeof EMPTY_FORM;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function validateStep(step: number, form: FormState, promo = false): string[] {
+export function validateStep(step: number, form: FormState, promo = false, skipPassword = false): string[] {
   const errors: string[] = [];
   if (step === 1) {
     if (!form.firstName.trim()) errors.push("Enter a first name.");
     if (!form.surname.trim()) errors.push("Enter a surname.");
     if (!EMAIL.test(form.email.trim())) errors.push("Enter a valid email address.");
     if (form.phone.replace(/\D/g, "").length < 7) errors.push("Enter a telephone number.");
-    if (form.password.length < 8) errors.push("Create a password of at least 8 characters.");
-    if (form.password !== form.confirmPassword) errors.push("Passwords do not match.");
+    if (!skipPassword && form.password.length < 8) errors.push("Create a password of at least 8 characters.");
+    if (!skipPassword && form.password !== form.confirmPassword) errors.push("Passwords do not match.");
     if (!form.dobYear || !form.dobMonth || !form.dobDay) errors.push("Enter date of birth.");
     if (!form.occupation) errors.push("Select occupation.");
   }

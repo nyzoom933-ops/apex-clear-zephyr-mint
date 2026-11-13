@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
-import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, defaultApplicationCopy, defaultExtensionCopy, defaultHtrCopy, defaultLeadCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, extensionLetter, htrLetter, leadLetter, mailStepLabel, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
+import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, defaultApplicationCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
 import {
   adminLogin,
   adminLogout,
@@ -40,6 +40,7 @@ import {
   savePromo,
   setApplicationStatus,
   sendApplicationApproved,
+  sendPortalAccess,
   deleteApplication,
   deleteCrmLead,
   deleteFunding,
@@ -64,6 +65,7 @@ import {
   sendLeadIntro,
   sendLeadExtension,
   sendLeadHtr,
+  sendLeadFollowup,
   sendLeadApplication,
   updateFunding,
   downloadInvoicePdf,
@@ -207,8 +209,8 @@ function Cabinet({
       setError(caught instanceof Error ? caught.message : "The application could not be removed.");
     }
   }
-  function noteApproval(email, mode, already) {
-    setNotice(already ? `Letter sent to ${email}.` : `Sign-in created for ${email}. ${mode === "advisor" ? "Sent from the advisor." : "Transactional email sent."}`);
+  function noteApproval(email, mode, already, portal = true) {
+    setNotice(already ? `Letter sent to ${email}.` : portal ? `Sign-in created for ${email}. ${mode === "advisor" ? "Sent from the advisor." : "Transactional email sent."}` : `Approved ${email}. No portal sign-in. Sent from the advisor.`);
     void refresh();
   }
   async function updateStatus(id, status) {
@@ -221,7 +223,9 @@ function Cabinet({
           status
         }
       });
-      if (result.loginEmail) setNotice(`Sign-in created for ${result.loginEmail}.`);else if (status !== "approved") setNotice("Investor sign-in removed.");
+      if (result.assisted) setNotice(status === "approved" ? "Approved. No portal sign-in. No email was sent." : "Status updated. No email was sent.");
+      else if (result.loginEmail) setNotice(`Sign-in created for ${result.loginEmail}.`);
+      else if (status !== "approved") setNotice("Investor sign-in removed.");
       await refresh();
     } catch {
       setError("Could not update this application. A login needs the password from the form.");
@@ -249,20 +253,21 @@ function LetterPreview({
   meta
 }) {
   const frame = useRef(null);
+  const head = useRef(null);
   const [status, setStatus] = useState("");
   return <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm">
     <div className="border-b border-border bg-white px-5 py-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p>
-        <button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(frame.current, setStatus)}>Copy screenshot</button>
+        <button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(frame.current, setStatus, head.current)}>Copy screenshot</button>
       </div>
       {status ? <p className="mt-2 text-sm text-fg">{status}</p> : null}
-      {meta}
+      {meta ? <div ref={head}>{meta}</div> : null}
     </div>
     <iframe ref={frame} title={title || "Letter preview"} sandbox="allow-same-origin" className={height + " w-full bg-[#f2f5f8]"} srcDoc={html} />
   </div>;
 }
-async function copyLetterImage(frame, setStatus) {
+async function copyLetterImage(frame, setStatus, head) {
   setStatus("Copying…");
   try {
     const doc = frame?.contentDocument;
@@ -271,6 +276,12 @@ async function copyLetterImage(frame, setStatus) {
     const width = Math.max(root.scrollWidth, doc.documentElement.scrollWidth, 640);
     const host = document.createElement("div");
     host.style.cssText = `position:fixed;left:0;top:0;width:${width}px;z-index:-1;pointer-events:none;background:#f2f5f8;`;
+    if (head) {
+      const banner = document.createElement("div");
+      banner.className = "border-b border-border bg-white px-5 py-4 text-sm text-primary";
+      banner.innerHTML = head.innerHTML;
+      host.appendChild(banner);
+    }
     const style = doc.querySelector("style");
     if (style) host.appendChild(style.cloneNode(true));
     const inner = document.createElement("div");
@@ -1301,7 +1312,7 @@ function InvoiceCard({
       setPending("");
     }
   }
-  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />Do not send transactional email</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4 overflow-hidden rounded-xl border border-border bg-[#e8e8e8]"><div className="border-b border-border bg-white px-5 py-4 text-sm"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><p className="mt-2 text-fg">To {letter.to}</p><p className="text-fg">From {letter.fromName} · {letter.fromEmail}</p><p className="mt-1 font-semibold text-primary">{letter.subject}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div><iframe title="Advisor invoice letter" sandbox="allow-same-origin" className="h-[720px] w-full bg-[#f2f5f8]" srcDoc={letter.html} /></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
+  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />{row.origin === "desk" ? "Do not send the advisor email" : "Do not send transactional email"}</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4 overflow-hidden rounded-xl border border-border bg-[#e8e8e8]"><div className="border-b border-border bg-white px-5 py-4 text-sm"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><p className="mt-2 text-fg">To {letter.to}</p><p className="text-fg">From {letter.fromName} · {letter.fromEmail}</p><p className="mt-1 font-semibold text-primary">{letter.subject}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div><iframe title="Advisor invoice letter" sandbox="allow-same-origin" className="h-[720px] w-full bg-[#f2f5f8]" srcDoc={letter.html} /></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
 }
 function ActiveCdsDesk() {
   const [rows, setRows] = useState(null);
@@ -1397,7 +1408,7 @@ function CreateClientInvestment({ advisors, onCreated }) {
     }
     setPending(false);
   }
-  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void create(); }}><h2 className="text-lg font-semibold text-primary">Create an investment</h2><p className="mt-1 text-sm text-fg">Opens a signed certificate, using the signature on the application. It is ready for an invoice.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Client</span><select className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)}><option value="">Choose a client</option>{clients.map(client => <option key={client.id} value={client.email}>{client.applicantName} · {client.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Term</span><select className={`${controlClass} mt-1`} value={termId} onChange={event => setTermId(event.target.value)}><option value="">Choose a term</option>{terms.map(term => <option key={term.id} value={term.id}>{term.months}-month · {term.apy}{promoSet.has(term.months) ? " · promotional" : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} inputMode="decimal" placeholder="100,000" value={amount} onChange={event => setAmount(event.target.value)} />{selected && promoSet.has(selected.months) ? <span className="mt-1 block text-xs text-fg">Promotional certificates start at $100,000. Enter 100000 or 100,000.</span> : <span className="mt-1 block text-xs text-fg">Enter 100000 or 100,000. A comma must separate thousands.</span>}</label><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label></div><label className="mt-3 flex items-start gap-2 text-sm text-fg"><input type="checkbox" className="mt-1" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} /><span>Do not send transactional emails</span></label>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Creating…" : "Create investment"}</button></form>;
+  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void create(); }}><h2 className="text-lg font-semibold text-primary">Create an investment</h2><p className="mt-1 text-sm text-fg">Opens a signed certificate, using the signature on the application. The client is emailed from the advisor, not the transactional mailbox. It is ready for an invoice.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Client</span><select className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)}><option value="">Choose a client</option>{clients.map(client => <option key={client.id} value={client.email}>{client.applicantName} · {client.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Term</span><select className={`${controlClass} mt-1`} value={termId} onChange={event => setTermId(event.target.value)}><option value="">Choose a term</option>{terms.map(term => <option key={term.id} value={term.id}>{term.months}-month · {term.apy}{promoSet.has(term.months) ? " · promotional" : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} inputMode="decimal" placeholder="100,000" value={amount} onChange={event => setAmount(event.target.value)} />{selected && promoSet.has(selected.months) ? <span className="mt-1 block text-xs text-fg">Promotional certificates start at $100,000. Enter 100000 or 100,000.</span> : <span className="mt-1 block text-xs text-fg">Enter 100000 or 100,000. A comma must separate thousands.</span>}</label><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label></div><label className="mt-3 flex items-start gap-2 text-sm text-fg"><input type="checkbox" className="mt-1" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} /><span>Do not send the advisor email</span></label>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Creating…" : "Create investment"}</button></form>;
 }
 function FundingDesk() {
   const [rows, setRows] = useState(null);
@@ -1575,6 +1586,7 @@ function LeadsPanel({
   const [pickedLeads, setPickedLeads] = useState([]);
   const [previewIndex, setPreviewIndex] = useState(0);
   const previewFrame = useRef(null);
+  const mailHead = useRef(null);
   const [shotStatus, setShotStatus] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1582,10 +1594,13 @@ function LeadsPanel({
   const [editing, setEditing] = useState(false);
   const [copy, setCopy] = useState(null);
   const [kind, setKind] = useState("rates");
+  const [dealProcess, setDealProcess] = useState("assisted");
   const [termMonths, setTermMonths] = useState("");
   const [appCopy, setAppCopy] = useState(null);
   const [extCopy, setExtCopy] = useState(null);
   const [htrCopy, setHtrCopy] = useState(null);
+  const [followCopy, setFollowCopy] = useState(null);
+  const [followMonths, setFollowMonths] = useState([]);
   const [promoCode] = useState(() => {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const bytes = crypto.getRandomValues(new Uint8Array(6));
@@ -1601,6 +1616,7 @@ function LeadsPanel({
     const months = String(focus.lead.term || "").match(/\d+/)?.[0] || "";
     if (months) setTermMonths(months);
     if (focus.lead.advisorId) setAdvisorId(focus.lead.advisorId);
+    setDealProcess(focus.lead.process === "portal" ? "portal" : "assisted");
     setAppCopy(null);
     setEditing(false);
     onFocusUsed?.();
@@ -1631,7 +1647,29 @@ function LeadsPanel({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [leadQuery]);
-  const bulk = kind === "rates" || kind === "extension" || kind === "htr";
+  useEffect(() => {
+    const address = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return;
+    const known = leadOptions.find(item => (item.email || "").trim().toLowerCase() === address);
+    if (known) {
+      setDealProcess(known.process === "portal" ? "portal" : "assisted");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void listCrmLeads({ data: { query: address, page: 1, withEmail: true } }).then(page => {
+        const found = (page.rows || []).find(item => (item.email || "").trim().toLowerCase() === address);
+        setDealProcess(found?.process === "portal" ? "portal" : "assisted");
+      }).catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [email]);
+  useEffect(() => {
+    if (!terms.length || !offer) return;
+    const promo = new Set(promoMonths(offer));
+    const next = terms.filter(term => promo.has(term.months) && (term.months === 10 || term.months === 22)).map(term => term.months);
+    setFollowMonths(current => current.length ? current : next);
+  }, [terms, offer]);
+  const bulk = kind === "rates" || kind === "extension" || kind === "htr" || kind === "followup";
   const previewAt = pickedLeads.length ? Math.min(previewIndex, pickedLeads.length - 1) : 0;
   const previewLead = pickedLeads[previewAt] || null;
   const activeName = bulk ? previewLead?.name || "" : name;
@@ -1665,7 +1703,13 @@ function LeadsPanel({
       advisorName: advisor?.name,
       variant
     }),
-    promoCode: kind === "promo" ? promoCode : ""
+    promoCode: kind === "promo" ? promoCode : "",
+    ...(dealProcess === "assisted"
+      ? {
+          instruction: "Use the button below before the link expires. Do not create a password. Your advisor completes the certificate.",
+          followUp: "Please finish within 48 hours. Your advisor handles the certificate after you submit. If the link expires, ask for a new one."
+        }
+      : {})
   };
   const applicationCopy = appCopy ?? appStandard;
   const previewOrigin = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
@@ -1717,8 +1761,26 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: htrText
   });
-  const letter = kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : "lead_intro", "client", {
+  const followChoices = terms.filter(term => promoSet.has(term.months) && (term.months === 10 || term.months === 22));
+  const followStandard = { ...defaultFollowupCopy(), promoCode };
+  const followText = followCopy ?? followStandard;
+  const followMail = followupLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    copy: followText,
+    promoCode: followText.promoCode || promoCode,
+    links: followChoices.filter(term => followMonths.includes(term.months)).map(term => ({
+      months: term.months,
+      apy: term.apy,
+      url: previewLink || "#"
+    }))
+  });
+  const letter = kind === "followup" ? followMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -1729,20 +1791,29 @@ function LeadsPanel({
     advisorStyle: emailStyles.advisor,
     emailColors: emailStyles.colors
   }) : null;
-  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "htr" ? htrText.subject : applicationCopy.subject;
+  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : applicationCopy.subject;
   async function send(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     setPending(true);
     try {
-      if (kind === "extension" || kind === "rates" || kind === "htr") {
+      if (kind === "extension" || kind === "rates" || kind === "htr" || kind === "followup") {
+        if (kind === "followup" && !followMonths.length) throw new Error("Choose a 10-month or 22-month term.");
         if (!pickedLeads.length) throw new Error("Choose at least one lead.");
         let sent = 0;
         const failed = [];
         for (const lead of pickedLeads) {
           try {
-            if (kind === "htr") await sendLeadHtr({
+            if (kind === "followup") await sendLeadFollowup({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
+                months: followMonths,
+                copy: followText
+              }
+            });else if (kind === "htr") await sendLeadHtr({
               data: {
                 advisorId,
                 name: lead.name,
@@ -1773,7 +1844,7 @@ function LeadsPanel({
         setNotice(sent === 1 ? `Sent to ${pickedLeads[0]?.email || "the lead"}.` : `Sent to ${sent} leads.`);
         setPickedLeads([]);
         setPreviewIndex(0);
-        if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
+        if (kind === "followup") setFollowCopy(null);else if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
       } else if (kind !== "rates") {
         if (!selectedTerm) throw new Error(kind === "promo" ? "Choose a promotional term." : "Choose a term that is not on promotion.");
         await sendLeadApplication({
@@ -1783,6 +1854,7 @@ function LeadsPanel({
             email,
             months: selectedTerm.months,
             kind,
+            process: dealProcess,
             copy: applicationCopy
           }
         });
@@ -1809,17 +1881,18 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, an HTR follow-up, a custom-term application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["htr", "HTR"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
         setExtCopy(null);
         setHtrCopy(null);
+        setFollowCopy(null);
         setTermMonths("");
       }}>{label}</button>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<form className="mt-6 grid max-w-3xl gap-3" onSubmit={event => void send(event)}><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => {
           setAdvisorId(event.target.value);
           setCopy(null);
-        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
+        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{kind === "followup" ? <div><p className="text-sm font-semibold text-primary">Application forms</p><div className="mt-2 flex flex-wrap gap-2">{followChoices.length ? followChoices.map(term => <label key={term.id} className="flex min-h-11 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-primary"><input type="checkbox" checked={followMonths.includes(term.months)} onChange={event => setFollowMonths(current => event.target.checked ? [...new Set([...current, term.months])] : current.filter(months => months !== term.months))} />{term.months}-month · {term.apy}</label>) : <p className="text-sm text-fg">No 10-month or 22-month promotional term is set.</p>}</div><p className="mt-2 text-sm text-fg">Select several leads. Each one receives a personal link for every term you check. The links expire in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p></div> : null}{kind === "custom" || kind === "promo" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
           const next = leadOptions.find(item => item.id === event.target.value);
           if (!next || pickedLeads.some(item => item.id === next.id)) return;
           setPickedLeads(current => [...current, next]);
@@ -1834,6 +1907,7 @@ function LeadsPanel({
           setName(next.name || "");
           setEmail(next.email || "");
           if (next.advisorId) setAdvisorId(next.advisorId);
+          setDealProcess(next.process === "portal" ? "portal" : "assisted");
           const months = String(next.term || "").match(/\d+/)?.[0] || "";
           if (months) setTermMonths(months);
           setAppCopy(null);
@@ -1842,10 +1916,10 @@ function LeadsPanel({
         }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "custom" || kind === "promo" ? <label className="block text-sm"><span className="font-semibold text-primary">{kind === "promo" ? "Promotional term" : "Custom term"}</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
-        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
-              if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
+        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
+              if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
-            }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
+            }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
             ...letterCopy,
             subject: next
           })} /><LetterField label="Headline" value={letterCopy.headline} onChange={headline => setCopy({
@@ -1908,7 +1982,7 @@ function LeadsPanel({
           })} rows={4} /><LetterField label="Closing" value={htrText.closing} onChange={closing => setHtrCopy({
             ...htrText,
             closing
-          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "htr" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
+          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={followText.subject} onChange={next => setFollowCopy({ ...followText, subject: next })} /><LetterField label="Opening" value={followText.opening} onChange={opening => setFollowCopy({ ...followText, opening })} rows={3} /><LetterField label="Move forward" value={followText.proceed} onChange={proceed => setFollowCopy({ ...followText, proceed })} rows={4} /><LetterField label="Application heading" value={followText.formTitle} onChange={formTitle => setFollowCopy({ ...followText, formTitle })} /><LetterField label="Promotional code" value={followText.promoCode} onChange={promoCode => setFollowCopy({ ...followText, promoCode })} /><LetterField label="Code note" value={followText.codeNote} onChange={codeNote => setFollowCopy({ ...followText, codeNote })} rows={2} /><LetterField label="Expiration heading" value={followText.expireTitle} onChange={expireTitle => setFollowCopy({ ...followText, expireTitle })} /><LetterField label="Expiration" value={followText.expire} onChange={expire => setFollowCopy({ ...followText, expire })} rows={3} /><LetterField label="More time" value={followText.time} onChange={time => setFollowCopy({ ...followText, time })} rows={3} /><LetterField label="Assistance" value={followText.assist} onChange={assist => setFollowCopy({ ...followText, assist })} rows={3} /><LetterField label="Complete soon" value={followText.urge} onChange={urge => setFollowCopy({ ...followText, urge })} rows={3} /><LetterField label="Different term heading" value={followText.changeTitle} onChange={changeTitle => setFollowCopy({ ...followText, changeTitle })} /><LetterField label="Different term" value={followText.change} onChange={change => setFollowCopy({ ...followText, change })} rows={4} /><LetterField label="Not proceeding" value={followText.other} onChange={other => setFollowCopy({ ...followText, other })} rows={4} /><LetterField label="Thank you" value={followText.thanks} onChange={thanks => setFollowCopy({ ...followText, thanks })} rows={3} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setFollowCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "htr" && kind !== "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
             ...applicationCopy,
             subject: next
           })} /><LetterField label="Headline" value={applicationCopy.headline} onChange={headline => setAppCopy({
@@ -1935,7 +2009,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2058,6 +2132,7 @@ function emptyLead() {
     status: "",
     notes: "",
     advisorId: "",
+    process: "assisted",
     receivedAt: now.toISOString()
   };
 }
@@ -2113,6 +2188,18 @@ function PipelineLeadsPanel() {
       setNotice("Lead saved.");
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "Could not save this lead.");
+    }
+  }
+
+  async function setProcess(lead, process) {
+    setError("");
+    setNotice("");
+    try {
+      await saveCrmLead({ data: { ...lead, process } });
+      if (draft.id === lead.id) setDraft({ ...draft, process });
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Could not update this lead.");
     }
   }
 
@@ -2193,7 +2280,7 @@ function PipelineLeadsPanel() {
       </label>
     </div>
     <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
-      <table className="w-full min-w-[980px] text-left text-sm">
+      <table className="w-full min-w-[1180px] text-left text-sm">
         <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
           <tr>
             <th className="px-4 py-3 font-semibold">Lead</th>
@@ -2203,6 +2290,7 @@ function PipelineLeadsPanel() {
             <th className="px-4 py-3 font-semibold">Source</th>
             <th className="px-4 py-3 font-semibold">Status</th>
             <th className="px-4 py-3 font-semibold">Advisor</th>
+            <th className="px-4 py-3 font-semibold">Deal</th>
             <th className="px-4 py-3 font-semibold">Received</th>
             <th className="px-4 py-3 font-semibold" />
           </tr>
@@ -2220,6 +2308,12 @@ function PipelineLeadsPanel() {
             <td className="px-4 py-3">{lead.source || "—"}</td>
             <td className="px-4 py-3">{lead.status || "—"}</td>
             <td className="px-4 py-3">{advisors.find((advisor) => advisor.id === lead.advisorId)?.name || "—"}</td>
+            <td className="px-4 py-3">
+              <select className={controlClass} aria-label={`Who completes the certificate for ${lead.name}`} value={lead.process === "portal" ? "portal" : "assisted"} onChange={(event) => void setProcess(lead, event.target.value)}>
+                <option value="assisted">Advisor processes</option>
+                <option value="portal">Client portal</option>
+              </select>
+            </td>
             <td className="px-4 py-3 whitespace-nowrap">{new Date(lead.receivedAt).toLocaleString()}</td>
             <td className="px-4 py-3 text-right">
               <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setDraft(lead)}>Edit</button>
@@ -2254,6 +2348,14 @@ function PipelineLeadsPanel() {
           {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}
         </select>
       </label>
+      <div className="sm:col-span-2">
+        <p className="mb-1.5 text-sm font-medium">Who completes the certificate</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + ((draft.process || "assisted") === "assisted" ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setDraft({ ...draft, process: "assisted" })}>Advisor processes the deal</button>
+          <button type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (draft.process === "portal" ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setDraft({ ...draft, process: "portal" })}>Client uses the portal</button>
+        </div>
+        <p className="mt-2 text-sm text-fg">{draft.process === "portal" ? "The application asks for a password and the client continues in the portal." : "Default. The application does not ask for a password. You complete the certificate."}</p>
+      </div>
       {draft.status ? <p className="text-sm text-fg sm:col-span-2">Status: {draft.status}</p> : null}
       {draft.notes ? <label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-medium">Notes</span><textarea className={`${controlClass} min-h-28`} readOnly value={draft.notes} /></label> : null}
       <label className="block">
@@ -2839,7 +2941,7 @@ function InboxPanel() {
     setNotice("");
     try {
       const subject = replySubject;
-      await sendAdvisorInboxMail({
+      const result = await sendAdvisorInboxMail({
         data: {
           advisorId,
           toEmail: selected.fromEmail,
@@ -2852,7 +2954,7 @@ function InboxPanel() {
       setReplyOpen(false);
       setReplyBody("");
       await load();
-      setNotice("Reply sent.");
+      setNotice(result.telegram ? "Reply sent. Copied to Telegram." : "Reply sent. Telegram did not get a copy.");
     } catch (caught) {
       const message = caught instanceof Error && caught.message ? caught.message : "The reply could not be sent.";
       setError(message);
@@ -2868,7 +2970,7 @@ function InboxPanel() {
     setNotice("");
     try {
       if (!pickedLead?.email) throw new Error("Select a lead with an email address.");
-      await sendAdvisorInboxMail({
+      const result = await sendAdvisorInboxMail({
         data: {
           advisorId: compose.advisorId,
           toEmail: pickedLead.email,
@@ -2885,7 +2987,7 @@ function InboxPanel() {
         message: ""
       });
       await load();
-      setNotice(`Sent to ${pickedLead.name}.`);
+      setNotice(result.telegram ? `Sent to ${pickedLead.name}. Copied to Telegram.` : `Sent to ${pickedLead.name}. Telegram did not get a copy.`);
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "The message could not be sent.");
     } finally {
@@ -3137,15 +3239,16 @@ function ApprovalMail({
   actions
 }) {
   const brand = useBrand();
+  const assisted = row.payload?.process === "assisted";
   const defaults = applicationApprovedDefaults(row.applicantName, row.email, brand.companyName);
   const [open, setOpen] = useState(false);
   const [subject, setSubject] = useState(defaults.subject);
   const [lead, setLead] = useState(defaults.lead);
-  const [next, setNext] = useState(defaults.next);
+  const [next, setNext] = useState(assisted ? "Your advisor completes the certificate and sends the invoice. A portal password is not required unless you ask for access later." : defaults.next);
   const [advisors, setAdvisors] = useState([]);
   const [advisorId, setAdvisorId] = useState("");
   const [styles, setStyles] = useState({ advisor: "classic", transactional: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
-  const [previewAs, setPreviewAs] = useState("transactional");
+  const [previewAs, setPreviewAs] = useState(assisted ? "advisor" : "transactional");
   const [origin, setOrigin] = useState("");
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
@@ -3173,7 +3276,7 @@ function ApprovalMail({
     copy: { subject, lead, next }
   });
   const loginUrl = portal ? `${portal.replace(/\/$/, "")}/login` : "";
-  const advisorMessage = [lead, next, `Sign-in email: ${row.email}`, loginUrl ? `Investor portal\n${loginUrl}` : ""].filter(Boolean).join("\n\n");
+  const advisorMessage = assisted ? [lead, next].filter(Boolean).join("\n\n") : [lead, next, `Sign-in email: ${row.email}`, loginUrl ? `Investor portal\n${loginUrl}` : ""].filter(Boolean).join("\n\n");
   const advisorLetter = advisor ? applyEmailStyle(advisorNoteLetter({
     company: brand.companyName,
     companyPhone: brand.companyPhone,
@@ -3201,7 +3304,7 @@ function ApprovalMail({
         }
       });
       setOpen(false);
-      onSent(result.loginEmail, mode);
+      onSent(result.loginEmail, mode, result.portal !== false);
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "The approval email was not sent.");
     } finally {
@@ -3213,7 +3316,7 @@ function ApprovalMail({
       <div>
         <h2 className="text-xl font-semibold text-primary">{row.applicantName}</h2>
         <p className="text-sm text-fg">{row.email}</p>
-        <p className="mt-1 text-sm text-fg">{row.status === "approved" ? "Sign-in is active. The investor portal opens with this email and the application password." : "Approving creates a sign-in and opens the investor portal with this email and the application password."}</p>
+        <p className="mt-1 text-sm text-fg">{assisted ? "Advisor-assisted application. Approving does not open a portal sign-in." : row.status === "approved" ? "Sign-in is active. The investor portal opens with this email and the application password." : "Approving creates a sign-in and opens the investor portal with this email and the application password."}</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {open ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => setOpen(false)}>Close letter</button> : <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => setOpen(true)}>{row.status === "approved" ? "Email the client" : "Approve"}</button>}
@@ -3222,25 +3325,54 @@ function ApprovalMail({
     </div>
     {open ? <div className="mt-4 rounded-lg border border-border p-4">
       <p className="font-semibold text-primary">Application approved</p>
-      <p className="mt-1 text-sm text-fg">{row.status === "approved" ? "The portal is already open. Edit the letter, preview it, then send another copy." : "Nothing is sent until you choose a letter. Sending approves the application and opens the portal."}</p>
+      <p className="mt-1 text-sm text-fg">{assisted ? "Nothing is sent until you send the advisor letter. Sending approves the application and does not create a portal password." : row.status === "approved" ? "The portal is already open. Edit the letter, preview it, then send another copy." : "Nothing is sent until you choose a letter. Sending approves the application and opens the portal."}</p>
       <div className="mt-4 grid gap-3">
         <label className="block text-sm"><span className="font-semibold text-primary">Subject</span><input className={`${controlClass} mt-1`} value={subject} onChange={event => setSubject(event.target.value)} /></label>
         <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-24`} value={lead} onChange={event => setLead(event.target.value)} /></label>
         <label className="block text-sm"><span className="font-semibold text-primary">What happens next</span><textarea className={`${controlClass} mt-1 min-h-20`} value={next} onChange={event => setNext(event.target.value)} /></label>
         <label className="block max-w-md text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisor?.id ?? ""} onChange={event => setAdvisorId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">{[["transactional", "Transactional"], ["advisor", "Advisor letter"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (previewAs === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAs(id)}>{label}</button>)}</div>
+      <div className="mt-4 flex flex-wrap gap-2">{(assisted ? [["advisor", "Advisor letter"]] : [["transactional", "Transactional"], ["advisor", "Advisor letter"]]).map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (previewAs === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAs(id)}>{label}</button>)}</div>
       <div className="mt-3">{previewAs === "advisor" && !advisorLetter ? <p className="text-sm text-fg">Add an advisor to preview this letter.</p> : <LetterPreview html={previewAs === "advisor" ? advisorLetter : transactional.html} title={previewSubject} height="h-[640px]" meta={<p className="mt-3 text-sm text-fg"><span className="font-semibold text-primary">Subject.</span> {previewSubject}</p>} />}</div>
       {previewAs === "advisor" && advisor && !mailboxReady ? <p className="mt-3 text-sm text-fg">{advisor.name} has no mailbox. Choose another advisor, or send the transactional letter.</p> : null}
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !ready} onClick={() => void send("transactional")}>{pending === "transactional" ? "Sending…" : "Send transactional"}</button>
+        {assisted ? null : <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !ready} onClick={() => void send("transactional")}>{pending === "transactional" ? "Sending…" : "Send transactional"}</button>}
         <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={Boolean(pending) || !ready || !mailboxReady} onClick={() => void send("advisor")}>{pending === "advisor" ? "Sending…" : "Send from advisor"}</button>
       </div>
     </div> : null}
   </>;
 }
 
+function PortalAccess({ row }) {
+  const [advisors, setAdvisors] = useState([]);
+  const [advisorId, setAdvisorId] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (row.status !== "approved") return;
+    listAdvisors().then(people => {
+      setAdvisors(people);
+      setAdvisorId(current => current || people.find(item => item.mailbox?.trim())?.id || "");
+    }).catch(() => undefined);
+  }, [row.status]);
+  if (row.status !== "approved") return null;
+  async function send() {
+    setError("");
+    setNotice("");
+    setPending(true);
+    try {
+      const result = await sendPortalAccess({ data: { id: row.id, advisorId } });
+      setNotice(`Portal access sent to ${result.email}. Temporary password: ${result.password}`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Portal access could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return <div className="mt-6 rounded-md border border-border p-4"><p className="font-semibold text-primary">Portal access</p><p className="mt-1 text-sm text-fg">Use this only if the client later asks to sign in. The advisor emails a temporary password. It replaces any earlier password.</p><label className="mt-3 block max-w-md text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Choose an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>{error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-2 text-sm text-fg">{notice}</p> : null}<button type="button" className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending || !advisorId} onClick={() => void send()}>{pending ? "Sending…" : "Send temporary password"}</button></div>;
+}
 function ApplicationDetail({
   row,
   onStatus,
@@ -3249,5 +3381,5 @@ function ApplicationDetail({
 }) {
   const form = row.payload;
   const fields = [["Account", form.accountType], ["Phone", `${form.phoneCountry} ${form.phone}`], ["Date of birth", [form.dobDay, form.dobMonth, form.dobYear].filter(Boolean).join(" ")], ["Nationality", form.nationality], ["Residence", form.residence], ["Occupation", form.occupation], ["Address", [form.street, form.apt, form.city, form.region, form.postal, form.country].filter(Boolean).join(", ")], ["Tax residence", form.taxResidence], ["Tax ID", form.taxId], ["Source of wealth", form.sourceOfWealth], ["Source of funds", form.sourceOfFunds], ["Purpose", form.investmentPurpose], ["Net worth", form.netWorth], ["Preferred amount", form.preferredAmount], ["Preferred term", form.preferredTerm ? `${form.preferredTerm}-month` : ""], ["Promotional code", form.promoCode], ["Identity document", `${form.idType}${form.idFileName ? ` · ${form.idFileName}` : ""}`], ["Address document", `${form.addressDocType}${form.addressFileName ? ` · ${form.addressFileName}` : ""}`], ["Bank", form.bankName], ["Account holder", form.accountHolder], ["Bank address", [form.bankStreet, form.bankLine2, form.bankCity, form.bankState, form.bankZip].filter(Boolean).join(", ")], ["Routing number", form.routingNumber], ["Account number", form.accountNumber]];
-  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode) => onMailed(email, mode, row.status === "approved")} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}</article>;
+  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode, portal) => onMailed(email, mode, row.status === "approved", portal)} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}<PortalAccess row={row} /></article>;
 }

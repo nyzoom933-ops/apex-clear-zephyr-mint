@@ -576,6 +576,16 @@ export async function sendInboxMail(
       true
     )
   `;
+  const who = input.toName.trim() ? `${input.toName.trim()} <${to}>` : to;
+  const { sendTelegramNotice } = await import("@/lib/mail.server");
+  const notice = await sendTelegramNotice(
+    sql,
+    `Inbox email from ${advisor.name}`,
+    [`To: ${who}`, `Subject: ${subject}`].join("\n"),
+    letter.text,
+  ).catch((error: unknown) => ({ delivery: "failed", error: error instanceof Error ? error.message : "Telegram did not accept the notice." }));
+  if (notice.delivery !== "sent") console.error("[inbox] Telegram notice failed:", notice.error || notice.delivery);
+  return { telegram: notice.delivery === "sent" };
 }
 
 const globalRef = globalThis as typeof globalThis & { __inboxTimer?: ReturnType<typeof setInterval>; __inboxRunning?: boolean };

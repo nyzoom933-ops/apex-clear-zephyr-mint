@@ -17,19 +17,20 @@ type InviteRow = {
   advisor_mailbox: string;
   advisor_role: string;
   advisor_personal_phone: string;
+  process: string;
   expires_at: string | Date;
 };
 
 export async function createLeadInvite(
   sql: Sql,
-  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo"; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
+  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo"; process?: "assisted" | "portal"; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
 ) {
   const token = randomBytes(24).toString("hex");
   const expiresAt = new Date(Date.now() + 48 * HOUR).toISOString();
-  await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
-  await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
+  const process = input.process === "portal" ? "portal" : "assisted";
+  await ensureInviteColumns(sql);
   await sql`
-    insert into lead_invites (token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, advisor_mailbox, advisor_role, advisor_personal_phone, expires_at)
+    insert into lead_invites (token, email, name, months, promo_code, kind, process, advisor_name, advisor_phone, advisor_email, advisor_mailbox, advisor_role, advisor_personal_phone, expires_at)
     values (
       ${token},
       ${input.email},
@@ -37,6 +38,7 @@ export async function createLeadInvite(
       ${input.months},
       ${input.promoCode},
       ${input.kind},
+      ${process},
       ${input.advisor.name},
       ${input.advisor.phone},
       ${input.advisor.email},
@@ -58,7 +60,7 @@ export function inviteApplicationUrl(origin: string, token: string) {
 export async function readLeadInvite(sql: Sql, token: string) {
   await ensureInviteColumns(sql);
   const rows = await sql<InviteRow & { used_at: string | Date | null; renew_requested_at: string | Date | null }>`
-    select token, email, name, months, promo_code, kind, advisor_name, advisor_phone, advisor_email, expires_at, used_at, renew_requested_at
+    select token, email, name, months, promo_code, kind, coalesce(process, 'portal') as process, advisor_name, advisor_phone, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone, expires_at, used_at, renew_requested_at
     from lead_invites
     where token = ${token}
     limit 1
@@ -77,6 +79,9 @@ export async function readLeadInvite(sql: Sql, token: string) {
     months: Number(row.months),
     promoCode: row.promo_code,
     kind: row.kind,
+    process: row.process === "assisted" ? ("assisted" as const) : ("portal" as const),
+    advisorName: row.advisor_name,
+    advisorMailbox: row.advisor_mailbox,
     expiresAt: expiresAt.toISOString(),
   };
 }
@@ -113,6 +118,7 @@ async function ensureInviteColumns(sql: Sql) {
   await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
   await sql`alter table lead_invites add column if not exists expired_notified_at timestamptz`;
   await sql`alter table lead_invites add column if not exists renew_requested_at timestamptz`;
+  await sql`alter table lead_invites add column if not exists process text not null default 'portal'`;
 }
 
 async function noteExpiredVisit(sql: Sql, row: { token: string; email: string; name: string; advisor_name: string; months: number }) {

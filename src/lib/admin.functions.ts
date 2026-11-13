@@ -4,7 +4,7 @@ import type { FormState } from "@/lib/application-data";
 import { cleanBackupEmail, cleanCloudflareCode, cleanCompanyName, cleanPublicDomain, DEFAULT_COMPANY_NAME } from "@/lib/company";
 import type { Sql } from "@/lib/db";
 import { isWorkspacePreview } from "@/lib/env.server";
-import type { MailStep } from "@/lib/mail.server";
+import type { MailFile, MailStep } from "@/lib/mail.server";
 import type { LeadCopy, ApplicationCopy } from "@/lib/email-templates";
 import { normalizeEmailStyle, normalizeEmailColors } from "@/lib/email-templates";
 import { dollarInputError, formatBonus, matchTier, parseDollarAmount, PROMO_MINIMUM, promoMonths, type PromoOffer, type PromoTier } from "@/lib/promo";
@@ -162,10 +162,7 @@ export const adminLogout = createServerFn({ method: "POST" }).handler(async () =
 });
 
 export const submitApplication = createServerFn({ method: "POST" })
-  .validator((input: FormState) => {
-    if (!input.password || input.password.length < 8) throw new Error("A password is required.");
-    return input;
-  })
+  .validator((input: FormState) => input)
   .handler(async ({ data }) => {
     const { getSql } = await import("@/lib/db");
     const { hashPassword } = await import("@/lib/passwords.server");
@@ -173,14 +170,20 @@ export const submitApplication = createServerFn({ method: "POST" })
     const id = crypto.randomUUID();
     const email = data.email.trim().toLowerCase();
     const inviteToken = data.inviteToken?.trim() || "";
-    let invited: { months: number; promoCode: string } | null = null;
+    let invited: { months: number; promoCode: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string } | null = null;
     if (inviteToken) {
       const { readLeadInvite } = await import("@/lib/lead-invites.server");
       const invite = await readLeadInvite(sql, inviteToken);
       if (invite.status !== "open") throw new Error("This application link has expired.");
-      invited = { months: invite.months, promoCode: invite.promoCode };
+      invited = { months: invite.months, promoCode: invite.promoCode, process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox };
     }
-    const payload = { ...stripSecrets(data), currency: "USD" as const };
+    const assisted = invited?.process === "assisted";
+    if (assisted && !(invited?.advisorMailbox || "").trim()) throw new Error("This link has no advisor mailbox. Ask your advisor for a new one.");
+    if (!assisted) {
+      if (!data.password || data.password.length < 8) throw new Error("A password is required.");
+      if (data.password !== data.confirmPassword) throw new Error("Passwords do not match.");
+    }
+    const payload = { ...stripSecrets(data), currency: "USD" as const, process: assisted ? ("assisted" as const) : ("portal" as const) };
     const { inviteToken: _inviteToken, ...stored } = payload;
     void _inviteToken;
     if (invited) {
@@ -192,21 +195,34 @@ export const submitApplication = createServerFn({ method: "POST" })
     const amountError = dollarInputError(stored.preferredAmount || "", promoMonths(offer).includes(months));
     if (amountError) throw new Error(amountError);
     const name = [stored.firstName, stored.middleName, stored.surname].filter(Boolean).join(" ");
-    const passwordHash = await hashPassword(data.password);
+    const passwordHash = assisted ? null : await hashPassword(data.password);
     await sql`
       insert into applications (id, applicant_name, email, account_type, currency, payload, password_hash)
       values (${id}, ${name}, ${email}, ${stored.accountType}, ${stored.currency}, ${JSON.stringify(stored)}::jsonb, ${passwordHash})
     `;
     if (inviteToken) await sql`update lead_invites set used_at = now() where token = ${inviteToken} and used_at is null`;
-    await sendStep(sql, {
-      step: "application_submitted",
-      clientEmail: email,
-      clientName: name,
-      detail: [`${payload.accountType} account`, `Sign-in email ${email}`].join("\n"),
-      adminDetail: applicationDeskDetail(payload),
-      attachments: applicationFiles(payload),
-      relatedId: id,
-    });
+    if (assisted) {
+      await sendAdvisorClientLetter(sql, {
+        to: email,
+        name,
+        mailbox: invited?.advisorMailbox,
+        advisorName: invited?.advisorName,
+        subject: "We received your application",
+        message: `We received your ${stored.accountType} application.\n\nYour advisor will review it and complete the certificate. You do not need a portal password.`,
+        step: "application_submitted",
+        relatedId: id,
+      });
+    } else {
+      await sendStep(sql, {
+        step: "application_submitted",
+        clientEmail: email,
+        clientName: name,
+        detail: [`${payload.accountType} account`, `Sign-in email ${email}`].join("\n"),
+        adminDetail: applicationDeskDetail(payload),
+        attachments: applicationFiles(payload),
+        relatedId: id,
+      });
+    }
     return { id };
   });
 
@@ -277,8 +293,15 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
       select email, applicant_name, account_type, password_hash, status from applications where id = ${data.id}
     `;
     if (!rows[0]) throw new Error("Application not found.");
-    if (rows[0].status === data.status) return { ok: true as const, loginEmail: data.status === "approved" ? String(rows[0].email).trim().toLowerCase() : null };
-    if (data.status === "approved" && !rows[0].password_hash) throw new Error("This application has no password, so a login cannot be created.");
+    const assisted = !rows[0].password_hash;
+    if (rows[0].status === data.status) {
+      return { ok: true as const, loginEmail: data.status === "approved" && !assisted ? String(rows[0].email).trim().toLowerCase() : null, assisted };
+    }
+    if (assisted) {
+      await sql`update applications set status = ${data.status} where id = ${data.id}`;
+      if (data.status !== "approved") await sql`delete from investor_users where application_id = ${data.id}`;
+      return { ok: true as const, loginEmail: null, assisted: true as const };
+    }
     await sql`update applications set status = ${data.status} where id = ${data.id}`;
     const email = String(rows[0].email).trim().toLowerCase();
     const step: MailStep = data.status === "approved" ? "application_approved" : data.status === "hold" ? "application_hold" : "application_pending";
@@ -321,7 +344,8 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
       select email, applicant_name, account_type, password_hash, status from applications where id = ${data.id}
     `;
     if (!rows[0]) throw new Error("Application not found.");
-    if (!rows[0].password_hash) throw new Error("This application has no password, so a login cannot be created.");
+    const assisted = !rows[0].password_hash;
+    if (assisted && data.mode !== "advisor") throw new Error("This client has no portal password. Send the letter from the advisor.");
     const email = String(rows[0].email).trim().toLowerCase();
     const detail = [`${rows[0].account_type} account`, `Sign-in email ${email}`].join("\n");
     const copy = { subject: data.subject, lead: data.lead, next: data.next };
@@ -336,12 +360,14 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
     }
     if (rows[0].status !== "approved") {
       await sql`update applications set status = 'approved' where id = ${data.id}`;
-      await sql`
-        insert into investor_users (email, password_hash, application_id)
-        values (${email}, ${rows[0].password_hash}, ${data.id})
-        on conflict (email) do update
-        set password_hash = excluded.password_hash, application_id = excluded.application_id
-      `;
+      if (!assisted) {
+        await sql`
+          insert into investor_users (email, password_hash, application_id)
+          values (${email}, ${rows[0].password_hash}, ${data.id})
+          on conflict (email) do update
+          set password_hash = excluded.password_hash, application_id = excluded.application_id
+        `;
+      }
     }
     if (data.mode === "transactional") {
       const delivery = await sendStep(sql, {
@@ -354,7 +380,7 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
         copy,
       });
       if (delivery.delivery !== "sent") throw new Error(delivery.error || "The approval email was not sent.");
-      return { ok: true as const, loginEmail: email, mode: data.mode };
+      return { ok: true as const, loginEmail: email, mode: data.mode, portal: true as const };
     }
     if (!advisor) throw new Error("Choose an advisor.");
     const { advisorNoteLetter, applyEmailStyle } = await import("@/lib/email-templates");
@@ -366,7 +392,9 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
     const logo = settings.find((row) => row.key === "email_logo")?.value || null;
     const origin = (await readPortalOrigin(sql)).replace(/\/$/, "");
     const portal = origin ? `${origin}/login` : "";
-    const message = [data.lead, data.next, `Sign-in email: ${email}`, portal ? `Investor portal\n${portal}` : ""].filter(Boolean).join("\n\n");
+    const message = assisted
+      ? [data.lead, data.next].filter(Boolean).join("\n\n")
+      : [data.lead, data.next, `Sign-in email: ${email}`, portal ? `Investor portal\n${portal}` : ""].filter(Boolean).join("\n\n");
     const logoFile = emailLogoFile(logo);
     const letter = advisorNoteLetter({
       company,
@@ -397,8 +425,8 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
       insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
       values (${crypto.randomUUID()}, 'client', ${email}, 'application_approved', ${data.subject}, ${letter.text}, ${html}, ${data.id}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${data.advisorId})
     `;
-    await sendTelegramNotice(sql, `Application approved for ${rows[0].applicant_name}`, `${rows[0].applicant_name} (${email}) was approved. ${advisor.name} sent the portal letter.`).catch(() => undefined);
-    return { ok: true as const, loginEmail: email, mode: data.mode };
+    await sendTelegramNotice(sql, `Application approved for ${rows[0].applicant_name}`, `${rows[0].applicant_name} (${email}) was approved. ${advisor.name} sent the letter.${assisted ? " No portal sign-in was created." : ""}`).catch(() => undefined);
+    return { ok: true as const, loginEmail: email, mode: data.mode, portal: !assisted as boolean };
   });
 
 export const deleteApplication = createServerFn({ method: "POST" })
@@ -1456,6 +1484,70 @@ export const submitFunding = createServerFn({ method: "POST" })
     return { id };
   });
 
+async function sendAdvisorClientLetter(
+  sql: Sql,
+  input: { to: string; name: string; subject: string; message: string; step: string; relatedId: string; advisorId?: string; mailbox?: string; advisorName?: string; attachments?: MailFile[] },
+) {
+  const { advisorNoteLetter, applyEmailStyle } = await import("@/lib/email-templates");
+  const { readEmailStyles, sendFromMailbox, emailLogoFile, ensureMailColumn, readPortalOrigin } = await import("@/lib/mail.server");
+  const rows = input.advisorId
+    ? await sql<{ id: string; name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`
+        select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone
+        from advisors where id = ${input.advisorId}
+      `
+    : await sql<{ id: string; name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`
+        select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone
+        from advisors where lower(mailbox) = ${String(input.mailbox || "").trim().toLowerCase()} limit 1
+      `;
+  const found = rows[0];
+  const mailbox = (found?.mailbox || input.mailbox || "").trim();
+  if (!mailbox) throw new Error("Choose an advisor with a verified mailbox.");
+  const advisorName = found?.name || input.advisorName || "Your advisor";
+  const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo')`;
+  const company = settings.find((row) => row.key === "company_name")?.value?.trim() || DEFAULT_COMPANY_NAME;
+  const companyPhone = settings.find((row) => row.key === "company_phone")?.value?.trim() || "";
+  const logo = settings.find((row) => row.key === "email_logo")?.value || null;
+  const origin = (await readPortalOrigin(sql)).replace(/\/$/, "");
+  const logoFile = emailLogoFile(logo);
+  const letter = advisorNoteLetter({
+    company,
+    companyPhone,
+    logo,
+    pageUrl: origin,
+    logoCid: logoFile?.filename || "",
+    advisor: {
+      name: advisorName,
+      phone: found?.phone || "",
+      email: found?.email || mailbox,
+      mailbox,
+      role: found?.role || "",
+      personalPhone: found?.personal_phone || "",
+    },
+    greeting: `Dear ${input.name},`,
+    message: input.message,
+  });
+  const styles = await readEmailStyles(sql);
+  const html = applyEmailStyle(letter.html, styles.advisor, styles.colors);
+  const replyTo = found?.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(found.email) ? found.email : mailbox;
+  const files = [...(logoFile ? [logoFile] : []), ...(input.attachments || [])];
+  const sent = await sendFromMailbox(sql, {
+    to: input.to,
+    subject: input.subject,
+    text: letter.text,
+    html,
+    fromAddress: mailbox,
+    replyTo,
+    replyName: advisorName,
+    attachments: files,
+  });
+  if (sent.delivery !== "sent") throw new Error(sent.error || "The advisor letter was not sent.");
+  await ensureMailColumn(sql);
+  await sql`
+    insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
+    values (${crypto.randomUUID()}, 'client', ${input.to}, ${input.step}, ${input.subject}, ${letter.text}, ${html}, ${input.relatedId}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${found?.id || input.advisorId || null})
+  `;
+}
+
 export const createClientFunding = createServerFn({ method: "POST" })
   .validator((input: { email: string; termId: string; amount: string; advisorId?: string; skipEmail?: boolean }) => {
     const email = (input.email || "").trim().toLowerCase();
@@ -1486,6 +1578,7 @@ export const createClientFunding = createServerFn({ method: "POST" })
     if (!signature.startsWith("data:image/png;base64,")) throw new Error("This client has no signature on the application.");
     const signerName = client.applicant_name?.trim() || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || client.email;
     const contactPhone = [payload?.phoneCountry, payload?.phone].filter(Boolean).join(" ").trim();
+    if (!data.skipEmail && !data.advisorId) throw new Error("Choose an advisor, or select do not send.");
     if (data.advisorId) {
       const advisors = await sql<{ id: string }>`select id from advisors where id = ${data.advisorId}`;
       if (!advisors[0]) throw new Error("Choose an advisor.");
@@ -1515,13 +1608,14 @@ export const createClientFunding = createServerFn({ method: "POST" })
       values (${id}, ${client.email}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"approved_phone"}, ${data.advisorId || null}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber}, ${rates.promo}, ${rates.final}, ${"desk"}, ${signerName}, ${signature}, now(), ${contactPhone}, ${"call"})
     `;
     if (!data.skipEmail) {
-      await sendStep(sql, {
+      await sendAdvisorClientLetter(sql, {
+        to: client.email,
+        name: signerName,
+        advisorId: data.advisorId,
+        subject: "Your certificate is ready",
+        message: [`Your certificate is signed and ready for an invoice.`, "", label, `Amount ${formatted}`, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`, "", "Do not send a wire until the invoice arrives from your advisor."].join("\n"),
         step: "approved_phone",
-        clientEmail: client.email,
-        clientName: signerName,
-        detail: [`${label}`, formatted, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`].join("\n"),
         relatedId: id,
-        skipAdmin: true,
       });
     }
     return { id, amount: formatted, term: label, email: client.email, emailed: !data.skipEmail };
@@ -1788,8 +1882,107 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const sendLeadFollowup = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; months: number[]; copy?: import("@/lib/email-templates").FollowupCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    const months = [...new Set((input.months || []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))];
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    if (!months.length) throw new Error("Choose a 10-month or 22-month term.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 180),
+          opening: clip(input.copy.opening, 900),
+          proceed: clip(input.copy.proceed, 900),
+          formTitle: clip(input.copy.formTitle, 180),
+          expireTitle: clip(input.copy.expireTitle, 180),
+          expire: clip(input.copy.expire, 600),
+          time: clip(input.copy.time, 700),
+          assist: clip(input.copy.assist, 700),
+          urge: clip(input.copy.urge, 700),
+          changeTitle: clip(input.copy.changeTitle, 180),
+          change: clip(input.copy.change, 900),
+          other: clip(input.copy.other, 900),
+          thanks: clip(input.copy.thanks, 400),
+          codeNote: clip(input.copy.codeNote, 400),
+          promoCode: clip(input.copy.promoCode, 40),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, months, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { followupLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    const offer = await loadPromo(sql);
+    const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms`;
+    const byMonths = new Map(terms.map((term) => [Number(term.months), term.apy]));
+    for (const months of data.months) {
+      if (!byMonths.has(months)) throw new Error(`Add the ${months}-month term before sending this letter.`);
+      if (!promoMonths.has(months)) throw new Error(`The ${months}-month term is not on promotion.`);
+    }
+    await ensureCrmLeads(sql);
+    const stored = await sql<{ process: string }>`
+      select case when process = 'portal' then 'portal' else 'assisted' end as process
+      from crm_leads
+      where lower(email) = ${data.email}
+      order by received_at desc
+      limit 1
+    `;
+    const process = stored[0]?.process === "portal" ? "portal" as const : "assisted" as const;
+    const promoCode = data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}`;
+    const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const links: { months: number; apy: string; url: string }[] = [];
+    for (const months of data.months) {
+      const token = await createLeadInvite(sql, { email: data.email, name: data.name, months, promoCode, kind: "promo", process, advisor });
+      links.push({ months, apy: byMonths.get(months) || "", url: inviteApplicationUrl(origin, token) });
+    }
+    const letter = followupLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      copy: data.copy,
+      promoCode,
+      links,
+    });
+    await sendStep(sql, {
+      step: "lead_followup",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: [promoCode ? `Promo code ${promoCode}` : "", ...links.map((link) => `${link.months}-month ${link.url}`)].filter(Boolean).join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
 export const sendLeadApplication = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; months: number; kind?: "custom" | "promo"; copy?: ApplicationCopy | null }) => {
+  .validator((input: { advisorId: string; name: string; email: string; months: number; kind?: "custom" | "promo"; process?: "assisted" | "portal"; copy?: ApplicationCopy | null }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
     const months = Number(input.months);
@@ -1812,7 +2005,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
           promoCode: clip(input.copy.promoCode, 40),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, months, kind, copy };
+    return { advisorId: input.advisorId, name, email, months, kind, process: input.process === "portal" ? "portal" as const : "assisted" as const, copy };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -1837,9 +2030,18 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const origin = settings.find((row) => row.key === "public_domain")?.value || "";
     if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
     const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    await ensureCrmLeads(sql);
+    const stored = await sql<{ process: string }>`
+      select case when process = 'portal' then 'portal' else 'assisted' end as process
+      from crm_leads
+      where lower(email) = ${data.email}
+      order by received_at desc
+      limit 1
+    `;
+    const process = stored[0]?.process === "portal" ? "portal" as const : stored[0] ? "assisted" as const : data.process;
     const kind = data.kind === "promo" ? "promo" : "custom";
     const promoCode = kind === "promo" ? data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}` : data.copy?.promoCode || "";
-    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode, kind, advisor });
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode, kind, process, advisor });
     const link = inviteApplicationUrl(origin, token);
     const letter = applicationLetter({
       leadName: data.name,
@@ -1895,6 +2097,7 @@ async function ensureCrmLeads(sql: Sql) {
   await sql`alter table crm_leads add column if not exists notes text not null default ''`;
   await sql`alter table crm_leads add column if not exists notes_at timestamptz`;
   await sql`alter table crm_leads add column if not exists advisor_id text not null default ''`;
+  await sql`alter table crm_leads add column if not exists process text not null default 'assisted'`;
 }
 
 export type CrmLead = {
@@ -1910,6 +2113,7 @@ export type CrmLead = {
   status: string;
   notes: string;
   advisorId: string;
+  process: "assisted" | "portal";
   receivedAt: string;
 };
 
@@ -1991,9 +2195,10 @@ export const listCrmLeads = createServerFn({ method: "GET" })
       notes_at: string | Date | null;
       perfex_id: string;
       advisor_id: string;
+      process: string;
       received_at: string | Date;
     }>(
-      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, received_at
+      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at
        from crm_leads ${clause}
        order by received_at desc, created_at desc
        limit $${params.length + 1} offset $${params.length + 2}`,
@@ -2003,8 +2208,8 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     const sources = await sql.query<{ source: string }>(`select distinct source from crm_leads where source <> '' order by source limit 200`);
     const statuses = await sql.query<{ status: string }>(`select distinct status from crm_leads where status <> '' order by status limit 100`);
     const focused = data.focusId
-      ? await sql.query<{ id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status: string; notes: string; notes_at: string | Date | null; perfex_id: string; advisor_id: string; received_at: string | Date }>(
-          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, received_at from crm_leads where id = $1 limit 1`,
+      ? await sql.query<{ id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status: string; notes: string; notes_at: string | Date | null; perfex_id: string; advisor_id: string; process: string; received_at: string | Date }>(
+          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at from crm_leads where id = $1 limit 1`,
           [data.focusId],
         )
       : [];
@@ -2020,7 +2225,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     };
   });
 
-function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; notes?: string; advisor_id?: string; received_at: string | Date }): CrmLead {
+function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; notes?: string; advisor_id?: string; process?: string; received_at: string | Date }): CrmLead {
   return {
     id: row.id,
     name: row.name,
@@ -2034,6 +2239,7 @@ function mapCrmLead(row: { id: string; name: string; email: string; phone: strin
     status: row.status || "",
     notes: row.notes || "",
     advisorId: row.advisor_id || "",
+    process: row.process === "portal" ? "portal" : "assisted",
     receivedAt: new Date(row.received_at).toISOString(),
   };
 }
@@ -2058,7 +2264,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
   .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
     const from = (input.from || "").slice(0, 10);
     const to = (input.to || "").slice(0, 10);
-    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr"];
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup"];
     const step = allowed.includes(input.step || "") ? input.step || "" : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
     return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
@@ -2103,7 +2309,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join lead_invites i on i.token = n.related_id
       where n.audience = 'client'
-        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr')
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup')
         and n.created_at >= ${start}
         and n.created_at < ${endDate.toISOString()}
       order by n.created_at desc
@@ -2233,7 +2439,7 @@ export const removeIntroOpen = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureOpenTrash(sql);
-    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo') and lower(recipient) = ${data.email}`;
+    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup') and lower(recipient) = ${data.email}`;
     await sql`delete from open_trash where lower(email) = ${data.email}`;
     return { ok: true as const };
   });
@@ -2302,7 +2508,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           select 1 from notifications later
           where later.audience = 'client'
             and lower(later.recipient) = lower(n.recipient)
-            and later.step in ('lead_application', 'lead_promo')
+            and later.step in ('lead_application', 'lead_promo', 'lead_followup')
             and later.delivery = 'sent'
         ) as application_sent,
         (
@@ -2310,7 +2516,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           from notifications later
           where later.audience = 'client'
             and lower(later.recipient) = lower(n.recipient)
-            and later.step in ('lead_application', 'lead_promo')
+            and later.step in ('lead_application', 'lead_promo', 'lead_followup')
             and later.delivery = 'sent'
           order by later.created_at desc
           limit 1
@@ -2403,7 +2609,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
-      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo') and n.delivery = 'sent'
+      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup') and n.delivery = 'sent'
         and (${trash}::boolean = (
           exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient))
           and not exists (
@@ -2411,7 +2617,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
             where newer.audience = 'client'
               and lower(newer.recipient) = lower(n.recipient)
               and newer.delivery = 'sent'
-              and newer.step in ('lead_intro', 'lead_application', 'lead_promo')
+              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup')
               and newer.created_at > (select t.created_at from open_trash t where lower(t.email) = lower(n.recipient))
           )
         ))
@@ -2468,6 +2674,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
       liquidity: clip(input.liquidity),
       source: clip(input.source),
       advisorId: input.advisorId == null ? null : (input.advisorId || "").trim().slice(0, 80),
+      process: input.process === "portal" ? "portal" as const : "assisted" as const,
       receivedAt: received.toISOString(),
     };
   })
@@ -2478,7 +2685,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
     await ensureCrmLeads(sql);
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, received_at)
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, process, received_at)
       values (
         ${id},
         ${data.name},
@@ -2490,6 +2697,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         ${data.liquidity},
         ${data.source},
         ${data.advisorId || ""},
+        ${data.process},
         ${data.receivedAt}
       )
       on conflict (id) do update set
@@ -2502,6 +2710,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         liquidity = excluded.liquidity,
         source = excluded.source,
         advisor_id = coalesce(${data.advisorId}, crm_leads.advisor_id),
+        process = excluded.process,
         received_at = excluded.received_at
     `;
     return { id };
@@ -3018,8 +3227,8 @@ export const sendAdvisorInboxMail = createServerFn({ method: "POST" })
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const { sendInboxMail } = await import("@/lib/inbox.server");
-    await sendInboxMail(await getSql(), data);
-    return { ok: true as const };
+    const result = await sendInboxMail(await getSql(), data);
+    return { ok: true as const, telegram: result.telegram };
   });
 
 export const deleteAdvisor = createServerFn({ method: "POST" })
@@ -3208,6 +3417,11 @@ export const updateFunding = createServerFn({ method: "POST" })
         ((from === "pending" || from === "approved_phone") && (to === "pending" || to === "approved_phone" || to === "cancelled"))
         || (from === "instructions_sent" && to === "cancelled");
       if (!allowed) throw new Error("Create the invoice on the Invoices tab. Confirm the payment there after the wire file is attached.");
+      const step = fundingStep(to);
+      if (step) {
+        const origin = await sql<{ origin: string }>`select coalesce(origin, '') as origin from fundings where id = ${data.id}`;
+        if (origin[0]?.origin === "desk" && !data.advisorId) throw new Error("Assign an advisor before emailing this client.");
+      }
     }
     const rates = current.amount === data.amount ? null : ratesFor(current.term_label, data.amount, (await loadPromo(sql)).tiers);
     await sql`
@@ -3226,15 +3440,7 @@ export const updateFunding = createServerFn({ method: "POST" })
     `;
     if (current && current.status !== data.status) {
       const step = fundingStep(data.status);
-      if (step) {
-        await sendStep(sql, {
-          step,
-          clientEmail: current.email,
-          clientName: await investorName(sql, current.email),
-          detail: await detailText(sql, { ...current, amount: data.amount }),
-          relatedId: data.id,
-        });
-      }
+      if (step) await sendFundingClient(sql, { id: data.id, step });
     }
     return { ok: true };
   });
@@ -3382,6 +3588,8 @@ export const approvePayment = createServerFn({ method: "POST" })
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    const gate = await sql<{ origin: string; advisor_id: string }>`select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id from fundings where id = ${data.id}`;
+    if (gate[0]?.origin === "desk" && !gate[0].advisor_id) throw new Error("Assign an advisor before emailing this client.");
     const rows = await sql<{ id: string }>`
       update fundings set status = 'payment_approved', payment_approved_at = now()
       where id = ${data.id} and payment_file <> '' and status = 'instructions_sent'
@@ -3391,15 +3599,7 @@ export const approvePayment = createServerFn({ method: "POST" })
     const detail = await fundingDetail(sql, data.id);
     if (detail) {
       const receipt = await paymentReceiptFile(sql, data.id);
-      await sendStep(sql, {
-        step: "payment_approved",
-        clientEmail: detail.email,
-        clientName: await investorName(sql, detail.email),
-        detail: await detailText(sql, detail),
-        relatedId: data.id,
-        attachments: receipt,
-        clientAttachments: receipt,
-      });
+      await sendFundingClient(sql, { id: data.id, step: "payment_approved", attachments: receipt, clientAttachments: receipt });
     }
     return { ok: true };
   });
@@ -3410,6 +3610,8 @@ export const rejectPayment = createServerFn({ method: "POST" })
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    const gate = await sql<{ origin: string; advisor_id: string }>`select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id from fundings where id = ${data.id}`;
+    if (gate[0]?.origin === "desk" && !gate[0].advisor_id) throw new Error("Assign an advisor before emailing this client.");
     const rows = await sql<{ id: string }>`
       update fundings
       set payment_file_name = '', payment_file = '', payment_uploaded_at = null
@@ -3418,15 +3620,7 @@ export const rejectPayment = createServerFn({ method: "POST" })
     `;
     if (!rows[0]) throw new Error("There is no wire confirmation to reject.");
     const detail = await fundingDetail(sql, data.id);
-    if (detail) {
-      await sendStep(sql, {
-        step: "payment_rejected",
-        clientEmail: detail.email,
-        clientName: await investorName(sql, detail.email),
-        detail: await detailText(sql, detail),
-        relatedId: data.id,
-      });
-    }
+    if (detail) await sendFundingClient(sql, { id: data.id, step: "payment_rejected" });
     return { ok: true };
   });
 
@@ -3748,6 +3942,47 @@ export const saveInvoiceBilling = createServerFn({ method: "POST" })
     return { billing: data.billing };
   });
 
+async function invoicePdfBase64(sql: Sql, id: string) {
+  await ensureInvoiceBillingColumn(sql);
+  const rows = await sql<{
+    email: string;
+    amount: string;
+    reference_number: string;
+    applicant_name: string | null;
+    payload: ApplicationPayload | string | null;
+    invoice_billing: unknown;
+  }>`
+    select f.email, f.amount, f.reference_number, f.invoice_billing, app.applicant_name, app.payload
+    from fundings f
+    left join lateral (
+      select applicant_name, payload from applications
+      where lower(email) = lower(f.email)
+      order by submitted_at desc nulls last
+      limit 1
+    ) app on true
+    where f.id = ${id}
+  `;
+  const row = rows[0];
+  if (!row) return "";
+  const payload = row.payload ? (typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload) : null;
+  const clientName = row.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || row.email;
+  const address = [
+    [payload?.street, payload?.apt].filter(Boolean).join(" "),
+    [payload?.city, payload?.region, payload?.postal].filter(Boolean).join(", "),
+    payload?.country ?? "",
+  ].filter(Boolean);
+  const { buildInvoicePdf } = await import("@/lib/investment-pdf.server");
+  const brand = await readPdfBrand(sql);
+  return buildInvoicePdf({
+    clientName,
+    address,
+    amount: row.amount,
+    billing: resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number),
+    logo: brand.logo,
+    companyAddress: brand.companyAddress,
+  });
+}
+
 export const approveInvoice = createServerFn({ method: "POST" })
   .validator((input: { id: string; billing: InvoiceBilling; skipEmail?: boolean }) => {
     const billing = { ...input.billing };
@@ -3770,8 +4005,24 @@ export const approveInvoice = createServerFn({ method: "POST" })
     if (current.status !== "approved_phone" && current.status !== "instructions_sent") throw new Error("Approve the call before generating the invoice.");
     await sql`update fundings set invoice_billing = ${JSON.stringify(data.billing)}::jsonb where id = ${data.id}`;
     if (current.status === "approved_phone") {
+      const meta = await sql<{ origin: string; advisor_id: string }>`select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id from fundings where id = ${data.id}`;
+      const manual = meta[0]?.origin === "desk";
+      if (manual && !data.skipEmail && !meta[0]?.advisor_id) throw new Error("Assign an advisor before sending the invoice letter.");
       await sql`update fundings set status = 'instructions_sent' where id = ${data.id}`;
-      if (!data.skipEmail) {
+      if (!data.skipEmail && manual) {
+        const pdf = await invoicePdfBase64(sql, data.id);
+        const name = await investorName(sql, current.email);
+        await sendAdvisorClientLetter(sql, {
+          to: current.email,
+          name,
+          advisorId: meta[0]?.advisor_id,
+          subject: "Your payment invoice",
+          message: [`Your payment invoice is attached.`, "", current.term_label, `Amount ${current.amount}`, `Reference ${current.reference_number || ""}`, "", "Send the wire using the invoice, then send the bank confirmation to your advisor. Do not use the portal for this certificate."].join("\n"),
+          step: "instructions_sent",
+          relatedId: data.id,
+          attachments: pdf ? [{ filename: "invoice.pdf", content: pdf, contentType: "application/pdf" }] : [],
+        });
+      } else if (!data.skipEmail) {
         await sendStep(sql, {
           step: "instructions_sent",
           clientEmail: current.email,
@@ -3779,6 +4030,83 @@ export const approveInvoice = createServerFn({ method: "POST" })
           detail: await detailText(sql, { ...current, status: "instructions_sent" }),
           relatedId: data.id,
         });
+      }
+    }
+    return { ok: true as const };
+  });
+
+export const sendPortalAccess = createServerFn({ method: "POST" })
+  .validator((input: { id: string; advisorId: string }) => {
+    const id = (input.id || "").trim();
+    const advisorId = (input.advisorId || "").trim();
+    if (!id) throw new Error("Choose a client.");
+    if (!advisorId) throw new Error("Choose an advisor.");
+    return { id, advisorId };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { hashPassword } = await import("@/lib/passwords.server");
+    const sql = await getSql();
+    const rows = await sql<{ email: string; applicant_name: string; status: string }>`
+      select email, applicant_name, status from applications where id = ${data.id}
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("Application not found.");
+    if (row.status !== "approved") throw new Error("Approve the application before sending portal access.");
+    const email = row.email.trim().toLowerCase();
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    const bytes = randomBytes(12);
+    const password = Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+    const passwordHash = await hashPassword(password);
+    await sql`update applications set password_hash = ${passwordHash} where id = ${data.id}`;
+    await sql`
+      insert into investor_users (email, password_hash, application_id)
+      values (${email}, ${passwordHash}, ${data.id})
+      on conflict (email) do update
+      set password_hash = excluded.password_hash, application_id = excluded.application_id
+    `;
+    const origin = (await import("@/lib/mail.server")).readPortalOrigin;
+    const base = (await origin(sql)).replace(/\/$/, "");
+    const login = base ? `${base}/login` : "";
+    await sendAdvisorClientLetter(sql, {
+      to: email,
+      name: row.applicant_name,
+      advisorId: data.advisorId,
+      subject: "Your investor portal access",
+      message: [`A portal sign-in is ready for ${email}.`, "", `Temporary password: ${password}`, login ? `Sign in\n${login}` : "", "Change this password after you sign in. Your advisor can send a new one if you need it."].join("\n"),
+      step: "application_approved",
+      relatedId: data.id,
+    });
+    return { ok: true as const, email, password };
+  });
+
+export const requestPortalAccess = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the email on the application.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ applicant_name: string; status: string }>`
+      select applicant_name, status from applications
+      where lower(email) = ${data.email}
+      order by submitted_at desc
+      limit 1
+    `;
+    const row = rows[0];
+    if (row?.status === "approved") {
+      try {
+        const { sendTelegramNotice } = await import("@/lib/mail.server");
+        await sendTelegramNotice(
+          sql,
+          "Portal access requested",
+          `${row.applicant_name || "A client"} (${data.email}) asked for portal access. Send a temporary password from the application.`,
+        );
+      } catch (error) {
+        console.error("[portal-access] notice failed", error);
       }
     }
     return { ok: true as const };
@@ -4110,6 +4438,68 @@ function fundingStep(status: string): MailStep | null {
   if (status === "payment_approved") return "payment_approved";
   if (status === "cancelled") return "investment_cancelled";
   return null;
+}
+
+const DESK_MAIL: Partial<Record<MailStep, { subject: string; message: string }>> = {
+  approved_phone: {
+    subject: "Your certificate was approved",
+    message: "Your advisor approved this certificate. It is signed and waiting for an invoice. Do not send a wire until the invoice arrives from your advisor.",
+  },
+  instructions_sent: {
+    subject: "Your payment invoice",
+    message: "Your payment invoice is ready. Send the wire using that invoice, then send the bank confirmation to your advisor. Do not use the portal for this certificate.",
+  },
+  payment_rejected: {
+    subject: "Please send the wire confirmation again",
+    message: "The wire confirmation was not accepted. Send a new confirmation to your advisor. The certificate stays inactive until the payment is approved.",
+  },
+  payment_approved: {
+    subject: "Your payment receipt",
+    message: "Your advisor approved the payment. This certificate is active. The payment receipt is attached. Keep it with your records. A $4.99 dealing fee applies to this purchase.",
+  },
+  investment_cancelled: {
+    subject: "Your certificate request was cancelled",
+    message: "This certificate request was cancelled and will not be funded. No wire is due. Your advisor can open a new certificate if you want one.",
+  },
+};
+
+async function sendFundingClient(
+  sql: Sql,
+  input: { id: string; step: MailStep; attachments?: MailFile[]; clientAttachments?: MailFile[] },
+) {
+  const meta = await sql<{ origin: string; advisor_id: string; email: string }>`
+    select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id, email
+    from fundings where id = ${input.id}
+  `;
+  const row = meta[0];
+  if (!row) return;
+  const detail = await fundingDetail(sql, input.id);
+  const name = await investorName(sql, row.email);
+  const body = await detailText(sql, detail);
+  if (row.origin === "desk") {
+    if (!row.advisor_id) throw new Error("Assign an advisor before emailing this client.");
+    const copy = DESK_MAIL[input.step] ?? { subject: "A note from your advisor", message: "Your advisor has an update on this certificate." };
+    await sendAdvisorClientLetter(sql, {
+      to: row.email,
+      name,
+      advisorId: row.advisor_id,
+      subject: copy.subject,
+      message: [copy.message, "", body].filter(Boolean).join("\n"),
+      step: input.step,
+      relatedId: input.id,
+      attachments: input.attachments,
+    });
+    return;
+  }
+  await sendStep(sql, {
+    step: input.step,
+    clientEmail: row.email,
+    clientName: name,
+    detail: body,
+    relatedId: input.id,
+    attachments: input.attachments,
+    clientAttachments: input.clientAttachments,
+  });
 }
 
 function applicationDeskDetail(payload: ApplicationPayload) {

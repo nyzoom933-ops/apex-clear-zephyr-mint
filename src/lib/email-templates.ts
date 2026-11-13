@@ -20,13 +20,14 @@ export type MailStep =
   | "lead_invite_reminder"
   | "lead_extension"
   | "lead_htr"
+  | "lead_followup"
   | "invoice_advisor";
 
 export function mailStepLabel(step: string) {
   return STEPS[step as MailStep]?.label || step;
 }
 
-export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "invoice_advisor"]);
+export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "invoice_advisor"]);
 
 export type MailAudience = "client" | "admin";
 
@@ -192,6 +193,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     clientNext: "",
     adminSubject: "HTR follow-up sent to {{name}}",
     adminLead: "A follow-up was sent to {{name}} ({{email}}) after they could not be reached.",
+  },
+  lead_followup: {
+    label: "Promo application follow-up",
+    clientSubject: "Follow-Up: 10 & 22 Month Promotional CD Opportunities",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Promo application follow-up sent to {{name}}",
+    adminLead: "A 10 and 22 month application follow-up was sent to {{name}} ({{email}}).",
   },
   invoice_advisor: {
     label: "Advisor invoice letter",
@@ -378,7 +387,7 @@ export function renderStep(
   const subject = fill(input.copy?.subject ?? (audience === "client" ? item.clientSubject : item.adminSubject), name, input.email, company);
   const nextRaw = input.copy?.next ?? item.clientNext;
   const next = audience === "client" && nextRaw ? fill(nextRaw, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "invoice_advisor";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -393,7 +402,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   const chosenStyle = isFullLetter ? input.advisorStyle : input.transactionalStyle;
   return {
     step,
@@ -626,7 +635,7 @@ export function defaultLeadCopy(input: { leadName: string; company: string; advi
   const advisor = input.advisorName?.trim();
   return {
     subject: `Current CD rates for ${name}`,
-    headline: `Lock in a fixed rate with a ${company} certificate of deposit.`,
+    headline: `Lock in a fixed rate with ${company}.`,
     welcome: `We are delighted to welcome you to ${company}. This new-client-only special promo is built to help you save with a fixed return over a term you choose. ${advisor ? `${advisor} can walk through the options with you.` : "Your advisor can walk through the options with you."}`,
     certificate: "Choose a term that fits your plans and earn a fixed rate for that term. A penalty may apply if you withdraw before maturity.",
     offer: input.offerIntro?.trim() || "A tiered introductory bonus for new clients. The bonus applies for the full duration of the CD and increases with the amount you place.",
@@ -1380,6 +1389,178 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
 
 function sampleHtrLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
   return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone }).html;
+}
+
+export type FollowupCopy = {
+  subject: string;
+  opening: string;
+  proceed: string;
+  formTitle: string;
+  expireTitle: string;
+  expire: string;
+  time: string;
+  assist: string;
+  urge: string;
+  changeTitle: string;
+  change: string;
+  other: string;
+  thanks: string;
+  codeNote: string;
+  promoCode: string;
+};
+
+export function defaultFollowupCopy(): FollowupCopy {
+  return {
+    subject: "Follow-Up: 10 & 22 Month Promotional CD Opportunities",
+    opening: "We are following up regarding the **10 & 22 Month Promotional CD Rates** we previously discussed with you.",
+    proceed: "To move forward and secure the promotional terms discussed, please complete and return the application form below. Once received and processed, we can proceed with establishing your account and securing the applicable promotional rate for your selected term.",
+    formTitle: "Application Form — Please Complete and Return",
+    expireTitle: "Important: Application Expiration & Assistance",
+    expire: "Please note that the application form will expire **48 hours** after it is issued.",
+    time: "If you need additional time to complete the application, simply let us know when you expect to be available, and we can arrange to have it sent closer to your preferred time.",
+    assist: "If you would prefer assistance from a representative, please provide your preferred date and time, and we will arrange for someone from our team to reach out and walk you through the application process.",
+    urge: "We encourage you to complete the application at your earliest convenience, as promotional rates are subject to availability and may change without notice.",
+    changeTitle: "Need a Different Term or Have Your Plans Changed?",
+    change: "We understand that financial plans and priorities can change. If the **10-month or 22-month term** is no longer what you are looking for, please let us know. We may have other promotional CD options available that better suit your needs.",
+    other: "If you have decided not to proceed at this time, simply reply to this email so we can update our records accordingly. We appreciate the opportunity to assist you and would welcome the opportunity to reconnect in the future.",
+    thanks: "Thank you for your time and consideration. We look forward to assisting you.",
+    codeNote: "Enter this code on the application to apply the promotional rate.",
+    promoCode: "",
+  };
+}
+
+export function followupLetter(input: {
+  leadName: string;
+  company: string;
+  advisor?: MailAdvisor;
+  logo?: string | null;
+  portalUrl?: string;
+  companyPhone?: string;
+  copy?: FollowupCopy | null;
+  promoCode?: string;
+  links?: { months: number; apy?: string; url: string }[];
+}) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.leadName.trim() || "Client";
+  const fallback = defaultFollowupCopy();
+  const copy = input.copy;
+  const pick = (value: string | undefined, standard: string) => value?.trim() || standard;
+  const subject = pick(copy?.subject, fallback.subject);
+  const opening = pick(copy?.opening, fallback.opening);
+  const proceed = pick(copy?.proceed, fallback.proceed);
+  const formTitle = pick(copy?.formTitle, fallback.formTitle);
+  const expireTitle = pick(copy?.expireTitle, fallback.expireTitle);
+  const expire = pick(copy?.expire, fallback.expire);
+  const time = pick(copy?.time, fallback.time);
+  const assist = pick(copy?.assist, fallback.assist);
+  const urge = pick(copy?.urge, fallback.urge);
+  const changeTitle = pick(copy?.changeTitle, fallback.changeTitle);
+  const change = pick(copy?.change, fallback.change);
+  const other = pick(copy?.other, fallback.other);
+  const thanks = pick(copy?.thanks, fallback.thanks);
+  const codeNote = pick(copy?.codeNote, fallback.codeNote);
+  const promoCode = (input.promoCode || copy?.promoCode || "").trim();
+  const links = (input.links || []).filter((link) => link.url && link.months);
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
+  const mark = logo
+    ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
+    : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
+  const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
+  const help = companyHelp(input.companyPhone);
+  const paragraph = (value: string) => value.trim() ? `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(value)}</p>` : "";
+  const heading = (value: string) => `<p style="margin:22px 0 0 0; font-size:18px; line-height:24px; font-weight:700; color:#12315c;">${richText(value)}</p>`;
+  const buttons = links.map((link) => `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:10px;"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(link.url)}" style="display:inline-block; padding:14px 22px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">${escapeHtml(`${link.months}-month application${link.apy ? ` · ${link.apy.replace(/\s*APY/i, "")} APY` : ""}`)}</a></td></tr></table>`).join("");
+  const codeBox = promoCode
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:16px; background:#e7f3fb; border-left:4px solid #006fcf;"><tr><td style="padding:16px 18px;">
+        <p style="margin:0 0 4px 0; font-size:12px; font-weight:700; letter-spacing:0.8px; color:#006fcf;">PROMOTIONAL CODE</p>
+        <p style="margin:0; font-size:22px; font-weight:700; letter-spacing:1px; color:#12315c;">${escapeHtml(promoCode)}</p>
+        <p style="margin:8px 0 0 0; font-size:14px; line-height:21px; color:#333333;">${escapeHtml(codeNote)}</p>
+      </td></tr></table>`
+    : "";
+  const text = [
+    `Dear ${name},`,
+    stripMarks(opening),
+    stripMarks(proceed),
+    stripMarks(formTitle),
+    ...links.map((link) => `${link.months}-month application: ${link.url}`),
+    promoCode ? `Promotional code: ${promoCode}` : "",
+    codeNote,
+    stripMarks(expireTitle),
+    stripMarks(expire),
+    stripMarks(time),
+    stripMarks(assist),
+    stripMarks(urge),
+    stripMarks(changeTitle),
+    stripMarks(change),
+    stripMarks(other),
+    stripMarks(thanks),
+    sign.text,
+    input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : "",
+  ].filter(Boolean).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">Your 10 and 22 month promotional CD application is ready and expires in 48 hours.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;">
+    <tr><td align="center" style="padding:20px 10px;">
+      <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
+        <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
+        <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:28px 36px 24px 36px;">
+          <p style="margin:0 0 4px 0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Promotional certificate</p>
+          <h1 style="margin:0; font-size:26px; line-height:32px; color:#12315c;">10 & 22 month application</h1>
+          <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
+          ${paragraph(opening)}
+          ${paragraph(proceed)}
+          ${heading(formTitle)}
+          ${buttons}
+          ${codeBox}
+          ${heading(expireTitle)}
+          ${paragraph(expire)}
+          ${paragraph(time)}
+          ${paragraph(assist)}
+          ${paragraph(urge)}
+          ${heading(changeTitle)}
+          ${paragraph(change)}
+          ${paragraph(other)}
+          ${paragraph(thanks)}
+          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        </td></tr>
+        <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+          <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+          <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
+        </td></tr>
+        <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
+          <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">Each application link expires 48 hours after this email is sent. Promotional rates are subject to availability and may change. A penalty may be imposed for early withdrawal.</p>
+          <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+  return { subject, text, html };
+}
+
+function sampleFollowupLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  const base = applicationUrl(portalUrl);
+  return followupLetter({
+    leadName: "Jonah Hale",
+    company: DEFAULT_COMPANY_NAME,
+    portalUrl,
+    advisor,
+    companyPhone,
+    promoCode: "CDPROMO",
+    links: [
+      { months: 10, apy: "4.50%", url: base || "#" },
+      { months: 22, apy: "4.50%", url: base || "#" },
+    ],
+  }).html;
 }
 
 export function invoiceAdvisorLetter(input: {

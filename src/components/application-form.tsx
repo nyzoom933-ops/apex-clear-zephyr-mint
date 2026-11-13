@@ -105,6 +105,7 @@ export function ApplicationForm() {
   const [offer, setOffer] = useState<PromoOffer>(EMPTY_PROMO);
   const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired" | "used">("none");
   const [inviteKind, setInviteKind] = useState("");
+  const [inviteProcess, setInviteProcess] = useState("");
   const [inviteToken, setInviteToken] = useState("");
   const [inviteRequested, setInviteRequested] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
@@ -131,6 +132,7 @@ export function ApplicationForm() {
       const term = params.get("term")?.replace(/\D/g, "") || "";
       setForm({ ...draft, preferredTerm: term || draft.preferredTerm, promoCode: "", inviteToken: "" });
       setInviteKind("");
+      setInviteProcess("");
       setInviteGate("none");
       setReady(true);
       return;
@@ -159,6 +161,7 @@ export function ApplicationForm() {
           firstName: draft.firstName || first,
         });
         setInviteKind(result.kind || "");
+        setInviteProcess(result.process || "portal");
         setInviteGate("open");
         setReady(true);
       })
@@ -199,7 +202,7 @@ export function ApplicationForm() {
   }
 
   async function onContinue() {
-    const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)));
+    const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)), inviteProcess === "assisted");
     if (nextErrors.length) {
       setErrors(nextErrors);
       cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -294,14 +297,7 @@ export function ApplicationForm() {
   if (submitted) {
     return (
       <div className="min-h-screen">
-        <SiteHeader
-          eyebrow="Investor application"
-          action={
-            <Link to="/login" className={headerActionClass}>
-              Sign in
-            </Link>
-          }
-        />
+        <SiteHeader eyebrow="Investor application" />
         <AppCover />
         <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
           <section className="rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10">
@@ -311,8 +307,9 @@ export function ApplicationForm() {
             <p className="text-xs font-semibold tracking-widest text-primary uppercase">Submitted</p>
             <h1 className="mt-2 text-3xl font-semibold">Application received</h1>
             <p className="mx-auto mt-3 max-w-md text-fg">
-              {form.firstName}, sign in with the email and password from this application. The investor portal opens
-              after the desk approves it.
+              {inviteProcess === "assisted"
+                ? `${form.firstName}, your advisor has the application. You do not need a password. The advisor will write to you about the certificate.`
+                : `${form.firstName}, sign in with the email and password from this application. The investor portal opens after the desk approves it.`}
             </p>
           </section>
         </main>
@@ -394,7 +391,7 @@ export function ApplicationForm() {
             {step === 0 ? <Prepare /> : null}
             {step === 1 ? (
               <div className="grid gap-10">
-                <Account form={form} patch={patch} />
+                <Account form={form} patch={patch} assisted={inviteProcess === "assisted"} />
                 <Personal form={form} patch={patch} />
               </div>
             ) : null}
@@ -475,13 +472,13 @@ function Prepare() {
   );
 }
 
-function Account({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+function Account({ form, patch, assisted = false }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void; assisted?: boolean }) {
   return (
     <div className="grid gap-5">
       <SectionIntro
         eyebrow="Section"
         title="Account and contact"
-        body="Choose the legal account structure and create the primary holder’s access."
+        body={assisted ? "Choose the legal account structure. Your advisor completes the certificate. A portal password is not required." : "Choose the legal account structure and create the primary holder’s access."}
       />
       <fieldset>
         <legend className="mb-2 text-sm font-medium">Account type</legend>
@@ -514,6 +511,7 @@ function Account({ form, patch }: { form: FormState; patch: <K extends keyof For
           <input className={controlClass} value={form.phone} onChange={(event) => patch("phone", event.target.value)} />
         </Field>
       </div>
+      {assisted ? null : (
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Password" hint="At least 8 characters. This becomes your portal sign-in.">
           <input type="password" className={controlClass} value={form.password} onChange={(event) => patch("password", event.target.value)} />
@@ -522,6 +520,7 @@ function Account({ form, patch }: { form: FormState; patch: <K extends keyof For
           <input type="password" className={controlClass} value={form.confirmPassword} onChange={(event) => patch("confirmPassword", event.target.value)} />
         </Field>
       </div>
+      )}
     </div>
   );
 }
