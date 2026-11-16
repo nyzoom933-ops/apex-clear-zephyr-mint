@@ -300,24 +300,27 @@ async function postTelegram(token: string, chatId: string, subject: string, text
   }
   for (const file of attachments) {
     const bytes = Buffer.from(file.content, "base64");
-    const photo = /\.(jpe?g|png|webp|gif)$/i.test(file.filename);
+    if (!bytes.length) continue;
+    const photo = /^image\/(jpeg|png|webp|gif)$/i.test(file.contentType || "") || /\.(jpe?g|png|webp|gif)$/i.test(file.filename);
     const sent = photo
-      ? await postTelegramFile(token, chatId, "sendPhoto", "photo", file.filename, bytes)
-      : await postTelegramFile(token, chatId, "sendDocument", "document", file.filename, bytes);
-    const delivered = sent.ok || !photo ? sent : await postTelegramFile(token, chatId, "sendDocument", "document", file.filename, bytes);
+      ? await postTelegramFile(token, chatId, "sendPhoto", "photo", file.filename, bytes, file.contentType)
+      : await postTelegramFile(token, chatId, "sendDocument", "document", file.filename, bytes, file.contentType);
+    const delivered = sent.ok || !photo ? sent : await postTelegramFile(token, chatId, "sendDocument", "document", file.filename, bytes, file.contentType || "application/octet-stream");
     if (!delivered.ok) return { ok: false, id, error: delivered.error || "Telegram rejected an attachment." };
     if (delivered.id) id = delivered.id;
   }
   return { ok: true, id, error: "" };
 }
 
-async function postTelegramFile(token: string, chatId: string, method: "sendPhoto" | "sendDocument", field: "photo" | "document", filename: string, bytes: Buffer) {
+async function postTelegramFile(token: string, chatId: string, method: "sendPhoto" | "sendDocument", field: "photo" | "document", filename: string, bytes: Buffer, contentType = "") {
   const form = new FormData();
   form.set("chat_id", chatId);
-  form.set(field, new Blob([new Uint8Array(bytes)]), filename || "image.jpg");
+  const type = contentType || (method === "sendPhoto" ? "image/jpeg" : "application/octet-stream");
+  const safeName = (filename || (method === "sendPhoto" ? "photo.jpg" : "file")).replace(/[^\w.\-]+/g, "-").slice(0, 80);
+  form.set(field, new Blob([Uint8Array.from(bytes)], { type }), safeName);
   const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(60000),
     body: form,
   });
   const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: { message_id?: number } };

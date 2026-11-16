@@ -28,7 +28,10 @@ export function latestMessageText(value: string) {
     }
   }
   const fresh = lines.slice(0, cut).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  return fresh || "No new text. The rest repeats an earlier message.";
+  if (fresh) return fresh;
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length > 0 && compact.length <= 1200) return compact;
+  return "No new text. The rest repeats an earlier message.";
 }
 
 export async function ensureInbox(sql: Sql) {
@@ -57,6 +60,8 @@ export async function ensureInbox(sql: Sql) {
     )
   `;
   await sql`alter table inbox_messages add column if not exists telegram_notified boolean not null default false`;
+  await sql`alter table inbox_messages add column if not exists telegram_attempts integer not null default 0`;
+  await sql`alter table inbox_messages add column if not exists telegram_body boolean not null default false`;
   await sql`alter table inbox_messages add column if not exists folder text not null default 'INBOX'`;
   await sql`alter table inbox_messages add column if not exists body_raw text not null default ''`;
   await sql`alter table inbox_messages add column if not exists attachments jsonb not null default '[]'::jsonb`;
@@ -237,10 +242,20 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
       const receivedAt = message.internalDate instanceof Date ? message.internalDate : parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime()) ? parsed.date : new Date();
       latest = `${parsed.subject || "(no subject)"} from ${fromEmail || "unknown"}`;
       if (folder !== "INBOX" && Date.now() - receivedAt.getTime() > 2 * DAY) continue;
-      const existing = await sql<{ id: string }>`
-        select id from inbox_messages where advisor_id = ${advisor.id} and direction = 'in' and uid = ${uid} and coalesce(folder, 'INBOX') = ${folder} limit 1
+      const existing = await sql<{ id: string; attachments: unknown }>`
+        select id, attachments from inbox_messages where advisor_id = ${advisor.id} and direction = 'in' and uid = ${uid} and coalesce(folder, 'INBOX') = ${folder} limit 1
       `;
-      if (existing[0]) continue;
+      const images = emailFiles(parsed.attachments);
+      if (existing[0]) {
+        const storedCount = storedInboxFiles(existing[0].attachments).length;
+        if (images.length > storedCount) {
+          const stored = JSON.stringify(images.map((file) => ({ filename: file.filename, contentType: file.contentType, content: file.content })));
+          await sql`update inbox_messages set attachments = ${stored}::jsonb, telegram_notified = false, telegram_attempts = 0 where id = ${existing[0].id}`;
+          fresh.push(existing[0].id);
+          pictures.set(existing[0].id, images);
+        }
+        continue;
+      }
       const messageId = (parsed.messageId || "").slice(0, 300);
       if (messageId) {
         const duplicate = await sql<{ id: string }>`
@@ -249,7 +264,6 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
         if (duplicate[0]) continue;
       }
       const id = crypto.randomUUID();
-      const images = emailFiles(parsed.attachments);
       const stored = JSON.stringify(images.map((file) => ({ filename: file.filename, contentType: file.contentType, content: file.content })));
       await sql`
         insert into inbox_messages (
@@ -287,44 +301,106 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
 function emailFiles(attachments: Array<{ filename?: string; contentType?: string; content?: Buffer; size?: number }> | undefined): Array<MailFile & { contentType: string }> {
   const files: Array<MailFile & { contentType: string }> = [];
   for (const attachment of attachments || []) {
-    const type = (attachment.contentType || "application/octet-stream").toLowerCase();
-    if (type.startsWith("multipart/") || type === "text/html" || type === "text/plain" || /pkcs7|pgp-signature/.test(type)) continue;
-    const bytes = attachment.content;
+    const type = (attachment.contentType || "application/octet-stream").split(";")[0].trim().toLowerCase();
+    if (type.startsWith("multipart/") || type === "text/html" || type === "text/plain" || /pkcs7|pgp-signature|ms-tnef/.test(type)) continue;
+    const bytes = attachment.content ? Buffer.from(attachment.content) : null;
     const size = bytes?.length || attachment.size || 0;
     if (!bytes || size < 1 || size > 20_000_000) continue;
     const name = (attachment.filename || "").trim();
-    const image = type.startsWith("image/") && !type.includes("svg");
+    const image = isImageFile(type, name, bytes);
     if (image) {
       if (size < 1024) continue;
       if (size < 8192 && (!name || /pixel|spacer|logo|icon|signature|blank|track/i.test(name))) continue;
     } else if (!name || size < 32) {
       continue;
     }
-    const extension = image ? (type.includes("png") ? "png" : type.includes("webp") ? "webp" : type.includes("gif") ? "gif" : "jpg") : "bin";
-    const filename = (name || `image-${files.length + 1}.${extension}`).replace(/[^\w.\-]+/g, "-").slice(0, 80);
-    files.push({ filename, contentType: type, content: Buffer.from(bytes).toString("base64") });
+    const filename = image ? imageFilename(name, type, bytes, files.length + 1) : (name || `file-${files.length + 1}`).replace(/[^\w.\-]+/g, "-").slice(0, 80);
+    const contentType = image ? imageType(type, filename, bytes) : type || "application/octet-stream";
+    files.push({ filename, contentType, content: bytes.toString("base64") });
     if (files.length >= 8) break;
   }
   return files;
 }
 
+function isImageFile(type: string, name: string, bytes: Buffer) {
+  if (type.startsWith("image/") && !type.includes("svg")) return true;
+  if (/\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)$/i.test(name)) return true;
+  return imageKind(bytes) !== "";
+}
+
+function imageKind(bytes: Buffer) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8) return "jpg";
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes.toString("ascii", 1, 4) === "PNG") return "png";
+  const head = bytes.toString("ascii", 0, 6);
+  if (head === "GIF87a" || head === "GIF89a") return "gif";
+  if (bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") return "webp";
+  return "";
+}
+
+function imageType(type: string, filename: string, bytes: Buffer) {
+  const kind = imageKind(bytes);
+  if (kind === "jpg") return "image/jpeg";
+  if (kind === "png") return "image/png";
+  if (kind === "gif") return "image/gif";
+  if (kind === "webp") return "image/webp";
+  if (type.startsWith("image/") && !type.includes("svg")) return type;
+  if (/\.png$/i.test(filename)) return "image/png";
+  if (/\.gif$/i.test(filename)) return "image/gif";
+  if (/\.webp$/i.test(filename)) return "image/webp";
+  return "image/jpeg";
+}
+
+function imageFilename(name: string, type: string, bytes: Buffer, index: number) {
+  const kind = imageKind(bytes);
+  const fromName = /\.(jpe?g|png|gif|webp|heic|heif)$/i.exec(name)?.[1]?.toLowerCase().replace("jpeg", "jpg") || "";
+  const extension = kind || fromName || (type.includes("png") ? "png" : type.includes("webp") ? "webp" : type.includes("gif") ? "gif" : type.includes("heic") ? "heic" : type.includes("heif") ? "heif" : "jpg");
+  const base = (name || `photo-${index}.${extension}`).replace(/[^\w.\-]+/g, "-").slice(0, 70);
+  if (/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(base)) return base;
+  return `${base.replace(/\.+$/, "") || `photo-${index}`}.${extension}`;
+}
+
 let inboxQueue: Promise<void> = Promise.resolve();
 
 async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[], pictures: Map<string, MailFile[]>) {
-  const ids = [...new Set(fresh.filter(Boolean))];
-  let row: { id: string; from_name: string; from_email: string; subject: string; body_text: string; body_raw: string; received_at: string; message_id: string } | undefined;
-  for (const id of ids) {
-    const extra = await sql<{ id: string; from_name: string; from_email: string; subject: string; body_text: string; body_raw: string; received_at: string; message_id: string }>`
-      select id, from_name, from_email, subject, body_text, coalesce(body_raw, '') as body_raw, received_at, coalesce(message_id, '') as message_id
-      from inbox_messages
-      where id = ${id} and telegram_notified = false
+  await sql`
+    update inbox_messages set telegram_notified = false, telegram_attempts = 0
+    where id in (
+      select id from inbox_messages
+      where advisor_id = ${advisor.id} and direction = 'in' and telegram_body = false and telegram_notified = true
+        and received_at > now() - interval '24 hours'
+      order by received_at desc
       limit 1
-    `;
-    if (extra[0] && (!row || String(extra[0].received_at) > String(row.received_at))) row = extra[0];
+    )
+  `;
+  const pending = await sql<{ id: string }>`
+    select id from inbox_messages
+    where advisor_id = ${advisor.id} and direction = 'in' and telegram_notified = false and coalesce(telegram_attempts, 0) < 3
+      and received_at > now() - interval '3 days'
+    order by received_at asc
+    limit 5
+  `;
+  const ids = [...new Set([...fresh, ...pending.map((item) => item.id)].filter(Boolean))];
+  let sent = 0;
+  let note = "";
+  for (const id of ids) {
+    const result = await notifyInboxMessage(sql, advisor, id, pictures.get(id) || []);
+    sent += result.sent;
+    if (result.note) note = result.note;
   }
+  return { sent, note };
+}
+
+async function notifyInboxMessage(sql: Sql, advisor: MailboxRow, id: string, memoryFiles: MailFile[]) {
+  const rows = await sql<{ id: string; from_name: string; from_email: string; subject: string; message_id: string; body_text: string; body_raw: string; attachments: unknown; telegram_attempts: number }>`
+    select id, from_name, from_email, subject, coalesce(message_id, '') as message_id, coalesce(body_text, '') as body_text, coalesce(body_raw, '') as body_raw, attachments, coalesce(telegram_attempts, 0) as telegram_attempts
+    from inbox_messages
+    where id = ${id} and telegram_notified = false
+    limit 1
+  `;
+  const row = rows[0];
   if (!row) return { sent: 0, note: "" };
   const claimed = await sql<{ id: string }>`
-    update inbox_messages set telegram_notified = true
+    update inbox_messages set telegram_notified = true, telegram_attempts = coalesce(telegram_attempts, 0) + 1
     where id = ${row.id} and telegram_notified = false
     returning id
   `;
@@ -332,28 +408,51 @@ async function notifyInbox(sql: Sql, advisor: MailboxRow, fresh: string[], pictu
   if (row.message_id) {
     const prior = await sql<{ id: string }>`
       select id from inbox_messages
-      where direction = 'in' and telegram_notified = true and message_id = ${row.message_id} and id <> ${row.id}
+      where direction = 'in' and telegram_body = true and message_id = ${row.message_id} and id <> ${row.id}
       limit 1
     `;
     if (prior[0]) return { sent: 0, note: "" };
   }
   const who = row.from_name?.trim() ? `${row.from_name.trim()} <${row.from_email}>` : row.from_email || "Unknown sender";
-  const visible = [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`].join("\n");
+  const body = inboxNoticeBody(row.body_text, row.body_raw);
+  const short = body.length > 0 && body.length <= 700;
+  const visible = [`From: ${who}`, `Subject: ${row.subject || "(no subject)"}`, short ? body : ""].filter(Boolean).join("\n");
+  const files = memoryFiles.length ? memoryFiles : storedInboxFiles(row.attachments);
   const { sendTelegramNotice } = await import("@/lib/mail.server");
   try {
-    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, "", pictures.get(row.id) || []);
+    const result = await sendTelegramNotice(sql, `New email for ${advisor.name || advisor.imap_user}`, visible, short ? "" : body, files);
     if (result.delivery !== "sent") {
-      await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
+      const attempts = Number(row.telegram_attempts) + 1;
+      if (attempts < 3) await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
       return { sent: 0, note: result.error || "Telegram did not accept the notice." };
     }
+    await sql`update inbox_messages set telegram_body = true where id = ${row.id}`;
     if (row.message_id) {
-      await sql`update inbox_messages set telegram_notified = true where direction = 'in' and message_id = ${row.message_id}`;
+      await sql`update inbox_messages set telegram_notified = true, telegram_body = true where direction = 'in' and message_id = ${row.message_id}`;
     }
     return { sent: 1, note: "" };
   } catch (error) {
-    await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
+    const attempts = Number(row.telegram_attempts) + 1;
+    if (attempts < 3) await sql`update inbox_messages set telegram_notified = false where id = ${row.id}`;
     return { sent: 0, note: error instanceof Error ? error.message : "Telegram did not accept the notice." };
   }
+}
+
+function inboxNoticeBody(body: string, raw: string) {
+  const text = (body || "").trim();
+  const source = (raw || "").trim();
+  if (text && text !== "No new text. The rest repeats an earlier message.") return text.slice(0, 3500);
+  if (source.length > 0 && source.length <= 1200) return source;
+  return text.slice(0, 3500);
+}
+
+function storedInboxFiles(value: unknown): MailFile[] {
+  const stored = Array.isArray(value) ? value : typeof value === "string" ? (JSON.parse(value) as unknown[]) : [];
+  return stored.flatMap((item) => {
+    const file = item as { filename?: string; contentType?: string; content?: string };
+    if (!file?.content) return [];
+    return [{ filename: file.filename || "photo.jpg", contentType: file.contentType || "application/octet-stream", content: file.content }];
+  });
 }
 export async function listInbox(sql: Sql, advisorId: string) {
   await ensureInbox(sql);
