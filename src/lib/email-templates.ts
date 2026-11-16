@@ -906,15 +906,18 @@ export type ApplicationCopy = {
   promoCode: string;
 };
 
-export function defaultApplicationCopy(input: { leadName: string; company: string; months: number; advisorName?: string; variant?: "custom" | "promo" }): ApplicationCopy {
+export function defaultApplicationCopy(input: { leadName: string; company: string; months: number; advisorName?: string; variant?: "custom" | "promo" | "exclusive" }): ApplicationCopy {
   const months = input.months || 0;
   const term = months ? `${months}-month` : "CD";
   const promo = input.variant === "promo";
+  const exclusive = input.variant === "exclusive";
   return {
-    subject: promo ? (months ? `Promotional CD application — ${term}` : "Promotional CD application") : months ? `CD application form — ${term}` : "CD application form",
-    headline: promo ? (months ? `Your promotional ${term} CD application is ready.` : "Your promotional CD application is ready.") : months ? `Your ${term} CD application is ready.` : "Your CD application is ready.",
+    subject: exclusive ? `Exclusive CD application — ${term}` : promo ? (months ? `Promotional CD application — ${term}` : "Promotional CD application") : months ? `CD application form — ${term}` : "CD application form",
+    headline: exclusive ? `Your exclusive ${term} CD application is ready.` : promo ? (months ? `Your promotional ${term} CD application is ready.` : "Your promotional CD application is ready.") : months ? `Your ${term} CD application is ready.` : "Your CD application is ready.",
     hope: "I hope you're doing well.",
-    ready: promo
+    ready: exclusive
+      ? "This certificate term and rate were prepared for you alone. They do not appear on any other application. This personal link expires 48 hours after this email is sent."
+      : promo
       ? "Your promotional certificate application is ready. This personal link expires 48 hours after this email is sent."
       : "Your certificate application is ready. This personal link expires 48 hours after this email is sent.",
     instruction: "Use the button below before the link expires.",
@@ -937,7 +940,7 @@ export function applicationLetter(input: {
   portalUrl?: string;
   link?: string;
   companyPhone?: string;
-  variant?: "custom" | "promo";
+  variant?: "custom" | "promo" | "exclusive";
   copy?: ApplicationCopy | null;
   terms?: { months: number; apy: string }[];
 }) {

@@ -69,6 +69,7 @@ import {
   sendLeadFollowup,
   sendLeadPromoReminder,
   sendLeadApplication,
+  sendLeadExclusiveApplication,
   resendOpenApplication,
   updateFunding,
   downloadInvoicePdf,
@@ -1599,6 +1600,8 @@ function LeadsPanel({
   const [kind, setKind] = useState("rates");
   const [dealProcess, setDealProcess] = useState("assisted");
   const [termMonths, setTermMonths] = useState("");
+  const [exclusiveMonths, setExclusiveMonths] = useState("");
+  const [exclusiveRate, setExclusiveRate] = useState("");
   const [appCopy, setAppCopy] = useState(null);
   const [extCopy, setExtCopy] = useState(null);
   const [exclusiveCopy, setExclusiveCopy] = useState(null);
@@ -1692,12 +1695,13 @@ function LeadsPanel({
   }));
   const termChoices = terms.filter(term => kind === "promo" ? promoSet.has(term.months) : kind === "custom" ? !promoSet.has(term.months) : false);
   const selectedTerm = termChoices.find(term => String(term.months) === termMonths) ?? termChoices[0];
-  const variant = kind === "promo" ? "promo" : "custom";
+  const variant = kind === "private" ? "exclusive" : kind === "promo" ? "promo" : "custom";
+  const privateMonths = Math.round(Number(exclusiveMonths));
   const appStandard = {
     ...defaultApplicationCopy({
       leadName: name.trim() || "Client",
       company: brand.companyName,
-      months: kind === "promo" ? 0 : selectedTerm?.months ?? 0,
+      months: kind === "private" ? privateMonths || 0 : kind === "promo" ? 0 : selectedTerm?.months ?? 0,
       advisorName: advisor?.name,
       variant
     }),
@@ -1723,13 +1727,20 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: letterCopy
   }) : null;
-  const formLetter = offer && (kind === "promo" || selectedTerm) ? applicationLetter({
+  const formLetter = kind === "private" || (offer && (kind === "promo" || selectedTerm)) ? applicationLetter({
     leadName: name.trim() || "there",
     company: brand.companyName,
-    months: kind === "promo" ? 0 : selectedTerm.months,
-    apy: kind === "promo" ? "" : selectedTerm.apy,
+    months: kind === "private" ? privateMonths || 0 : kind === "promo" ? 0 : selectedTerm.months,
+    apy: kind === "private" ? exclusiveRate : kind === "promo" ? "" : selectedTerm.apy,
     terms: kind === "promo" ? termChoices : undefined,
-    offer,
+    offer: offer || {
+      intro: "",
+      protection: "",
+      finePrint: "",
+      startsOn: "",
+      endsOn: "",
+      tiers: []
+    },
     advisor,
     logo: brand.emailLogo,
     portalUrl: brand.publicDomain,
@@ -1801,7 +1812,7 @@ function LeadsPanel({
     link: previewLink || "#"
   });
   const letter = kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -1878,6 +1889,20 @@ function LeadsPanel({
         setPickedLeads([]);
         setPreviewIndex(0);
         if (kind === "reminder") setReminderCopy(null);else if (kind === "followup") setFollowCopy(null);else if (kind === "exclusive") setExclusiveCopy(null);else if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
+      } else if (kind === "private") {
+        await sendLeadExclusiveApplication({
+          data: {
+            advisorId,
+            name,
+            email,
+            months: Number(exclusiveMonths),
+            apy: exclusiveRate,
+            process: dealProcess
+          }
+        });
+        setNotice(`Exclusive application sent to ${email.trim()}. Only this client can use the term and rate. The link expires in 48 hours.`);
+        setExclusiveMonths("");
+        setExclusiveRate("");
       } else if (kind !== "rates") {
         if (kind === "custom" && !selectedTerm) throw new Error("Choose a term that is not on promotion.");
         if (kind === "promo" && !termChoices.length) throw new Error("Add a promotional term before sending this email.");
@@ -1915,7 +1940,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -1928,7 +1953,7 @@ function LeadsPanel({
       }}>{label}</button>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<form className="mt-6 grid max-w-3xl gap-3" onSubmit={event => void send(event)}><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => {
           setAdvisorId(event.target.value);
           setCopy(null);
-        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{kind === "followup" || kind === "reminder" ? <p className="text-sm text-fg">One application covers every promotional term. Each lead gets a single link and chooses 10-month or 22-month on the form. The link expires in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p> : null}{kind === "custom" || kind === "promo" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
+        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{kind === "followup" || kind === "reminder" ? <p className="text-sm text-fg">One application covers every promotional term. Each lead gets a single link and chooses 10-month or 22-month on the form. The link expires in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p> : null}{kind === "custom" || kind === "promo" || kind === "private" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
           const next = leadOptions.find(item => item.id === event.target.value);
           if (!next || pickedLeads.some(item => item.id === next.id)) return;
           setPickedLeads(current => [...current, next]);
@@ -1952,7 +1977,7 @@ function LeadsPanel({
         }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes every promotional term. The client chooses the term on the form.</p> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
-        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
+        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
               if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
             }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
@@ -2045,7 +2070,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,

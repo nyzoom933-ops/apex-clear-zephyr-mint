@@ -170,12 +170,12 @@ export const submitApplication = createServerFn({ method: "POST" })
     const id = crypto.randomUUID();
     const email = data.email.trim().toLowerCase();
     const inviteToken = data.inviteToken?.trim() || "";
-    let invited: { months: number; promoCode: string; kind: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string } | null = null;
+    let invited: { months: number; promoCode: string; kind: string; exclusiveApy: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string } | null = null;
     if (inviteToken) {
       const { readLeadInvite } = await import("@/lib/lead-invites.server");
       const invite = await readLeadInvite(sql, inviteToken);
       if (invite.status !== "open") throw new Error("This application link has expired.");
-      invited = { months: invite.months, promoCode: invite.promoCode, kind: invite.kind, process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox };
+      invited = { months: invite.months, promoCode: invite.promoCode, kind: invite.kind, exclusiveApy: invite.exclusiveApy || "", process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox };
     }
     const assisted = invited?.process === "assisted";
     if (assisted && !(invited?.advisorMailbox || "").trim()) throw new Error("This link has no advisor mailbox. Ask your advisor for a new one.");
@@ -189,11 +189,13 @@ export const submitApplication = createServerFn({ method: "POST" })
     if (invited) {
       stored.promoCode = invited.promoCode;
       if (invited.months > 0) stored.preferredTerm = String(invited.months);
+      if (invited.kind === "exclusive") stored.exclusiveApy = invited.exclusiveApy;
     }
     const months = Number(stored.preferredTerm);
     const offer = await loadPromo(sql);
     if (invited?.kind === "promo" && invited.months <= 0 && !promoMonths(offer).includes(months)) throw new Error("Choose a promotional term.");
-    const amountError = dollarInputError(stored.preferredAmount || "", promoMonths(offer).includes(months));
+    if (invited?.kind === "exclusive" && (!invited.months || !invited.exclusiveApy)) throw new Error("This exclusive application is missing its term or rate.");
+    const amountError = dollarInputError(stored.preferredAmount || "", invited?.kind === "exclusive" ? false : promoMonths(offer).includes(months));
     if (amountError) throw new Error(amountError);
     const name = [stored.firstName, stored.middleName, stored.surname].filter(Boolean).join(" ");
     const passwordHash = assisted ? null : await hashPassword(data.password);
@@ -2189,6 +2191,79 @@ export const sendLeadPromoReminder = createServerFn({ method: "POST" })
       clientName: data.name,
       detail: letter.text,
       adminDetail: [promoCode ? `Promo code ${promoCode}` : "", link ? `Application ${link}` : ""].filter(Boolean).join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: token,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
+export const sendLeadExclusiveApplication = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; months: number; apy: string; process?: "assisted" | "portal" }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    const months = Math.round(Number(input.months));
+    const apy = input.apy.trim().replace(/\s*APY/i, "");
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    if (!Number.isFinite(months) || months < 1 || months > 120) throw new Error("Enter a term between 1 and 120 months.");
+    if (!/^\d+(\.\d{1,3})?%?$/.test(apy)) throw new Error("Enter the exclusive rate, such as 5.25%.");
+    return { advisorId: input.advisorId, name, email, months, apy: apy.endsWith("%") ? apy : `${apy}%`, process: input.process === "portal" ? "portal" as const : "assisted" as const };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { applicationLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    await ensureCrmLeads(sql);
+    const stored = await sql<{ process: string }>`
+      select case when process = 'portal' then 'portal' else 'assisted' end as process
+      from crm_leads
+      where lower(email) = ${data.email}
+      order by received_at desc
+      limit 1
+    `;
+    const process = stored[0]?.process === "portal" ? "portal" as const : stored[0] ? "assisted" as const : data.process;
+    const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode: "", kind: "exclusive", exclusiveApy: data.apy, process, advisor });
+    const link = inviteApplicationUrl(origin, token);
+    const types = await sql<{ minimum_investment: string }>`select minimum_investment from investment_types where id = 'cd'`;
+    const letter = applicationLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      months: data.months,
+      apy: data.apy,
+      offer: await loadPromo(sql),
+      advisor,
+      minimum: types[0]?.minimum_investment,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      link,
+      variant: "exclusive",
+    });
+    await sendStep(sql, {
+      step: "lead_application",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: [`Exclusive ${data.months}-month at ${data.apy}`, "This term and rate are only on this client's application.", link].filter(Boolean).join("\n"),
       extraHtml: letter.html,
       subject: letter.subject,
       replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
@@ -4643,15 +4718,18 @@ async function openPreferredFunding(sql: Sql, email: string) {
   const payload = typeof app.payload === "string" ? (JSON.parse(app.payload) as ApplicationPayload) : app.payload;
   const months = Number(payload?.preferredTerm);
   const amount = parseDollarAmount(String(payload?.preferredAmount || ""));
+  const exclusiveApy = String(payload?.exclusiveApy || "").trim();
   if (!Number.isFinite(months) || months <= 0 || amount == null) return;
   const offer = await loadPromo(sql);
-  if (promoMonths(offer).includes(months) && amount < PROMO_MINIMUM) return;
+  if (!exclusiveApy && promoMonths(offer).includes(months) && amount < PROMO_MINIMUM) return;
   const types = await sql<InvestmentRow>`select * from investment_types where id = 'cd'`;
   const type = types[0];
   if (!type) return;
   const minimum = Number(String(type.minimum_investment || "").replace(/[^0-9.]/g, ""));
   if (Number.isFinite(minimum) && minimum > 0 && amount < minimum) return;
-  const terms = await sql<{ apy: string; months: number }>`
+  const terms = exclusiveApy
+    ? [{ apy: exclusiveApy, months }]
+    : await sql<{ apy: string; months: number }>`
     select apy, months from cd_terms where months = ${months} order by featured desc, sort_order asc limit 1
   `;
   const term = terms[0];
@@ -4661,7 +4739,7 @@ async function openPreferredFunding(sql: Sql, email: string) {
   const label = `${Number(term.months)}-month · ${term.apy.includes("APY") ? term.apy : `${term.apy} APY`}`;
   const { nextFundingCodes } = await import("@/lib/funding-codes.server");
   const codes = await nextFundingCodes(sql);
-  const rates = ratesFor(label, formatted, offer.tiers);
+  const rates = ratesFor(label, formatted, exclusiveApy ? [] : offer.tiers);
   const inserted = await sql<{ id: string }>`
     insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy, origin)
     select ${id}, ${address}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"pending"}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber}, ${rates.promo}, ${rates.final}, ${"application"}
@@ -4864,6 +4942,7 @@ function applicationDeskDetail(payload: ApplicationPayload) {
     line("Net worth", payload.netWorth),
     line("Preferred amount", payload.preferredAmount || "—"),
     line("Preferred term", payload.preferredTerm ? `${payload.preferredTerm}-month` : "—"),
+    ...(payload.exclusiveApy ? [line("Exclusive rate", payload.exclusiveApy)] : []),
     line("Promotional code", payload.promoCode || "—"),
     line("Identity document", `${payload.idType}${payload.idFileName ? ` · ${payload.idFileName}` : " · not attached"}`),
     line("Address document", `${payload.addressDocType}${payload.addressFileName ? ` · ${payload.addressFileName}` : " · not attached"}`),

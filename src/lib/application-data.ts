@@ -180,6 +180,7 @@ export const EMPTY_FORM = {
   preferredAmount: "",
   preferredTerm: "",
   promoCode: "",
+  exclusiveApy: "",
   inviteToken: "",
   idType: "Passport",
   addressDocType: "Bank or credit-card statement",

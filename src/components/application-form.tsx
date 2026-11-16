@@ -108,6 +108,7 @@ export function ApplicationForm() {
   const [inviteProcess, setInviteProcess] = useState("");
   const [inviteToken, setInviteToken] = useState("");
   const [inviteMonths, setInviteMonths] = useState(0);
+  const [inviteExclusive, setInviteExclusive] = useState(null);
   const [inviteRequested, setInviteRequested] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const [requestError, setRequestError] = useState("");
@@ -134,6 +135,7 @@ export function ApplicationForm() {
       setForm({ ...draft, preferredTerm: term || draft.preferredTerm, promoCode: "", inviteToken: "" });
       setInviteKind("");
       setInviteProcess("");
+      setInviteExclusive(null);
       setInviteGate("none");
       setReady(true);
       return;
@@ -164,6 +166,7 @@ export function ApplicationForm() {
         });
         setInviteKind(result.kind || "");
         setInviteProcess(result.process || "portal");
+        setInviteExclusive(result.kind === "exclusive" && Number(result.months) > 0 && result.exclusiveApy ? { months: Number(result.months), apy: result.exclusiveApy } : null);
         setInviteGate("open");
         setReady(true);
       })
@@ -401,7 +404,7 @@ export function ApplicationForm() {
             {step === 2 ? <Address form={form} patch={patch} /> : null}
             {step === 3 ? (
               <div className="grid min-w-0 gap-10">
-                <Preference form={form} patch={patch} terms={terms} offer={offer} locked={inviteGate === "open" && inviteMonths > 0} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0} showPromo={inviteGate === "open" && inviteKind === "promo"} codeLocked={inviteGate === "open"} />
+                <Preference form={form} patch={patch} terms={terms} offer={offer} exclusive={inviteExclusive} locked={inviteGate === "open" && (inviteMonths > 0 || Boolean(inviteExclusive))} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !inviteExclusive} showPromo={inviteGate === "open" && inviteKind === "promo" && !inviteExclusive} codeLocked={inviteGate === "open"} />
                 <Financial form={form} patch={patch} />
                 <Funding form={form} patch={patch} />
               </div>
@@ -612,6 +615,7 @@ function Preference({
   promoOnly = false,
   showPromo = false,
   codeLocked = false,
+  exclusive = null,
 }: {
   form: FormState;
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
@@ -621,11 +625,15 @@ function Preference({
   promoOnly?: boolean;
   showPromo?: boolean;
   codeLocked?: boolean;
+  exclusive?: { months: number; apy: string } | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
-  const promo = new Set(showPromo || promoOnly ? promoMonths(offer) : []);
-  const ordered = locked
+  const promo = new Set(exclusive ? [] : showPromo || promoOnly ? promoMonths(offer) : []);
+  const exclusiveTerm = exclusive ? { id: "exclusive", months: exclusive.months, apy: exclusive.apy, featured: false } as CdTerm : null;
+  const ordered = exclusiveTerm
+    ? [exclusiveTerm]
+    : locked
     ? terms.filter((term) => String(term.months) === form.preferredTerm)
     : [...terms]
         .filter((term) => !promoOnly || promo.has(term.months))
@@ -644,7 +652,7 @@ function Preference({
 
   return (
     <div className="grid min-w-0 max-w-full gap-5">
-      <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : promoOnly ? "Choose the promotional term. The code from your email stays fixed." : "Choose a term and the amount you expect to invest."} />
+      <SectionIntro eyebrow="Section" title="Preferred certificate" body={exclusive ? "This term and rate were prepared for you. They stay fixed on this application." : locked ? "This term and promotional code come from your email link. They stay fixed for this application." : promoOnly ? "Choose the promotional term. The code from your email stays fixed." : "Choose a term and the amount you expect to invest."} />
       {shown.length === 0 ? (
         <p className="text-sm text-fg">No certificate terms are available right now.</p>
       ) : locked ? (
@@ -653,9 +661,9 @@ function Preference({
             const isPromo = promo.has(term.months);
             return (
               <div key={term.id} className="relative mt-3 flex min-h-40 max-w-sm flex-col rounded-xl border border-action bg-white px-5 pt-12 pb-5 text-left">
-                {term.featured || isPromo ? (
+                {term.featured || isPromo || exclusive ? (
                   <span className="absolute -top-3 left-4 flex flex-col items-start gap-1">
-                    {isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
+                    {exclusive ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Exclusive rate</span> : isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
                     {term.featured ? <span className="inline-flex rounded-md bg-action px-2 py-1 text-xs font-semibold text-white">Featured APY</span> : null}
                   </span>
                 ) : null}
