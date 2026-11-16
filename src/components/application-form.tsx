@@ -107,6 +107,7 @@ export function ApplicationForm() {
   const [inviteKind, setInviteKind] = useState("");
   const [inviteProcess, setInviteProcess] = useState("");
   const [inviteToken, setInviteToken] = useState("");
+  const [inviteMonths, setInviteMonths] = useState(0);
   const [inviteRequested, setInviteRequested] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const [requestError, setRequestError] = useState("");
@@ -153,9 +154,10 @@ export function ApplicationForm() {
           return;
         }
         const first = result.name.split(" ")[0] || "";
+        setInviteMonths(Number(result.months) || 0);
         setForm({
           ...draft,
-          preferredTerm: String(result.months),
+          preferredTerm: Number(result.months) > 0 ? String(result.months) : "",
           promoCode: result.promoCode,
           inviteToken: invite,
           firstName: draft.firstName || first,
@@ -203,6 +205,7 @@ export function ApplicationForm() {
 
   async function onContinue() {
     const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)), inviteProcess === "assisted");
+    if (step === 3 && inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !promoMonths(offer).includes(Number(form.preferredTerm))) nextErrors.push("Choose a promotional term.");
     if (nextErrors.length) {
       setErrors(nextErrors);
       cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -398,7 +401,7 @@ export function ApplicationForm() {
             {step === 2 ? <Address form={form} patch={patch} /> : null}
             {step === 3 ? (
               <div className="grid min-w-0 gap-10">
-                <Preference form={form} patch={patch} terms={terms} offer={offer} locked={inviteGate === "open"} showPromo={inviteGate === "open" && inviteKind === "promo"} />
+                <Preference form={form} patch={patch} terms={terms} offer={offer} locked={inviteGate === "open" && inviteMonths > 0} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0} showPromo={inviteGate === "open" && inviteKind === "promo"} codeLocked={inviteGate === "open"} />
                 <Financial form={form} patch={patch} />
                 <Funding form={form} patch={patch} />
               </div>
@@ -606,21 +609,27 @@ function Preference({
   terms,
   offer,
   locked = false,
+  promoOnly = false,
   showPromo = false,
+  codeLocked = false,
 }: {
   form: FormState;
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   terms: CdTerm[];
   offer: PromoOffer;
   locked?: boolean;
+  promoOnly?: boolean;
   showPromo?: boolean;
+  codeLocked?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
-  const promo = new Set(showPromo ? promoMonths(offer) : []);
+  const promo = new Set(showPromo || promoOnly ? promoMonths(offer) : []);
   const ordered = locked
     ? terms.filter((term) => String(term.months) === form.preferredTerm)
-    : [...terms].sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
+    : [...terms]
+        .filter((term) => !promoOnly || promo.has(term.months))
+        .sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
   const months = Number(form.preferredTerm);
   const shown = ordered.length > 0 || !locked || !months ? ordered : [{ id: "invite", months, apy: "—", featured: false } as CdTerm];
   const amount = Number(form.preferredAmount.replace(/[^0-9.]/g, ""));
@@ -635,7 +644,7 @@ function Preference({
 
   return (
     <div className="grid min-w-0 max-w-full gap-5">
-      <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : "Choose a term and the amount you expect to invest."} />
+      <SectionIntro eyebrow="Section" title="Preferred certificate" body={locked ? "This term and promotional code come from your email link. They stay fixed for this application." : promoOnly ? "Choose the promotional term. The code from your email stays fixed." : "Choose a term and the amount you expect to invest."} />
       {shown.length === 0 ? (
         <p className="text-sm text-fg">No certificate terms are available right now.</p>
       ) : locked ? (
@@ -712,7 +721,7 @@ function Preference({
         </div>
       )}
       {showPromo ? <Field label="Promotional code">
-        <input className={controlClass} value={form.promoCode} placeholder="Optional" readOnly={locked} onChange={(event) => patch("promoCode", event.target.value)} />
+        <input className={controlClass} value={form.promoCode} placeholder="Optional" readOnly={codeLocked || locked} onChange={(event) => patch("promoCode", event.target.value)} />
       </Field> : null}
       <Field label="Preferred investment amount" hint={promo.has(months) ? "Promotional certificates start at $100,000. Enter 100000 or 100,000." : "Enter 100000 or 100,000. A comma must separate thousands."}>
         <input

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
-import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, defaultApplicationCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
+import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
 import {
   adminLogin,
   adminLogout,
@@ -64,9 +64,12 @@ import {
   saveDeskLogin,
   sendLeadIntro,
   sendLeadExtension,
+  sendLeadExclusive,
   sendLeadHtr,
   sendLeadFollowup,
+  sendLeadPromoReminder,
   sendLeadApplication,
+  resendOpenApplication,
   updateFunding,
   downloadInvoicePdf,
   previewAdvisorInvoice,
@@ -1598,9 +1601,10 @@ function LeadsPanel({
   const [termMonths, setTermMonths] = useState("");
   const [appCopy, setAppCopy] = useState(null);
   const [extCopy, setExtCopy] = useState(null);
+  const [exclusiveCopy, setExclusiveCopy] = useState(null);
   const [htrCopy, setHtrCopy] = useState(null);
   const [followCopy, setFollowCopy] = useState(null);
-  const [followMonths, setFollowMonths] = useState([]);
+  const [reminderCopy, setReminderCopy] = useState(null);
   const [promoCode] = useState(() => {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const bytes = crypto.getRandomValues(new Uint8Array(6));
@@ -1663,13 +1667,7 @@ function LeadsPanel({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [email]);
-  useEffect(() => {
-    if (!terms.length || !offer) return;
-    const promo = new Set(promoMonths(offer));
-    const next = terms.filter(term => promo.has(term.months) && (term.months === 10 || term.months === 22)).map(term => term.months);
-    setFollowMonths(current => current.length ? current : next);
-  }, [terms, offer]);
-  const bulk = kind === "rates" || kind === "extension" || kind === "htr" || kind === "followup";
+  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder";
   const previewAt = pickedLeads.length ? Math.min(previewIndex, pickedLeads.length - 1) : 0;
   const previewLead = pickedLeads[previewAt] || null;
   const activeName = bulk ? previewLead?.name || "" : name;
@@ -1699,7 +1697,7 @@ function LeadsPanel({
     ...defaultApplicationCopy({
       leadName: name.trim() || "Client",
       company: brand.companyName,
-      months: selectedTerm?.months ?? 0,
+      months: kind === "promo" ? 0 : selectedTerm?.months ?? 0,
       advisorName: advisor?.name,
       variant
     }),
@@ -1725,11 +1723,12 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: letterCopy
   }) : null;
-  const formLetter = offer && selectedTerm ? applicationLetter({
+  const formLetter = offer && (kind === "promo" || selectedTerm) ? applicationLetter({
     leadName: name.trim() || "there",
     company: brand.companyName,
-    months: selectedTerm.months,
-    apy: selectedTerm.apy,
+    months: kind === "promo" ? 0 : selectedTerm.months,
+    apy: kind === "promo" ? "" : selectedTerm.apy,
+    terms: kind === "promo" ? termChoices : undefined,
     offer,
     advisor,
     logo: brand.emailLogo,
@@ -1750,6 +1749,20 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: extensionCopy
   });
+  const exclusiveStandard = defaultExclusiveCopy();
+  const exclusiveText = exclusiveCopy ?? exclusiveStandard;
+  const exclusiveMail = exclusiveLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    terms,
+    offer: offer ?? { intro: "", protection: "", finePrint: "", startsOn: "", endsOn: "", tiers: [] },
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    minimum: "$100,000",
+    copy: exclusiveText
+  });
   const htrStandard = defaultHtrCopy();
   const htrText = htrCopy ?? htrStandard;
   const htrMail = htrLetter({
@@ -1761,7 +1774,6 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: htrText
   });
-  const followChoices = terms.filter(term => promoSet.has(term.months) && (term.months === 10 || term.months === 22));
   const followStandard = { ...defaultFollowupCopy(), promoCode };
   const followText = followCopy ?? followStandard;
   const followMail = followupLetter({
@@ -1773,14 +1785,23 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: followText,
     promoCode: followText.promoCode || promoCode,
-    links: followChoices.filter(term => followMonths.includes(term.months)).map(term => ({
-      months: term.months,
-      apy: term.apy,
-      url: previewLink || "#"
-    }))
+    link: previewLink || "#"
   });
-  const letter = kind === "followup" ? followMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : "lead_intro", "client", {
+  const reminderStandard = { ...defaultPromoReminderCopy(), promoCode };
+  const reminderText = reminderCopy ?? reminderStandard;
+  const reminderMail = promoReminderLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    copy: reminderText,
+    promoCode: reminderText.promoCode || promoCode,
+    link: previewLink || "#"
+  });
+  const letter = kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -1791,26 +1812,31 @@ function LeadsPanel({
     advisorStyle: emailStyles.advisor,
     emailColors: emailStyles.colors
   }) : null;
-  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : applicationCopy.subject;
+  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : applicationCopy.subject;
   async function send(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     setPending(true);
     try {
-      if (kind === "extension" || kind === "rates" || kind === "htr" || kind === "followup") {
-        if (kind === "followup" && !followMonths.length) throw new Error("Choose a 10-month or 22-month term.");
+      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder") {
         if (!pickedLeads.length) throw new Error("Choose at least one lead.");
         let sent = 0;
         const failed = [];
         for (const lead of pickedLeads) {
           try {
-            if (kind === "followup") await sendLeadFollowup({
+            if (kind === "reminder") await sendLeadPromoReminder({
               data: {
                 advisorId,
                 name: lead.name,
                 email: lead.email,
-                months: followMonths,
+                copy: reminderCopy
+              }
+            });else if (kind === "followup") await sendLeadFollowup({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
                 copy: followText
               }
             });else if (kind === "htr") await sendLeadHtr({
@@ -1819,6 +1845,13 @@ function LeadsPanel({
                 name: lead.name,
                 email: lead.email,
                 copy: htrCopy
+              }
+            });else if (kind === "exclusive") await sendLeadExclusive({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
+                copy: exclusiveCopy
               }
             });else if (kind === "extension") await sendLeadExtension({
               data: {
@@ -1844,15 +1877,16 @@ function LeadsPanel({
         setNotice(sent === 1 ? `Sent to ${pickedLeads[0]?.email || "the lead"}.` : `Sent to ${sent} leads.`);
         setPickedLeads([]);
         setPreviewIndex(0);
-        if (kind === "followup") setFollowCopy(null);else if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
+        if (kind === "reminder") setReminderCopy(null);else if (kind === "followup") setFollowCopy(null);else if (kind === "exclusive") setExclusiveCopy(null);else if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
       } else if (kind !== "rates") {
-        if (!selectedTerm) throw new Error(kind === "promo" ? "Choose a promotional term." : "Choose a term that is not on promotion.");
+        if (kind === "custom" && !selectedTerm) throw new Error("Choose a term that is not on promotion.");
+        if (kind === "promo" && !termChoices.length) throw new Error("Add a promotional term before sending this email.");
         await sendLeadApplication({
           data: {
             advisorId,
             name,
             email,
-            months: selectedTerm.months,
+            months: kind === "promo" ? 0 : selectedTerm.months,
             kind,
             process: dealProcess,
             copy: applicationCopy
@@ -1881,18 +1915,20 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
         setExtCopy(null);
+        setExclusiveCopy(null);
         setHtrCopy(null);
         setFollowCopy(null);
+        setReminderCopy(null);
         setTermMonths("");
       }}>{label}</button>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<form className="mt-6 grid max-w-3xl gap-3" onSubmit={event => void send(event)}><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => {
           setAdvisorId(event.target.value);
           setCopy(null);
-        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{kind === "followup" ? <div><p className="text-sm font-semibold text-primary">Application forms</p><div className="mt-2 flex flex-wrap gap-2">{followChoices.length ? followChoices.map(term => <label key={term.id} className="flex min-h-11 items-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-primary"><input type="checkbox" checked={followMonths.includes(term.months)} onChange={event => setFollowMonths(current => event.target.checked ? [...new Set([...current, term.months])] : current.filter(months => months !== term.months))} />{term.months}-month · {term.apy}</label>) : <p className="text-sm text-fg">No 10-month or 22-month promotional term is set.</p>}</div><p className="mt-2 text-sm text-fg">Select several leads. Each one receives a personal link for every term you check. The links expire in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p></div> : null}{kind === "custom" || kind === "promo" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
+        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{kind === "followup" || kind === "reminder" ? <p className="text-sm text-fg">One application covers every promotional term. Each lead gets a single link and chooses 10-month or 22-month on the form. The link expires in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p> : null}{kind === "custom" || kind === "promo" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
           const next = leadOptions.find(item => item.id === event.target.value);
           if (!next || pickedLeads.some(item => item.id === next.id)) return;
           setPickedLeads(current => [...current, next]);
@@ -1913,11 +1949,11 @@ function LeadsPanel({
           setAppCopy(null);
           setLeadQuery("");
           setLeadOptions([]);
-        }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "custom" || kind === "promo" ? <label className="block text-sm"><span className="font-semibold text-primary">{kind === "promo" ? "Promotional term" : "Custom term"}</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
+        }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes every promotional term. The client chooses the term on the form.</p> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
         }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
-              if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
+              if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
             }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
             ...letterCopy,
@@ -1967,7 +2003,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Closing" value={extensionCopy.closing} onChange={closing => setExtCopy({
             ...extensionCopy,
             closing
-          })} rows={2} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExtCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "htr" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={htrText.subject} onChange={next => setHtrCopy({
+          })} rows={2} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExtCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "exclusive" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={exclusiveText.subject} onChange={subject => setExclusiveCopy({ ...exclusiveText, subject })} /><LetterField label="Title" value={exclusiveText.title} onChange={title => setExclusiveCopy({ ...exclusiveText, title })} /><LetterField label="Yield line" value={exclusiveText.yieldLine} onChange={yieldLine => setExclusiveCopy({ ...exclusiveText, yieldLine })} /><LetterField label="Opening" value={exclusiveText.intro} onChange={intro => setExclusiveCopy({ ...exclusiveText, intro })} rows={4} /><LetterField label="Terms" value={exclusiveText.both} onChange={both => setExclusiveCopy({ ...exclusiveText, both })} rows={3} /><LetterField label="Rate enhancements" value={exclusiveText.enhance} onChange={enhance => setExclusiveCopy({ ...exclusiveText, enhance })} rows={3} /><LetterField label="Offer window" value={exclusiveText.windowNote} onChange={windowNote => setExclusiveCopy({ ...exclusiveText, windowNote })} rows={3} /><LetterField label="FDIC" value={exclusiveText.fdic} onChange={fdic => setExclusiveCopy({ ...exclusiveText, fdic })} rows={3} /><LetterField label="Ready heading" value={exclusiveText.readyTitle} onChange={readyTitle => setExclusiveCopy({ ...exclusiveText, readyTitle })} /><LetterField label="Ready" value={exclusiveText.ready} onChange={ready => setExclusiveCopy({ ...exclusiveText, ready })} rows={3} /><LetterField label="How to start" value={exclusiveText.start} onChange={start => setExclusiveCopy({ ...exclusiveText, start })} rows={4} /><LetterField label="Availability" value={exclusiveText.urge} onChange={urge => setExclusiveCopy({ ...exclusiveText, urge })} rows={3} /><LetterField label="Closing" value={exclusiveText.closing} onChange={closing => setExclusiveCopy({ ...exclusiveText, closing })} rows={2} /><LetterField label="Disclosures" value={exclusiveText.disclosures} onChange={disclosures => setExclusiveCopy({ ...exclusiveText, disclosures })} rows={8} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold. {{company}}, {{apy}}, {{terms}}, {{window}}, and {{minimum}} fill in from the account.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExclusiveCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "htr" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={htrText.subject} onChange={next => setHtrCopy({
             ...htrText,
             subject: next
           })} /><LetterField label="Opening" value={htrText.opening} onChange={opening => setHtrCopy({
@@ -1982,7 +2018,7 @@ function LeadsPanel({
           })} rows={4} /><LetterField label="Closing" value={htrText.closing} onChange={closing => setHtrCopy({
             ...htrText,
             closing
-          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={followText.subject} onChange={next => setFollowCopy({ ...followText, subject: next })} /><LetterField label="Opening" value={followText.opening} onChange={opening => setFollowCopy({ ...followText, opening })} rows={3} /><LetterField label="Move forward" value={followText.proceed} onChange={proceed => setFollowCopy({ ...followText, proceed })} rows={4} /><LetterField label="Application heading" value={followText.formTitle} onChange={formTitle => setFollowCopy({ ...followText, formTitle })} /><LetterField label="Promotional code" value={followText.promoCode} onChange={promoCode => setFollowCopy({ ...followText, promoCode })} /><LetterField label="Code note" value={followText.codeNote} onChange={codeNote => setFollowCopy({ ...followText, codeNote })} rows={2} /><LetterField label="Expiration heading" value={followText.expireTitle} onChange={expireTitle => setFollowCopy({ ...followText, expireTitle })} /><LetterField label="Expiration" value={followText.expire} onChange={expire => setFollowCopy({ ...followText, expire })} rows={3} /><LetterField label="More time" value={followText.time} onChange={time => setFollowCopy({ ...followText, time })} rows={3} /><LetterField label="Assistance" value={followText.assist} onChange={assist => setFollowCopy({ ...followText, assist })} rows={3} /><LetterField label="Complete soon" value={followText.urge} onChange={urge => setFollowCopy({ ...followText, urge })} rows={3} /><LetterField label="Different term heading" value={followText.changeTitle} onChange={changeTitle => setFollowCopy({ ...followText, changeTitle })} /><LetterField label="Different term" value={followText.change} onChange={change => setFollowCopy({ ...followText, change })} rows={4} /><LetterField label="Not proceeding" value={followText.other} onChange={other => setFollowCopy({ ...followText, other })} rows={4} /><LetterField label="Thank you" value={followText.thanks} onChange={thanks => setFollowCopy({ ...followText, thanks })} rows={3} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setFollowCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "htr" && kind !== "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
+          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "reminder" ? <FollowLetterEditor text={reminderText} onChange={setReminderCopy} onRestore={() => setReminderCopy(null)} /> : null}{editing && kind === "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={followText.subject} onChange={next => setFollowCopy({ ...followText, subject: next })} /><LetterField label="Opening" value={followText.opening} onChange={opening => setFollowCopy({ ...followText, opening })} rows={3} /><LetterField label="Move forward" value={followText.proceed} onChange={proceed => setFollowCopy({ ...followText, proceed })} rows={4} /><LetterField label="Application heading" value={followText.formTitle} onChange={formTitle => setFollowCopy({ ...followText, formTitle })} /><LetterField label="Promotional code" value={followText.promoCode} onChange={promoCode => setFollowCopy({ ...followText, promoCode })} /><LetterField label="Code note" value={followText.codeNote} onChange={codeNote => setFollowCopy({ ...followText, codeNote })} rows={2} /><LetterField label="Expiration heading" value={followText.expireTitle} onChange={expireTitle => setFollowCopy({ ...followText, expireTitle })} /><LetterField label="Expiration" value={followText.expire} onChange={expire => setFollowCopy({ ...followText, expire })} rows={3} /><LetterField label="More time" value={followText.time} onChange={time => setFollowCopy({ ...followText, time })} rows={3} /><LetterField label="Assistance" value={followText.assist} onChange={assist => setFollowCopy({ ...followText, assist })} rows={3} /><LetterField label="Complete soon" value={followText.urge} onChange={urge => setFollowCopy({ ...followText, urge })} rows={3} /><LetterField label="Different term heading" value={followText.changeTitle} onChange={changeTitle => setFollowCopy({ ...followText, changeTitle })} /><LetterField label="Different term" value={followText.change} onChange={change => setFollowCopy({ ...followText, change })} rows={4} /><LetterField label="Not proceeding" value={followText.other} onChange={other => setFollowCopy({ ...followText, other })} rows={4} /><LetterField label="Thank you" value={followText.thanks} onChange={thanks => setFollowCopy({ ...followText, thanks })} rows={3} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setFollowCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "exclusive" && kind !== "htr" && kind !== "followup" && kind !== "reminder" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
             ...applicationCopy,
             subject: next
           })} /><LetterField label="Headline" value={applicationCopy.headline} onChange={headline => setAppCopy({
@@ -2009,7 +2045,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2018,6 +2054,32 @@ function LetterField({
   rows = 1
 }) {
   return <label className="block text-sm"><span className="font-semibold text-primary">{label}</span>{rows > 1 ? <textarea className={`${controlClass} mt-1 min-h-20`} rows={rows} value={value} onChange={event => onChange(event.target.value)} /> : <input className={`${controlClass} mt-1`} value={value} onChange={event => onChange(event.target.value)} />}</label>;
+}
+function FollowLetterEditor({
+  text,
+  onChange,
+  onRestore
+}) {
+  const set = key => value => onChange({ ...text, [key]: value });
+  return <div className="grid gap-3 border-b border-border bg-white px-5 py-4">
+    <LetterField label="Subject" value={text.subject} onChange={set("subject")} />
+    <LetterField label="Opening" value={text.opening} onChange={set("opening")} rows={3} />
+    <LetterField label="Move forward" value={text.proceed} onChange={set("proceed")} rows={4} />
+    <LetterField label="Application heading" value={text.formTitle} onChange={set("formTitle")} />
+    <LetterField label="Promotional code" value={text.promoCode} onChange={set("promoCode")} />
+    <LetterField label="Code note" value={text.codeNote} onChange={set("codeNote")} rows={2} />
+    <LetterField label="Expiration heading" value={text.expireTitle} onChange={set("expireTitle")} />
+    <LetterField label="Expiration" value={text.expire} onChange={set("expire")} rows={3} />
+    <LetterField label="More time" value={text.time} onChange={set("time")} rows={3} />
+    <LetterField label="Assistance" value={text.assist} onChange={set("assist")} rows={3} />
+    <LetterField label="Encouragement" value={text.urge} onChange={set("urge")} rows={3} />
+    <LetterField label="Different term heading" value={text.changeTitle} onChange={set("changeTitle")} />
+    <LetterField label="Different term" value={text.change} onChange={set("change")} rows={4} />
+    <LetterField label="Not proceeding" value={text.other} onChange={set("other")} rows={4} />
+    <LetterField label="Thanks" value={text.thanks} onChange={set("thanks")} rows={2} />
+    <p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold. Leave the promotional code blank to create a different code for each lead.</p>
+    <button type="button" className="w-fit text-sm font-semibold text-action" onClick={onRestore}>Restore the standard text</button>
+  </div>;
 }
 function AdvisorsPanel() {
   const [rows, setRows] = useState(null);
@@ -2639,6 +2701,68 @@ function IntroOpensPanel({
       setPending(false);
     }
   }
+  async function sendExclusive(row) {
+    setError("");
+    setNotice("");
+    if (!row.advisorId) {
+      setError("This open has no advisor, so the exclusive promo cannot be sent.");
+      return;
+    }
+    setPending(true);
+    try {
+      await sendLeadExclusive({
+        data: {
+          advisorId: row.advisorId,
+          name: row.name,
+          email: row.email
+        }
+      });
+      await load();
+      setNotice(`Exclusive promo sent to ${row.email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The exclusive promo could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  async function resendApplication(row) {
+    setError("");
+    setNotice("");
+    setPending(true);
+    try {
+      await resendOpenApplication({ data: { email: row.email } });
+      await load();
+      setNotice(`Application email sent again to ${row.email}. The same link is still open.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The application email could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  async function sendReminder(row) {
+    setError("");
+    setNotice("");
+    if (!row.advisorId) {
+      setError("This open has no advisor, so the reminder cannot be sent.");
+      return;
+    }
+    setPending(true);
+    try {
+      await sendLeadPromoReminder({
+        data: {
+          advisorId: row.advisorId,
+          name: row.name,
+          email: row.email
+        }
+      });
+      await load();
+      setNotice(`Promo application reminder sent to ${row.email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The reminder could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
   async function remove(email) {
     setError("");
     setNotice("");
@@ -2654,7 +2778,7 @@ function IntroOpensPanel({
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-3xl font-semibold">{view === "trash" ? "Trash" : "Opens"}</h1>
-        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "A lead appears after a promo email or an application email. Status badges sit under the step. An expired application link can be sent again."}</p>
+        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "A lead appears after a rates introduction, an exclusive promo, or an application email. Status badges sit under the step. An expired application link can be sent again."}</p>
       </div>
       {view === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button> : null}
     </div>
@@ -2755,7 +2879,10 @@ function IntroOpensPanel({
               advisorId: row.advisorId,
               receivedAt: new Date().toISOString()
             })}>Application email</button> : null}
+            {view === "open" && row.applicationSent && row.inviteStatus === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void resendApplication(row)}>Resend application</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void resendPromo(row)}>Resend promo</button> : null}
+            {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendExclusive(row)}>Exclusive promo</button> : null}
+            {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendReminder(row)}>Promo reminder</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void restore(row.email)}>Restore</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void remove(row.email)}>Remove</button> : <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void trash(row.email)}>Delete</button>}
           </div>

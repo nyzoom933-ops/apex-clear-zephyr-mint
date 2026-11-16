@@ -170,12 +170,12 @@ export const submitApplication = createServerFn({ method: "POST" })
     const id = crypto.randomUUID();
     const email = data.email.trim().toLowerCase();
     const inviteToken = data.inviteToken?.trim() || "";
-    let invited: { months: number; promoCode: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string } | null = null;
+    let invited: { months: number; promoCode: string; kind: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string } | null = null;
     if (inviteToken) {
       const { readLeadInvite } = await import("@/lib/lead-invites.server");
       const invite = await readLeadInvite(sql, inviteToken);
       if (invite.status !== "open") throw new Error("This application link has expired.");
-      invited = { months: invite.months, promoCode: invite.promoCode, process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox };
+      invited = { months: invite.months, promoCode: invite.promoCode, kind: invite.kind, process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox };
     }
     const assisted = invited?.process === "assisted";
     if (assisted && !(invited?.advisorMailbox || "").trim()) throw new Error("This link has no advisor mailbox. Ask your advisor for a new one.");
@@ -187,11 +187,12 @@ export const submitApplication = createServerFn({ method: "POST" })
     const { inviteToken: _inviteToken, ...stored } = payload;
     void _inviteToken;
     if (invited) {
-      stored.preferredTerm = String(invited.months);
       stored.promoCode = invited.promoCode;
+      if (invited.months > 0) stored.preferredTerm = String(invited.months);
     }
     const months = Number(stored.preferredTerm);
     const offer = await loadPromo(sql);
+    if (invited?.kind === "promo" && invited.months <= 0 && !promoMonths(offer).includes(months)) throw new Error("Choose a promotional term.");
     const amountError = dollarInputError(stored.preferredAmount || "", promoMonths(offer).includes(months));
     if (amountError) throw new Error(amountError);
     const name = [stored.firstName, stored.middleName, stored.surname].filter(Boolean).join(" ");
@@ -1825,6 +1826,144 @@ export const sendLeadExtension = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const sendLeadExclusive = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").ExclusiveCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 180),
+          title: clip(input.copy.title, 180),
+          yieldLine: clip(input.copy.yieldLine, 220),
+          intro: clip(input.copy.intro, 900),
+          both: clip(input.copy.both, 700),
+          enhance: clip(input.copy.enhance, 700),
+          windowNote: clip(input.copy.windowNote, 700),
+          fdic: clip(input.copy.fdic, 800),
+          readyTitle: clip(input.copy.readyTitle, 180),
+          ready: clip(input.copy.ready, 700),
+          start: clip(input.copy.start, 800),
+          urge: clip(input.copy.urge, 600),
+          closing: clip(input.copy.closing, 400),
+          codeNote: clip(input.copy.codeNote, 400),
+          promoCode: clip(input.copy.promoCode, 40),
+          disclosures: clip(input.copy.disclosures, 2500),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { exclusiveLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const offer = await loadPromo(sql);
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
+    const types = await sql<{ minimum_investment: string }>`select minimum_investment from investment_types where id = 'cd'`;
+    const rawMinimum = types[0]?.minimum_investment?.trim() || "";
+    const numericMinimum = Number(rawMinimum.replace(/[$,\s]/g, ""));
+    const minimum = rawMinimum.includes("$") ? rawMinimum : Number.isFinite(numericMinimum) && numericMinimum > 0 ? `$${numericMinimum.toLocaleString("en-US")}` : "$100,000";
+    const letter = exclusiveLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      terms: terms.map((term) => ({ months: Number(term.months), apy: term.apy })),
+      offer,
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      minimum,
+      copy: data.copy,
+    });
+    await sendStep(sql, {
+      step: "lead_exclusive",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
+async function uniqueExclusiveCode(sql: Sql, reserved?: Set<string>) {
+  const reservedCodes = reserved ?? new Set<string>();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const code = `CD${randomBytes(3).toString("hex").toUpperCase()}`;
+    if (reservedCodes.has(code)) continue;
+    const taken = await sql<{ promo_code: string }>`select promo_code from lead_invites where upper(promo_code) = ${code} limit 1`;
+    if (taken.length) continue;
+    reservedCodes.add(code);
+    return code;
+  }
+  const code = `CD${randomBytes(5).toString("hex").toUpperCase()}`;
+  reservedCodes.add(code);
+  return code;
+}
+
+async function assignExclusivePromoCodes(sql: Sql) {
+  const notes = await sql<{ id: string; html: string; body: string; related_id: string }>`
+    select id, coalesce(html, '') as html, coalesce(body, '') as body, coalesce(related_id, '') as related_id
+    from notifications
+    where audience = 'client' and step = 'lead_exclusive' and delivery = 'sent'
+    order by created_at asc
+  `;
+  if (!notes.length) return;
+  const invites = await sql<{ token: string; promo_code: string; used_at: string | null }>`
+    select token, coalesce(promo_code, '') as promo_code, used_at from lead_invites
+  `;
+  const byToken = new Map(invites.map((invite) => [invite.token, invite]));
+  const counts = new Map<string, number>();
+  for (const invite of invites) {
+    const code = invite.promo_code.trim().toUpperCase();
+    if (!code) continue;
+    counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  const reserved = new Set(counts.keys());
+  const groups = new Map<string, typeof notes>();
+  for (const note of notes) {
+    const token = /^[a-f0-9]{32,}$/i.test(note.related_id) ? note.related_id : note.html.match(/invite=([a-f0-9]{16,})/i)?.[1] || "";
+    if (!token || !byToken.has(token)) continue;
+    const group = groups.get(token) || [];
+    group.push(note);
+    groups.set(token, group);
+  }
+  for (const [token, group] of groups) {
+    const invite = byToken.get(token);
+    if (!invite || invite.used_at) continue;
+    const current = invite.promo_code.trim().toUpperCase();
+    if (current && (counts.get(current) || 0) <= 1) continue;
+    const next = await uniqueExclusiveCode(sql, reserved);
+    if (current) counts.set(current, (counts.get(current) || 1) - 1);
+    counts.set(next, 1);
+    invite.promo_code = next;
+    await sql`update lead_invites set promo_code = ${next} where token = ${token} and used_at is null`;
+    for (const note of group) {
+      const html = current ? note.html.split(current).join(next) : note.html;
+      const body = current ? note.body.split(current).join(next) : note.body;
+      if (html !== note.html || body !== note.body) await sql`update notifications set html = ${html}, body = ${body} where id = ${note.id}`;
+    }
+  }
+}
+
 export const sendLeadHtr = createServerFn({ method: "POST" })
   .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").HtrCopy | null }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
@@ -1883,14 +2022,12 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
   });
 
 export const sendLeadFollowup = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; months: number[]; copy?: import("@/lib/email-templates").FollowupCopy | null }) => {
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").FollowupCopy | null }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
-    const months = [...new Set((input.months || []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))];
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
     if (!input.advisorId) throw new Error("Select an advisor.");
-    if (!months.length) throw new Error("Choose a 10-month or 22-month term.");
     const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
     const copy = input.copy
       ? {
@@ -1911,7 +2048,7 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
           promoCode: clip(input.copy.promoCode, 40),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, months, copy };
+    return { advisorId: input.advisorId, name, email, copy };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -1931,11 +2068,7 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
     const offer = await loadPromo(sql);
     const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
     const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms`;
-    const byMonths = new Map(terms.map((term) => [Number(term.months), term.apy]));
-    for (const months of data.months) {
-      if (!byMonths.has(months)) throw new Error(`Add the ${months}-month term before sending this letter.`);
-      if (!promoMonths.has(months)) throw new Error(`The ${months}-month term is not on promotion.`);
-    }
+    if (!terms.some((term) => promoMonths.has(Number(term.months)))) throw new Error("Add a promotional term before sending this letter.");
     await ensureCrmLeads(sql);
     const stored = await sql<{ process: string }>`
       select case when process = 'portal' then 'portal' else 'assisted' end as process
@@ -1947,11 +2080,8 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
     const process = stored[0]?.process === "portal" ? "portal" as const : "assisted" as const;
     const promoCode = data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}`;
     const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
-    const links: { months: number; apy: string; url: string }[] = [];
-    for (const months of data.months) {
-      const token = await createLeadInvite(sql, { email: data.email, name: data.name, months, promoCode, kind: "promo", process, advisor });
-      links.push({ months, apy: byMonths.get(months) || "", url: inviteApplicationUrl(origin, token) });
-    }
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: 0, promoCode, kind: "promo", process, advisor });
+    const link = inviteApplicationUrl(origin, token);
     const letter = followupLetter({
       leadName: data.name,
       company: await readCompanyName(sql),
@@ -1961,14 +2091,14 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       copy: data.copy,
       promoCode,
-      links,
+      link,
     });
     await sendStep(sql, {
       step: "lead_followup",
       clientEmail: data.email,
       clientName: data.name,
       detail: letter.text,
-      adminDetail: [promoCode ? `Promo code ${promoCode}` : "", ...links.map((link) => `${link.months}-month ${link.url}`)].filter(Boolean).join("\n"),
+      adminDetail: [promoCode ? `Promo code ${promoCode}` : "", link ? `Application ${link}` : ""].filter(Boolean).join("\n"),
       extraHtml: letter.html,
       subject: letter.subject,
       replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
@@ -1981,16 +2111,106 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const sendLeadPromoReminder = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").FollowupCopy | null }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const copy = input.copy
+      ? {
+          subject: clip(input.copy.subject, 160),
+          opening: clip(input.copy.opening, 900),
+          proceed: clip(input.copy.proceed, 900),
+          formTitle: clip(input.copy.formTitle, 180),
+          expireTitle: clip(input.copy.expireTitle, 180),
+          expire: clip(input.copy.expire, 600),
+          time: clip(input.copy.time, 700),
+          assist: clip(input.copy.assist, 700),
+          urge: clip(input.copy.urge, 700),
+          changeTitle: clip(input.copy.changeTitle, 180),
+          change: clip(input.copy.change, 900),
+          other: clip(input.copy.other, 900),
+          thanks: clip(input.copy.thanks, 400),
+          codeNote: clip(input.copy.codeNote, 400),
+          promoCode: clip(input.copy.promoCode, 40),
+        }
+      : null;
+    return { advisorId: input.advisorId, name, email, copy };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { promoReminderLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    const offer = await loadPromo(sql);
+    const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms`;
+    if (!terms.some((term) => promoMonths.has(Number(term.months)))) throw new Error("Add a promotional term before sending this letter.");
+    await ensureCrmLeads(sql);
+    const stored = await sql<{ process: string }>`
+      select case when process = 'portal' then 'portal' else 'assisted' end as process
+      from crm_leads
+      where lower(email) = ${data.email}
+      order by received_at desc
+      limit 1
+    `;
+    const process = stored[0]?.process === "portal" ? "portal" as const : "assisted" as const;
+    const promoCode = data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}`;
+    const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: 0, promoCode, kind: "promo", process, advisor });
+    const link = inviteApplicationUrl(origin, token);
+    const letter = promoReminderLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      copy: data.copy,
+      promoCode,
+      link,
+    });
+    await sendStep(sql, {
+      step: "lead_promo_reminder",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: [promoCode ? `Promo code ${promoCode}` : "", link ? `Application ${link}` : ""].filter(Boolean).join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: token,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
 export const sendLeadApplication = createServerFn({ method: "POST" })
   .validator((input: { advisorId: string; name: string; email: string; months: number; kind?: "custom" | "promo"; process?: "assisted" | "portal"; copy?: ApplicationCopy | null }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
-    const months = Number(input.months);
     const kind = input.kind === "promo" ? "promo" : "custom";
+    const months = kind === "promo" ? 0 : Number(input.months);
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
     if (!input.advisorId) throw new Error("Select an advisor.");
-    if (!Number.isFinite(months) || months <= 0) throw new Error("Choose a certificate term.");
+    if (kind === "custom" && (!Number.isFinite(months) || months <= 0)) throw new Error("Choose a certificate term.");
     const clip = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
     const copy = input.copy
       ? {
@@ -2019,12 +2239,14 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     if (!found) throw new Error("Select an advisor.");
     const advisor = { ...found, personalPhone: found.personal_phone };
     if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
-    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms where months = ${data.months} limit 1`;
-    if (!terms[0]) throw new Error("Choose a certificate term.");
+    const allTerms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
     const types = await sql<{ minimum_investment: string }>`select minimum_investment from investment_types where id = 'cd'`;
     const offer = await loadPromo(sql);
     const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
-    if (data.kind === "promo" && !promoMonths.has(data.months)) throw new Error("Choose a promotional term.");
+    const promoTerms = allTerms.filter((term) => promoMonths.has(Number(term.months))).map((term) => ({ months: Number(term.months), apy: term.apy }));
+    const chosen = allTerms.find((term) => Number(term.months) === data.months);
+    if (data.kind === "promo" && !promoTerms.length) throw new Error("Add a promotional term before sending this email.");
+    if (data.kind === "custom" && !chosen) throw new Error("Choose a certificate term.");
     if (data.kind === "custom" && promoMonths.has(data.months)) throw new Error("Choose a term that is not on promotion.");
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const origin = settings.find((row) => row.key === "public_domain")?.value || "";
@@ -2046,8 +2268,9 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const letter = applicationLetter({
       leadName: data.name,
       company: await readCompanyName(sql),
-      months: data.months,
-      apy: terms[0].apy,
+      months: kind === "promo" ? 0 : data.months,
+      apy: chosen?.apy || "",
+      terms: kind === "promo" ? promoTerms : undefined,
       offer,
       advisor,
       minimum: types[0]?.minimum_investment,
@@ -2063,7 +2286,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       clientEmail: data.email,
       clientName: data.name,
       detail: letter.text,
-      adminDetail: [`${data.months}-month certificate`, promoCode ? `Promo code ${promoCode}` : "", "Application", link].filter(Boolean).join("\n"),
+      adminDetail: [kind === "promo" ? "Promotional application — client chooses the term" : `${data.months}-month certificate`, promoCode ? `Promo code ${promoCode}` : "", "Application", link].filter(Boolean).join("\n"),
       extraHtml: letter.html,
       subject: letter.subject,
       replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
@@ -2073,6 +2296,124 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
       advisorId: data.advisorId,
     });
     await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
+export const resendOpenApplication = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("That open has no email.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
+    await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
+    const invites = await sql<{ token: string; name: string; months: number; promo_code: string; kind: string; advisor_name: string; advisor_email: string; advisor_mailbox: string; advisor_phone: string; advisor_role: string; advisor_personal_phone: string }>`
+      select token, name, months, promo_code, kind, advisor_name, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_phone, '') as advisor_phone, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone
+      from lead_invites
+      where lower(email) = ${data.email} and used_at is null and expires_at > now()
+      order by created_at desc
+      limit 1
+    `;
+    const invite = invites[0];
+    if (!invite) throw new Error("This application link has expired.");
+    const notes = await sql<{ step: string; subject: string; body: string; html: string; advisor_id: string }>`
+      select step, subject, body, coalesce(html, '') as html, coalesce(advisor_id, '') as advisor_id
+      from notifications
+      where audience = 'client'
+        and lower(recipient) = ${data.email}
+        and step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder')
+        and delivery = 'sent'
+      order by created_at desc
+      limit 1
+    `;
+    const note = notes[0];
+    const advisors = await sql<{ id: string; name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`
+      select id, name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone
+      from advisors
+      where id = ${note?.advisor_id || ""} or (${invite.advisor_mailbox} <> '' and lower(mailbox) = lower(${invite.advisor_mailbox}))
+      order by case when id = ${note?.advisor_id || ""} then 0 else 1 end
+      limit 1
+    `;
+    const advisor = advisors[0];
+    const mailbox = advisor?.mailbox?.trim() || invite.advisor_mailbox.trim();
+    if (!mailbox) throw new Error("Add this advisor's verified mailbox before resending.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    const { inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const link = inviteApplicationUrl(origin, invite.token);
+    const sameLetter = Boolean(note?.html && note.html.includes(invite.token));
+    let step: MailStep = note?.step === "lead_followup" || note?.step === "lead_promo_reminder" || note?.step === "lead_application" || note?.step === "lead_promo" ? note.step : invite.kind === "custom" ? "lead_application" : "lead_promo";
+    let subject = note?.subject || "";
+    let text = note?.body || "";
+    let html = sameLetter ? note.html : "";
+    if (!sameLetter) {
+      const company = await readCompanyName(sql);
+      const logo = settings.find((row) => row.key === "email_logo")?.value || null;
+      const companyPhone = settings.find((row) => row.key === "company_phone")?.value || "";
+      const mailAdvisor = {
+        name: advisor?.name || invite.advisor_name,
+        phone: advisor?.phone || invite.advisor_phone,
+        email: advisor?.email || invite.advisor_email,
+        mailbox,
+        role: advisor?.role || invite.advisor_role,
+        personalPhone: advisor?.personal_phone || invite.advisor_personal_phone,
+      };
+      if (step === "lead_followup" || step === "lead_promo_reminder") {
+        const { followupLetter, promoReminderLetter } = await import("@/lib/email-templates");
+        const letter = step === "lead_promo_reminder"
+          ? promoReminderLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, promoCode: invite.promo_code, link })
+          : followupLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, promoCode: invite.promo_code, link });
+        subject = letter.subject;
+        text = letter.text;
+        html = letter.html;
+      } else {
+        const offer = await loadPromo(sql);
+        const allTerms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
+        const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
+        const months = Number(invite.months) || 0;
+        const chosen = allTerms.find((term) => Number(term.months) === months);
+        const { applicationLetter } = await import("@/lib/email-templates");
+        const letter = applicationLetter({
+          leadName: invite.name || data.email,
+          company,
+          months: invite.kind === "promo" && months <= 0 ? 0 : months,
+          apy: chosen?.apy || "",
+          terms: invite.kind === "promo" ? allTerms.filter((term) => promoMonths.has(Number(term.months))).map((term) => ({ months: Number(term.months), apy: term.apy })) : undefined,
+          offer,
+          advisor: mailAdvisor,
+          logo,
+          portalUrl: origin,
+          companyPhone,
+          link,
+          variant: invite.kind === "custom" ? "custom" : "promo",
+          copy: { subject: "", headline: "", hope: "", ready: "", instruction: "", codeNote: "", followUp: "", thanks: "", promoCode: invite.promo_code },
+        });
+        subject = letter.subject;
+        text = letter.text;
+        html = letter.html;
+        step = invite.kind === "custom" ? "lead_application" : "lead_promo";
+      }
+    }
+    const { sendFromMailbox, sendTelegramNotice } = await import("@/lib/mail.server");
+    const sent = await sendFromMailbox(sql, {
+      to: data.email,
+      subject,
+      text: text || subject,
+      html,
+      fromAddress: mailbox,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor?.email || invite.advisor_email) ? (advisor?.email || invite.advisor_email) : mailbox,
+      replyName: advisor?.name || invite.advisor_name,
+    });
+    if (sent.delivery !== "sent") throw new Error(sent.error || "The application email was not sent.");
+    await sql`
+      insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
+      values (${crypto.randomUUID()}, 'client', ${data.email}, ${step}, ${subject}, ${text}, ${html}, ${invite.token}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${advisor?.id || note?.advisor_id || ""})
+    `;
+    await sendTelegramNotice(sql, `Application resent to ${invite.name || data.email}`, [data.email, subject, link].filter(Boolean).join("\n"));
     return { ok: true as const };
   });
 
@@ -2264,7 +2605,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
   .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
     const from = (input.from || "").slice(0, 10);
     const to = (input.to || "").slice(0, 10);
-    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup"];
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive"];
     const step = allowed.includes(input.step || "") ? input.step || "" : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
     return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
@@ -2309,7 +2650,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join lead_invites i on i.token = n.related_id
       where n.audience = 'client'
-        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup')
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive')
         and n.created_at >= ${start}
         and n.created_at < ${endDate.toISOString()}
       order by n.created_at desc
@@ -2439,7 +2780,7 @@ export const removeIntroOpen = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureOpenTrash(sql);
-    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup') and lower(recipient) = ${data.email}`;
+    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive') and lower(recipient) = ${data.email}`;
     await sql`delete from open_trash where lower(email) = ${data.email}`;
     return { ok: true as const };
   });
@@ -2454,6 +2795,7 @@ async function releaseOpen(sql: Sql, email: string) {
 }
 
 async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string | null; to?: string | null; limit?: number }) {
+  await assignExclusivePromoCodes(sql);
   await ensureCrmLeads(sql);
   await ensureOpenTrash(sql);
   const from = range?.from || null;
@@ -2499,7 +2841,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           from notifications intro
           where intro.audience = 'client'
             and lower(intro.recipient) = lower(n.recipient)
-            and intro.step = 'lead_intro'
+            and intro.step in ('lead_intro', 'lead_exclusive')
             and intro.delivery = 'sent'
           order by intro.created_at desc
           limit 1
@@ -2508,7 +2850,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           select 1 from notifications later
           where later.audience = 'client'
             and lower(later.recipient) = lower(n.recipient)
-            and later.step in ('lead_application', 'lead_promo', 'lead_followup')
+            and later.step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder')
             and later.delivery = 'sent'
         ) as application_sent,
         (
@@ -2516,7 +2858,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           from notifications later
           where later.audience = 'client'
             and lower(later.recipient) = lower(n.recipient)
-            and later.step in ('lead_application', 'lead_promo', 'lead_followup')
+            and later.step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder')
             and later.delivery = 'sent'
           order by later.created_at desc
           limit 1
@@ -2609,7 +2951,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
-      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup') and n.delivery = 'sent'
+      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive') and n.delivery = 'sent'
         and (${trash}::boolean = (
           exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient))
           and not exists (
@@ -2617,7 +2959,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
             where newer.audience = 'client'
               and lower(newer.recipient) = lower(n.recipient)
               and newer.delivery = 'sent'
-              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup')
+              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive')
               and newer.created_at > (select t.created_at from open_trash t where lower(t.email) = lower(n.recipient))
           )
         ))
