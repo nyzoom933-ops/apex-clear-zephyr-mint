@@ -24,7 +24,7 @@ type InviteRow = {
 
 export async function createLeadInvite(
   sql: Sql,
-  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo" | "exclusive"; process?: "assisted" | "portal"; exclusiveApy?: string; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
+  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo" | "exclusive" | "cdars"; process?: "assisted" | "portal"; exclusiveApy?: string; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
 ) {
   const token = randomBytes(24).toString("hex");
   const expiresAt = new Date(Date.now() + 48 * HOUR).toISOString();

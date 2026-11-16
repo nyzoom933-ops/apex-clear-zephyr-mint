@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
-import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
+import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, cdarsIntroLetter, cdarsLetter, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
 import {
   adminLogin,
   adminLogout,
@@ -65,6 +65,8 @@ import {
   sendLeadIntro,
   sendLeadExtension,
   sendLeadExclusive,
+  sendLeadCdars,
+  sendLeadCdarsIntro,
   sendLeadHtr,
   sendLeadFollowup,
   sendLeadPromoReminder,
@@ -79,6 +81,7 @@ import {
   saveInvoiceBilling,
   approveInvoice,
   getCdTerms,
+  getCdarsRates,
   getInvestmentTypes,
   getPromo,
   DEFAULT_THEME,
@@ -1602,6 +1605,12 @@ function LeadsPanel({
   const [termMonths, setTermMonths] = useState("");
   const [exclusiveMonths, setExclusiveMonths] = useState("");
   const [exclusiveRate, setExclusiveRate] = useState("");
+  const [cdarsRates, setCdarsRates] = useState([
+    { months: 1, apy: "" },
+    { months: 3, apy: "" },
+    { months: 6, apy: "" },
+    { months: 12, apy: "" }
+  ]);
   const [appCopy, setAppCopy] = useState(null);
   const [extCopy, setExtCopy] = useState(null);
   const [exclusiveCopy, setExclusiveCopy] = useState(null);
@@ -1638,6 +1647,11 @@ function LeadsPanel({
     }).catch(() => setError("Lead email could not be prepared."));
   }, []);
   useEffect(() => {
+    void getCdarsRates().then(rates => {
+      if (rates?.length) setCdarsRates(rates);
+    }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
     const query = leadQuery.trim();
     if (query.length < 2) {
       setLeadOptions([]);
@@ -1670,7 +1684,7 @@ function LeadsPanel({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [email]);
-  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder";
+  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro";
   const previewAt = pickedLeads.length ? Math.min(previewIndex, pickedLeads.length - 1) : 0;
   const previewLead = pickedLeads[previewAt] || null;
   const activeName = bulk ? previewLead?.name || "" : name;
@@ -1811,8 +1825,27 @@ function LeadsPanel({
     promoCode: reminderText.promoCode || promoCode,
     link: previewLink || "#"
   });
-  const letter = kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
+  const cdarsMail = cdarsLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    terms: cdarsRates,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    link: previewLink || "#"
+  });
+  const cdarsIntroMail = cdarsIntroLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    terms: cdarsRates,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone
+  });
+  const letter = kind === "cdars-intro" ? cdarsIntroMail : kind === "cdars" ? cdarsMail : kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "cdars" ? "lead_cdars" : kind === "cdars-intro" ? "lead_cdars_intro" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -1823,20 +1856,34 @@ function LeadsPanel({
     advisorStyle: emailStyles.advisor,
     emailColors: emailStyles.colors
   }) : null;
-  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : applicationCopy.subject;
+  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : kind === "cdars" ? cdarsMail.subject : kind === "cdars-intro" ? cdarsIntroMail.subject : applicationCopy.subject;
   async function send(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     setPending(true);
     try {
-      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder") {
+      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro") {
         if (!pickedLeads.length) throw new Error("Choose at least one lead.");
         let sent = 0;
         const failed = [];
         for (const lead of pickedLeads) {
           try {
-            if (kind === "reminder") await sendLeadPromoReminder({
+            if (kind === "cdars-intro") await sendLeadCdarsIntro({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
+                rates: cdarsRates
+              }
+            });else if (kind === "cdars") await sendLeadCdars({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
+                rates: cdarsRates
+              }
+            });else if (kind === "reminder") await sendLeadPromoReminder({
               data: {
                 advisorId,
                 name: lead.name,
@@ -1940,7 +1987,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -1977,7 +2024,8 @@ function LeadsPanel({
         }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes every promotional term. The client chooses the term on the form.</p> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
-        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => {
+        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{kind === "cdars" || kind === "cdars-intro" ? <div className="grid gap-3 sm:grid-cols-4"><p className="text-sm text-fg sm:col-span-4">{kind === "cdars-intro" ? "This introduction explains CDARS and does not include an application link. Filled rates appear in the letter. Blank rates are left out." : "CDARS places $500,000 to $50 million across FDIC-insured banks. Set the rate for each term. The client chooses 1, 3, 6, or 12 months on the application. The link expires in 48 hours."}</p>{cdarsRates.map(rate => <label key={rate.months} className="block text-sm"><span className="font-semibold text-primary">{rate.months}-month APY</span><input className={`${controlClass} mt-1`} value={rate.apy} placeholder="4.25%" onChange={event => setCdarsRates(current => current.map(item => item.months === rate.months ? { ...item, apy: event.target.value } : item))} /></label>)}</div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className={"min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" + (kind === "cdars" || kind === "cdars-intro" ? " hidden" : "")} onClick={() => {
+              if (kind === "cdars" || kind === "cdars-intro") return;
               if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
             }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
@@ -2043,7 +2091,7 @@ function LeadsPanel({
           })} rows={4} /><LetterField label="Closing" value={htrText.closing} onChange={closing => setHtrCopy({
             ...htrText,
             closing
-          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "reminder" ? <FollowLetterEditor text={reminderText} onChange={setReminderCopy} onRestore={() => setReminderCopy(null)} /> : null}{editing && kind === "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={followText.subject} onChange={next => setFollowCopy({ ...followText, subject: next })} /><LetterField label="Opening" value={followText.opening} onChange={opening => setFollowCopy({ ...followText, opening })} rows={3} /><LetterField label="Move forward" value={followText.proceed} onChange={proceed => setFollowCopy({ ...followText, proceed })} rows={4} /><LetterField label="Application heading" value={followText.formTitle} onChange={formTitle => setFollowCopy({ ...followText, formTitle })} /><LetterField label="Promotional code" value={followText.promoCode} onChange={promoCode => setFollowCopy({ ...followText, promoCode })} /><LetterField label="Code note" value={followText.codeNote} onChange={codeNote => setFollowCopy({ ...followText, codeNote })} rows={2} /><LetterField label="Expiration heading" value={followText.expireTitle} onChange={expireTitle => setFollowCopy({ ...followText, expireTitle })} /><LetterField label="Expiration" value={followText.expire} onChange={expire => setFollowCopy({ ...followText, expire })} rows={3} /><LetterField label="More time" value={followText.time} onChange={time => setFollowCopy({ ...followText, time })} rows={3} /><LetterField label="Assistance" value={followText.assist} onChange={assist => setFollowCopy({ ...followText, assist })} rows={3} /><LetterField label="Complete soon" value={followText.urge} onChange={urge => setFollowCopy({ ...followText, urge })} rows={3} /><LetterField label="Different term heading" value={followText.changeTitle} onChange={changeTitle => setFollowCopy({ ...followText, changeTitle })} /><LetterField label="Different term" value={followText.change} onChange={change => setFollowCopy({ ...followText, change })} rows={4} /><LetterField label="Not proceeding" value={followText.other} onChange={other => setFollowCopy({ ...followText, other })} rows={4} /><LetterField label="Thank you" value={followText.thanks} onChange={thanks => setFollowCopy({ ...followText, thanks })} rows={3} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setFollowCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "exclusive" && kind !== "htr" && kind !== "followup" && kind !== "reminder" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
+          })} rows={3} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setHtrCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "reminder" ? <FollowLetterEditor text={reminderText} onChange={setReminderCopy} onRestore={() => setReminderCopy(null)} /> : null}{editing && kind === "followup" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={followText.subject} onChange={next => setFollowCopy({ ...followText, subject: next })} /><LetterField label="Opening" value={followText.opening} onChange={opening => setFollowCopy({ ...followText, opening })} rows={3} /><LetterField label="Move forward" value={followText.proceed} onChange={proceed => setFollowCopy({ ...followText, proceed })} rows={4} /><LetterField label="Application heading" value={followText.formTitle} onChange={formTitle => setFollowCopy({ ...followText, formTitle })} /><LetterField label="Promotional code" value={followText.promoCode} onChange={promoCode => setFollowCopy({ ...followText, promoCode })} /><LetterField label="Code note" value={followText.codeNote} onChange={codeNote => setFollowCopy({ ...followText, codeNote })} rows={2} /><LetterField label="Expiration heading" value={followText.expireTitle} onChange={expireTitle => setFollowCopy({ ...followText, expireTitle })} /><LetterField label="Expiration" value={followText.expire} onChange={expire => setFollowCopy({ ...followText, expire })} rows={3} /><LetterField label="More time" value={followText.time} onChange={time => setFollowCopy({ ...followText, time })} rows={3} /><LetterField label="Assistance" value={followText.assist} onChange={assist => setFollowCopy({ ...followText, assist })} rows={3} /><LetterField label="Complete soon" value={followText.urge} onChange={urge => setFollowCopy({ ...followText, urge })} rows={3} /><LetterField label="Different term heading" value={followText.changeTitle} onChange={changeTitle => setFollowCopy({ ...followText, changeTitle })} /><LetterField label="Different term" value={followText.change} onChange={change => setFollowCopy({ ...followText, change })} rows={4} /><LetterField label="Not proceeding" value={followText.other} onChange={other => setFollowCopy({ ...followText, other })} rows={4} /><LetterField label="Thank you" value={followText.thanks} onChange={thanks => setFollowCopy({ ...followText, thanks })} rows={3} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setFollowCopy(null)}>Restore the standard text</button></div> : null}{editing && kind !== "rates" && kind !== "extension" && kind !== "exclusive" && kind !== "htr" && kind !== "followup" && kind !== "reminder" && kind !== "cdars" && kind !== "cdars-intro" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={applicationCopy.subject} onChange={next => setAppCopy({
             ...applicationCopy,
             subject: next
           })} /><LetterField label="Headline" value={applicationCopy.headline} onChange={headline => setAppCopy({
@@ -2070,7 +2118,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2788,6 +2836,30 @@ function IntroOpensPanel({
       setPending(false);
     }
   }
+  async function sendCdars(row) {
+    setError("");
+    setNotice("");
+    if (!row.advisorId) {
+      setError("This open has no advisor, so the CDARS email cannot be sent.");
+      return;
+    }
+    setPending(true);
+    try {
+      await sendLeadCdars({
+        data: {
+          advisorId: row.advisorId,
+          name: row.name,
+          email: row.email
+        }
+      });
+      await load();
+      setNotice(`CDARS application sent to ${row.email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The CDARS email could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
   async function remove(email) {
     setError("");
     setNotice("");
@@ -2908,6 +2980,7 @@ function IntroOpensPanel({
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void resendPromo(row)}>Resend promo</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendExclusive(row)}>Exclusive promo</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendReminder(row)}>Promo reminder</button> : null}
+            {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendCdars(row)}>CDARS</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void restore(row.email)}>Restore</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void remove(row.email)}>Remove</button> : <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void trash(row.email)}>Delete</button>}
           </div>

@@ -1,4 +1,5 @@
 import { dollarInputError } from "@/lib/promo";
+import { CDARS_TERMS, cdarsAmountError } from "@/lib/cdars";
 
 export const STEP_NAMES = ["Before you begin", "About you", "Address and tax", "Financial and funding", "Verification", "Declarations"];
 
@@ -181,6 +182,8 @@ export const EMPTY_FORM = {
   preferredTerm: "",
   promoCode: "",
   exclusiveApy: "",
+  cdarsApy: "",
+  cdarsExclusions: "",
   inviteToken: "",
   idType: "Passport",
   addressDocType: "Bank or credit-card statement",
@@ -208,7 +211,7 @@ export type FormState = typeof EMPTY_FORM;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function validateStep(step: number, form: FormState, promo = false, skipPassword = false): string[] {
+export function validateStep(step: number, form: FormState, promo = false, skipPassword = false, cdars = false): string[] {
   const errors: string[] = [];
   if (step === 1) {
     if (!form.firstName.trim()) errors.push("Enter a first name.");
@@ -235,13 +238,13 @@ export function validateStep(step: number, form: FormState, promo = false, skipP
     if (!form.accountHolder.trim()) errors.push("Enter the account holder's name.");
     if (!/^\d{9}$/.test(form.routingNumber.replace(/\D/g, ""))) errors.push("Enter a 9-digit routing number.");
     if (form.accountNumber.replace(/\D/g, "").length < 4) errors.push("Enter the account number.");
-    const amountError = dollarInputError(form.preferredAmount, promo);
+    const amountError = cdars ? cdarsAmountError(form.preferredAmount) : dollarInputError(form.preferredAmount, promo);
     if (amountError) errors.push(amountError);
-    if (!form.preferredTerm) errors.push("Choose a promotional term.");
+    if (!form.preferredTerm) errors.push(cdars ? "Choose a CDARS term." : "Choose a promotional term.");
+    else if (cdars && !CDARS_TERMS.includes(Number(form.preferredTerm) as 1 | 3 | 6 | 12)) errors.push("Choose a 1-, 3-, 6-, or 12-month CDARS term.");
   }
   if (step === 5) {
     if (!form.d1 || !form.d2 || !form.d3 || !form.d4) errors.push("Confirm every declaration before submitting.");
-    if (!form.signature.startsWith("data:image/png;base64,")) errors.push("Draw your signature.");
   }
   return errors;
 }

@@ -21,7 +21,7 @@ import {
   validateStep,
   type FormState,
 } from "@/lib/application-data";
-import { getCdTerms, getInvestorSession, getLeadInvite, getPromo, investorLogout, requestLeadInvite, submitApplication, type CdTerm, type InvestorSession } from "@/lib/admin.functions";
+import { getCdTerms, getCdarsRates, getInvestorSession, getLeadInvite, getPromo, investorLogout, requestLeadInvite, submitApplication, type CdTerm, type InvestorSession } from "@/lib/admin.functions";
 import { amountRange, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, promoMonths, type PromoOffer } from "@/lib/promo";
 import { AppCover, headerActionClass, SiteHeader } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
@@ -109,6 +109,7 @@ export function ApplicationForm() {
   const [inviteToken, setInviteToken] = useState("");
   const [inviteMonths, setInviteMonths] = useState(0);
   const [inviteExclusive, setInviteExclusive] = useState(null);
+  const [cdarsTerms, setCdarsTerms] = useState([]);
   const [inviteRequested, setInviteRequested] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const [requestError, setRequestError] = useState("");
@@ -177,6 +178,11 @@ export function ApplicationForm() {
   }, []);
 
   useEffect(() => {
+    if (inviteKind !== "cdars") return;
+    void getCdarsRates().then((rates) => setCdarsTerms(rates.filter((rate) => rate.apy))).catch(() => setCdarsTerms([]));
+  }, [inviteKind]);
+
+  useEffect(() => {
     void Promise.all([getCdTerms(), getPromo()])
       .then(([nextTerms, nextOffer]) => {
         setTerms(nextTerms);
@@ -207,7 +213,7 @@ export function ApplicationForm() {
   }
 
   async function onContinue() {
-    const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)), inviteProcess === "assisted");
+    const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)), inviteProcess === "assisted", inviteKind === "cdars");
     if (step === 3 && inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !promoMonths(offer).includes(Number(form.preferredTerm))) nextErrors.push("Choose a promotional term.");
     if (nextErrors.length) {
       setErrors(nextErrors);
@@ -404,7 +410,7 @@ export function ApplicationForm() {
             {step === 2 ? <Address form={form} patch={patch} /> : null}
             {step === 3 ? (
               <div className="grid min-w-0 gap-10">
-                <Preference form={form} patch={patch} terms={terms} offer={offer} exclusive={inviteExclusive} locked={inviteGate === "open" && (inviteMonths > 0 || Boolean(inviteExclusive))} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !inviteExclusive} showPromo={inviteGate === "open" && inviteKind === "promo" && !inviteExclusive} codeLocked={inviteGate === "open"} />
+                <Preference form={form} patch={patch} terms={terms} offer={offer} exclusive={inviteExclusive} cdarsTerms={inviteKind === "cdars" ? cdarsTerms : null} locked={inviteGate === "open" && (inviteMonths > 0 || Boolean(inviteExclusive)) && inviteKind !== "cdars"} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !inviteExclusive} showPromo={inviteGate === "open" && inviteKind === "promo" && !inviteExclusive} codeLocked={inviteGate === "open" && inviteKind !== "cdars"} />
                 <Financial form={form} patch={patch} />
                 <Funding form={form} patch={patch} />
               </div>
@@ -616,6 +622,7 @@ function Preference({
   showPromo = false,
   codeLocked = false,
   exclusive = null,
+  cdarsTerms = null,
 }: {
   form: FormState;
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
@@ -626,13 +633,17 @@ function Preference({
   showPromo?: boolean;
   codeLocked?: boolean;
   exclusive?: { months: number; apy: string } | null;
+  cdarsTerms?: { months: number; apy: string }[] | null;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
-  const promo = new Set(exclusive ? [] : showPromo || promoOnly ? promoMonths(offer) : []);
+  const cdarsCards = cdarsTerms?.map((term) => ({ id: `cdars-${term.months}`, months: term.months, apy: term.apy, featured: false }) as CdTerm) || null;
+  const promo = new Set(exclusive || cdarsCards ? [] : showPromo || promoOnly ? promoMonths(offer) : []);
   const exclusiveTerm = exclusive ? { id: "exclusive", months: exclusive.months, apy: exclusive.apy, featured: false } as CdTerm : null;
   const ordered = exclusiveTerm
     ? [exclusiveTerm]
+    : cdarsCards
+    ? cdarsCards
     : locked
     ? terms.filter((term) => String(term.months) === form.preferredTerm)
     : [...terms]
@@ -652,7 +663,7 @@ function Preference({
 
   return (
     <div className="grid min-w-0 max-w-full gap-5">
-      <SectionIntro eyebrow="Section" title="Preferred certificate" body={exclusive ? "This term and rate were prepared for you. They stay fixed on this application." : locked ? "This term and promotional code come from your email link. They stay fixed for this application." : promoOnly ? "Choose the promotional term. The code from your email stays fixed." : "Choose a term and the amount you expect to invest."} />
+      <SectionIntro eyebrow="Section" title="Preferred certificate" body={cdarsTerms ? "Choose a 1-, 3-, 6-, or 12-month CDARS term. This placement is only on your application." : exclusive ? "This term and rate were prepared for you. They stay fixed on this application." : locked ? "This term and promotional code come from your email link. They stay fixed for this application." : promoOnly ? "Choose the promotional term. The code from your email stays fixed." : "Choose a term and the amount you expect to invest."} />
       {shown.length === 0 ? (
         <p className="text-sm text-fg">No certificate terms are available right now.</p>
       ) : locked ? (
@@ -691,9 +702,9 @@ function Preference({
                       if (!locked) patch("preferredTerm", String(term.months));
                     }}
                   >
-                    {term.featured || isPromo ? (
+                    {term.featured || isPromo || cdarsTerms ? (
                       <span className="absolute -top-3 left-4 flex flex-col items-start gap-1">
-                        {isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
+                        {cdarsTerms ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">CDARS</span> : isPromo ? <span className="inline-flex rounded-md bg-[#e24b2a] px-2 py-1 text-xs font-semibold text-white">Promotional Offer</span> : null}
                         {term.featured ? <span className="inline-flex rounded-md bg-action px-2 py-1 text-xs font-semibold text-white">Featured APY</span> : null}
                       </span>
                     ) : null}
@@ -731,7 +742,7 @@ function Preference({
       {showPromo ? <Field label="Promotional code">
         <input className={controlClass} value={form.promoCode} placeholder="Optional" readOnly={codeLocked || locked} onChange={(event) => patch("promoCode", event.target.value)} />
       </Field> : null}
-      <Field label="Preferred investment amount" hint={promo.has(months) ? "Promotional certificates start at $100,000. Enter 100000 or 100,000." : "Enter 100000 or 100,000. A comma must separate thousands."}>
+      <Field label="Preferred investment amount" hint={cdarsTerms ? "CDARS placements are $500,000 to $50,000,000. Enter 500000 or 500,000." : promo.has(months) ? "Promotional certificates start at $100,000. Enter 100000 or 100,000." : "Enter 100000 or 100,000. A comma must separate thousands."}>
         <input
           className={controlClass}
           inputMode="decimal"
@@ -740,6 +751,9 @@ function Preference({
           onChange={(event) => patch("preferredAmount", event.target.value)}
         />
       </Field>
+      {cdarsTerms ? <Field label="Banks to exclude, if any" hint="Optional. Name any banks that should not hold this placement.">
+        <input className={controlClass} value={form.cdarsExclusions} onChange={(event) => patch("cdarsExclusions", event.target.value)} />
+      </Field> : null}
       {showPromo && tiers.length > 0 ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white text-sm">
           <div className="border-b border-border px-4 py-3 font-semibold text-primary">{months}-month promo bonus</div>
@@ -857,7 +871,7 @@ function Funding({ form, patch }: { form: FormState; patch: <K extends keyof For
 function Declarations({ form, patch }: { form: FormState; patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
   return (
     <div className="grid gap-5">
-      <SectionIntro eyebrow="Section" title="Declarations" body="Review each statement, then sign. This signature is used on your account documents." />
+      <SectionIntro eyebrow="Section" title="Declarations" body="Review each statement. A signature is optional." />
       {DECLARATIONS.map((item) => (
         <label key={item.key} className="flex min-h-11 items-start gap-3 rounded-md border border-border px-4 py-3">
           <input
@@ -870,8 +884,8 @@ function Declarations({ form, patch }: { form: FormState; patch: <K extends keyo
         </label>
       ))}
       <div>
-        <p className="text-sm font-medium">Signature</p>
-        <p className="mt-1 text-sm text-fg">Draw the signature that will appear on your certificates. You can lift the pointer and keep drawing.</p>
+        <p className="text-sm font-medium">Signature, optional</p>
+        <p className="mt-1 text-sm text-fg">You can draw a signature for your certificates, or leave this blank and submit.</p>
         <SignaturePad onChange={(value) => patch("signature", value ?? "")} />
       </div>
     </div>

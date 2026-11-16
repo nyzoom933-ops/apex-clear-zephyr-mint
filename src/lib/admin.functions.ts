@@ -8,6 +8,7 @@ import type { MailFile, MailStep } from "@/lib/mail.server";
 import type { LeadCopy, ApplicationCopy } from "@/lib/email-templates";
 import { normalizeEmailStyle, normalizeEmailColors } from "@/lib/email-templates";
 import { dollarInputError, formatBonus, matchTier, parseDollarAmount, PROMO_MINIMUM, promoMonths, type PromoOffer, type PromoTier } from "@/lib/promo";
+import { cdarsAmountError, cdarsRatesReady, CDARS_TERMS, normalizeCdarsRates, type CdarsRate } from "@/lib/cdars";
 import { resolveInvoiceBilling, type InvoiceBilling } from "@/lib/invoice-billing";
 
 export type ApplicationPayload = Omit<FormState, "password" | "confirmPassword">;
@@ -195,7 +196,14 @@ export const submitApplication = createServerFn({ method: "POST" })
     const offer = await loadPromo(sql);
     if (invited?.kind === "promo" && invited.months <= 0 && !promoMonths(offer).includes(months)) throw new Error("Choose a promotional term.");
     if (invited?.kind === "exclusive" && (!invited.months || !invited.exclusiveApy)) throw new Error("This exclusive application is missing its term or rate.");
-    const amountError = dollarInputError(stored.preferredAmount || "", invited?.kind === "exclusive" ? false : promoMonths(offer).includes(months));
+    if (invited?.kind === "cdars") {
+      if (!CDARS_TERMS.includes(months as 1 | 3 | 6 | 12)) throw new Error("Choose a 1-, 3-, 6-, or 12-month CDARS term.");
+      const rates = await readCdarsRates(sql);
+      const chosen = rates.find((rate) => rate.months === months && rate.apy);
+      if (!chosen) throw new Error("That CDARS term is not available.");
+      stored.cdarsApy = chosen.apy;
+    }
+    const amountError = invited?.kind === "cdars" ? cdarsAmountError(stored.preferredAmount || "") : dollarInputError(stored.preferredAmount || "", invited?.kind === "exclusive" ? false : promoMonths(offer).includes(months));
     if (amountError) throw new Error(amountError);
     const name = [stored.firstName, stored.middleName, stored.surname].filter(Boolean).join(" ");
     const passwordHash = assisted ? null : await hashPassword(data.password);
@@ -2203,6 +2211,145 @@ export const sendLeadPromoReminder = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+async function readCdarsRates(sql: Sql): Promise<CdarsRate[]> {
+  const rows = await sql<{ value: string }>`select value from site_settings where key = 'cdars_rates'`;
+  let parsed: { months: number; apy: string }[] = [];
+  try {
+    parsed = JSON.parse(rows[0]?.value || "[]");
+  } catch {
+    parsed = [];
+  }
+  return normalizeCdarsRates(Array.isArray(parsed) ? parsed : []);
+}
+
+async function writeCdarsRates(sql: Sql, rates: CdarsRate[]) {
+  const ready = normalizeCdarsRates(rates);
+  if (!cdarsRatesReady(ready)) throw new Error("Enter an APY for the 1-, 3-, 6-, and 12-month CDARS terms.");
+  await saveSetting(sql, "cdars_rates", JSON.stringify(ready));
+  return ready;
+}
+
+export const getCdarsRates = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  return readCdarsRates(await getSql());
+});
+
+export const sendLeadCdars = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; rates?: { months: number; apy: string }[] }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const rates = input.rates ? normalizeCdarsRates(input.rates) : null;
+    if (rates && !cdarsRatesReady(rates)) throw new Error("Enter an APY for the 1-, 3-, 6-, and 12-month CDARS terms.");
+    return { advisorId: input.advisorId, name, email, rates };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { cdarsLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const rates = data.rates ? await writeCdarsRates(sql, data.rates) : await readCdarsRates(sql);
+    if (!cdarsRatesReady(rates)) throw new Error("Set the 1-, 3-, 6-, and 12-month CDARS rates before sending.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    await ensureCrmLeads(sql);
+    const stored = await sql<{ process: string }>`
+      select case when process = 'portal' then 'portal' else 'assisted' end as process
+      from crm_leads where lower(email) = ${data.email} order by received_at desc limit 1
+    `;
+    const process = stored[0]?.process === "portal" ? "portal" as const : "assisted" as const;
+    const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: 0, promoCode: "", kind: "cdars", process, advisor });
+    const link = inviteApplicationUrl(origin, token);
+    const letter = cdarsLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      terms: rates,
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      link,
+    });
+    await sendStep(sql, {
+      step: "lead_cdars",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: ["CDARS application", ...rates.map((rate) => `${rate.months}-month ${rate.apy}`), link].join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: token,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
+export const sendLeadCdarsIntro = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; rates?: { months: number; apy: string }[] }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    return { advisorId: input.advisorId, name, email, rates: input.rates ? normalizeCdarsRates(input.rates) : null };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { cdarsIntroLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const rates = (data.rates || await readCdarsRates(sql)).filter((rate) => rate.apy);
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    const letter = cdarsIntroLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      terms: rates,
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+    });
+    await sendStep(sql, {
+      step: "lead_cdars_intro",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: ["CDARS introduction", ...rates.map((rate) => `${rate.months}-month ${rate.apy}`)].join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
 export const sendLeadExclusiveApplication = createServerFn({ method: "POST" })
   .validator((input: { advisorId: string; name: string; email: string; months: number; apy: string; process?: "assisted" | "portal" }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
@@ -2400,7 +2547,7 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
       from notifications
       where audience = 'client'
         and lower(recipient) = ${data.email}
-        and step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder')
+        and step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_cdars')
         and delivery = 'sent'
       order by created_at desc
       limit 1
@@ -2421,7 +2568,7 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
     const { inviteApplicationUrl } = await import("@/lib/lead-invites.server");
     const link = inviteApplicationUrl(origin, invite.token);
     const sameLetter = Boolean(note?.html && note.html.includes(invite.token));
-    let step: MailStep = note?.step === "lead_followup" || note?.step === "lead_promo_reminder" || note?.step === "lead_application" || note?.step === "lead_promo" ? note.step : invite.kind === "custom" ? "lead_application" : "lead_promo";
+    let step: MailStep = note?.step === "lead_followup" || note?.step === "lead_promo_reminder" || note?.step === "lead_cdars" || note?.step === "lead_application" || note?.step === "lead_promo" ? note.step : invite.kind === "custom" ? "lead_application" : invite.kind === "cdars" ? "lead_cdars" : "lead_promo";
     let subject = note?.subject || "";
     let text = note?.body || "";
     let html = sameLetter ? note.html : "";
@@ -2442,6 +2589,12 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
         const letter = step === "lead_promo_reminder"
           ? promoReminderLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, promoCode: invite.promo_code, link })
           : followupLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, promoCode: invite.promo_code, link });
+        subject = letter.subject;
+        text = letter.text;
+        html = letter.html;
+      } else if (step === "lead_cdars") {
+        const { cdarsLetter } = await import("@/lib/email-templates");
+        const letter = cdarsLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, link, terms: await readCdarsRates(sql) });
         subject = letter.subject;
         text = letter.text;
         html = letter.html;
@@ -2680,7 +2833,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
   .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
     const from = (input.from || "").slice(0, 10);
     const to = (input.to || "").slice(0, 10);
-    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive"];
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro"];
     const step = allowed.includes(input.step || "") ? input.step || "" : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
     return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
@@ -2725,7 +2878,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join lead_invites i on i.token = n.related_id
       where n.audience = 'client'
-        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive')
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro')
         and n.created_at >= ${start}
         and n.created_at < ${endDate.toISOString()}
       order by n.created_at desc
@@ -2855,7 +3008,7 @@ export const removeIntroOpen = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureOpenTrash(sql);
-    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive') and lower(recipient) = ${data.email}`;
+    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro') and lower(recipient) = ${data.email}`;
     await sql`delete from open_trash where lower(email) = ${data.email}`;
     return { ok: true as const };
   });
@@ -2925,7 +3078,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           select 1 from notifications later
           where later.audience = 'client'
             and lower(later.recipient) = lower(n.recipient)
-            and later.step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder')
+            and later.step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_cdars')
             and later.delivery = 'sent'
         ) as application_sent,
         (
@@ -2933,7 +3086,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           from notifications later
           where later.audience = 'client'
             and lower(later.recipient) = lower(n.recipient)
-            and later.step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder')
+            and later.step in ('lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_cdars')
             and later.delivery = 'sent'
           order by later.created_at desc
           limit 1
@@ -2956,7 +3109,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           end
           from lead_invites i
           where lower(i.email) = lower(n.recipient)
-            and i.kind in ('promo', 'custom')
+            and i.kind in ('promo', 'custom', 'exclusive', 'cdars')
           order by i.created_at desc
           limit 1
         ) as invite_status,
@@ -2964,7 +3117,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           select to_char(i.expires_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
           from lead_invites i
           where lower(i.email) = lower(n.recipient)
-            and i.kind in ('promo', 'custom')
+            and i.kind in ('promo', 'custom', 'exclusive', 'cdars')
           order by i.created_at desc
           limit 1
         ) as invite_expires_at,
@@ -3026,7 +3179,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
-      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive') and n.delivery = 'sent'
+      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro') and n.delivery = 'sent'
         and (${trash}::boolean = (
           exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient))
           and not exists (
@@ -3034,7 +3187,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
             where newer.audience = 'client'
               and lower(newer.recipient) = lower(n.recipient)
               and newer.delivery = 'sent'
-              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive')
+              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro')
               and newer.created_at > (select t.created_at from open_trash t where lower(t.email) = lower(n.recipient))
           )
         ))
@@ -4719,16 +4872,18 @@ async function openPreferredFunding(sql: Sql, email: string) {
   const months = Number(payload?.preferredTerm);
   const amount = parseDollarAmount(String(payload?.preferredAmount || ""));
   const exclusiveApy = String(payload?.exclusiveApy || "").trim();
+  const cdarsApy = String(payload?.cdarsApy || "").trim();
+  const specialApy = exclusiveApy || cdarsApy;
   if (!Number.isFinite(months) || months <= 0 || amount == null) return;
   const offer = await loadPromo(sql);
-  if (!exclusiveApy && promoMonths(offer).includes(months) && amount < PROMO_MINIMUM) return;
+  if (!specialApy && promoMonths(offer).includes(months) && amount < PROMO_MINIMUM) return;
   const types = await sql<InvestmentRow>`select * from investment_types where id = 'cd'`;
   const type = types[0];
   if (!type) return;
   const minimum = Number(String(type.minimum_investment || "").replace(/[^0-9.]/g, ""));
   if (Number.isFinite(minimum) && minimum > 0 && amount < minimum) return;
-  const terms = exclusiveApy
-    ? [{ apy: exclusiveApy, months }]
+  const terms = specialApy
+    ? [{ apy: specialApy, months }]
     : await sql<{ apy: string; months: number }>`
     select apy, months from cd_terms where months = ${months} order by featured desc, sort_order asc limit 1
   `;
@@ -4736,10 +4891,10 @@ async function openPreferredFunding(sql: Sql, email: string) {
   if (!term?.apy) return;
   const id = crypto.randomUUID();
   const formatted = amount.toLocaleString("en-US", { style: "currency", currency: "USD" });
-  const label = `${Number(term.months)}-month · ${term.apy.includes("APY") ? term.apy : `${term.apy} APY`}`;
+  const label = `${cdarsApy ? "CDARS " : ""}${Number(term.months)}-month · ${term.apy.includes("APY") ? term.apy : `${term.apy} APY`}`;
   const { nextFundingCodes } = await import("@/lib/funding-codes.server");
   const codes = await nextFundingCodes(sql);
-  const rates = ratesFor(label, formatted, exclusiveApy ? [] : offer.tiers);
+  const rates = ratesFor(label, formatted, specialApy ? [] : offer.tiers);
   const inserted = await sql<{ id: string }>`
     insert into fundings (id, email, type_id, amount, frequency, term_label, status, deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy, origin)
     select ${id}, ${address}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"pending"}, ${codes.depositCode}, ${codes.depositNumber}, ${codes.accountNumber}, ${codes.referenceNumber}, ${rates.promo}, ${rates.final}, ${"application"}
@@ -4943,6 +5098,8 @@ function applicationDeskDetail(payload: ApplicationPayload) {
     line("Preferred amount", payload.preferredAmount || "—"),
     line("Preferred term", payload.preferredTerm ? `${payload.preferredTerm}-month` : "—"),
     ...(payload.exclusiveApy ? [line("Exclusive rate", payload.exclusiveApy)] : []),
+    ...(payload.cdarsApy ? [line("CDARS rate", payload.cdarsApy)] : []),
+    ...(payload.cdarsExclusions ? [line("Banks to exclude", payload.cdarsExclusions)] : []),
     line("Promotional code", payload.promoCode || "—"),
     line("Identity document", `${payload.idType}${payload.idFileName ? ` · ${payload.idFileName}` : " · not attached"}`),
     line("Address document", `${payload.addressDocType}${payload.addressFileName ? ` · ${payload.addressFileName}` : " · not attached"}`),

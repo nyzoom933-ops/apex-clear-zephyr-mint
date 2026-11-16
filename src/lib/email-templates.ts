@@ -23,13 +23,15 @@ export type MailStep =
   | "lead_followup"
   | "lead_promo_reminder"
   | "lead_exclusive"
+  | "lead_cdars"
+  | "lead_cdars_intro"
   | "invoice_advisor";
 
 export function mailStepLabel(step: string) {
   return STEPS[step as MailStep]?.label || step;
 }
 
-export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "invoice_advisor"]);
+export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "invoice_advisor"]);
 
 export type MailAudience = "client" | "admin";
 
@@ -220,6 +222,22 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminSubject: "Exclusive promo sent to {{name}}",
     adminLead: "The exclusive new-client CD promotion was sent to {{name}} ({{email}}).",
   },
+  lead_cdars: {
+    label: "CDARS application",
+    clientSubject: "Certificate of Deposit Account Registry Service (CDARS)",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "CDARS application sent to {{name}}",
+    adminLead: "A CDARS application was sent to {{name}} ({{email}}).",
+  },
+  lead_cdars_intro: {
+    label: "CDARS introduction",
+    clientSubject: "An introduction to CDARS",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "CDARS introduction sent to {{name}}",
+    adminLead: "A CDARS introduction was sent to {{name}} ({{email}}).",
+  },
   invoice_advisor: {
     label: "Advisor invoice letter",
     clientSubject: "Your CD is ready for funding",
@@ -405,7 +423,7 @@ export function renderStep(
   const subject = fill(input.copy?.subject ?? (audience === "client" ? item.clientSubject : item.adminSubject), name, input.email, company);
   const nextRaw = input.copy?.next ?? item.clientNext;
   const next = audience === "client" && nextRaw ? fill(nextRaw, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "invoice_advisor";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -420,7 +438,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   const chosenStyle = isFullLetter ? input.advisorStyle : input.transactionalStyle;
   return {
     step,
@@ -1941,6 +1959,194 @@ function sampleExclusiveLetter(portalUrl?: string, advisor?: MailAdvisor, compan
         { id: "d", minAmount: 500000, maxAmount: null, bonusPercent: 1.25, months: [10, 22] },
       ],
     },
+  }).html;
+}
+
+export function cdarsLetter(input: {
+  leadName: string;
+  company: string;
+  terms: { months: number; apy: string }[];
+  advisor?: MailAdvisor;
+  logo?: string | null;
+  portalUrl?: string;
+  companyPhone?: string;
+  link?: string;
+}) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.leadName.trim() || "Client";
+  const subject = "Certificate of Deposit Account Registry Service (CDARS)";
+  const terms = input.terms.filter((term) => term.apy.trim());
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
+  const mark = logo
+    ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
+    : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
+  const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
+  const help = companyHelp(input.companyPhone);
+  const link = input.link?.trim() || "";
+  const button = link
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:16px;"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(link)}" style="display:inline-block; padding:14px 22px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Click here for application</a></td></tr></table>`
+    : "";
+  const heads = terms.map((term) => `<td style="background:#006fcf; color:#ffffff; padding:10px 8px; text-align:center; font-size:12px; font-weight:700;">${term.months}-MONTH</td>`).join("");
+  const rates = terms.map((term) => `<td style="background:#f7fbfe; padding:16px 8px; text-align:center; font-size:22px; font-weight:700; color:#12315c;">${escapeHtml(term.apy.replace(/\s*APY/i, "").replace(/%/g, ""))}% <span style="font-size:12px; color:#006fcf;">APY</span></td>`).join("");
+  const fixed = terms.map(() => `<td style="padding:8px; text-align:center; font-size:13px; color:#333333; border-top:1px solid #d6e4ef;">Fixed rate</td>`).join("");
+  const table = terms.length
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:12px; border:1px solid #d6e4ef;"><tr>${heads}</tr><tr>${rates}</tr><tr>${fixed}</tr></table>`
+    : `<p style="margin:12px 0 0 0; font-size:14px;">CDARS rates are not set yet.</p>`;
+  const text = [
+    `Dear ${name},`,
+    "Looking for the security of a certificate of deposit, with FDIC insurance across more than one bank? CDARS may be the right placement.",
+    "CDARS is an FDIC-insured certificate program. It places $500,000 to $50 million in certificates held at other FDIC-insured banks.",
+    "Your funds are allocated so the amount at any one bank, including interest paid at maturity, stays within FDIC coverage — currently $250,000 per depositor, per institution.",
+    "Terms are 1, 3, 6, and 12 months. You may name banks to exclude. One statement covers the whole placement.",
+    ...terms.map((term) => `${term.months}-month CDARS ${term.apy} APY`),
+    "One competitive rate is paid on the entire amount. The rate is fixed. Interest is compounded daily and paid at maturity. Early withdrawal is subject to a penalty.",
+    link ? `Click here for application: ${link}` : "",
+    sign.text,
+  ].filter(Boolean).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">CDARS places $500,000 to $50 million in FDIC-insured certificates across banks.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;"><tr><td align="center" style="padding:20px 10px;">
+    <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
+      <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
+      <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
+      <tr><td style="padding:28px 36px 24px 36px;">
+        <p style="margin:0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Certificate of deposit</p>
+        <h1 style="margin:8px 0 0 0; font-size:26px; line-height:32px; color:#12315c;">Account Registry Service (CDARS)</h1>
+        <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Looking for the security of a certificate of deposit, with the additional safety of FDIC insurance across more than one bank? CDARS may be the right placement for you.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">CDARS is an FDIC-insured certificate program. It lets you place <strong>$500,000 to $50 million</strong> in certificates held by other FDIC-insured banks, through one relationship with ${escapeHtml(company)}.</p>
+        <p style="margin:22px 0 0 0; font-size:16px; line-height:22px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase; color:#12315c;">How CDARS works</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Funds are allocated among banks so the amount at any one bank, including interest paid at maturity, does not exceed FDIC coverage — currently <strong>$250,000 per depositor, per institution</strong>.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">You choose how long the funds stay placed. Terms are <strong>1, 3, 6, and 12 months</strong>. You may name banks you do not want used. However many banks hold the certificates, you receive one statement.</p>
+        ${table}
+        <p style="margin:12px 0 0 0; font-size:14px; line-height:21px;"><strong>Minimum placement: $500,000. Maximum placement: $50 million.</strong></p>
+        <p style="margin:22px 0 0 0; font-size:16px; line-height:22px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase; color:#12315c;">What you receive</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">1. One competitive rate on the entire amount.<br>2. A fixed rate of return.<br>3. Interest compounded daily and paid at maturity.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Early withdrawal is subject to a penalty. To move forward, complete the application below and choose the term.</p>
+        ${button}
+        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+      </td></tr>
+      <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+        <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+        <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
+      </td></tr>
+      <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
+        <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">CDARS placements are certificates at FDIC-insured banks. Insurance is subject to FDIC limits and ownership rules, currently $250,000 per depositor, per insured bank, per ownership category. The application link expires 48 hours after this email is sent. A penalty may apply to an early withdrawal. Rates can change before the application is submitted.</p>
+        <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+  return { subject, text, html };
+}
+
+export function cdarsIntroLetter(input: {
+  leadName: string;
+  company: string;
+  terms?: { months: number; apy: string }[];
+  advisor?: MailAdvisor;
+  logo?: string | null;
+  portalUrl?: string;
+  companyPhone?: string;
+}) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.leadName.trim() || "Client";
+  const subject = "An introduction to CDARS";
+  const terms = (input.terms || []).filter((term) => term.apy.trim());
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
+  const mark = logo
+    ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
+    : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
+  const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
+  const help = companyHelp(input.companyPhone);
+  const shown = (term: { apy: string }) => term.apy.replace(/\s*APY/i, "").replace(/%/g, "");
+  const table = terms.length
+    ? `<p style="margin:22px 0 0 0; font-size:16px; line-height:22px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase; color:#12315c;">Current terms</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:12px; border:1px solid #d6e4ef;"><tr>${terms.map((term) => `<td style="background:#006fcf; color:#ffffff; padding:10px 8px; text-align:center; font-size:12px; font-weight:700;">${term.months}-MONTH</td>`).join("")}</tr><tr>${terms.map((term) => `<td style="background:#f7fbfe; padding:16px 8px; text-align:center; font-size:22px; font-weight:700; color:#12315c;">${escapeHtml(shown(term))}% <span style="font-size:12px; color:#006fcf;">APY</span></td>`).join("")}</tr><tr>${terms.map(() => `<td style="padding:8px; text-align:center; font-size:13px; color:#333333; border-top:1px solid #d6e4ef;">Fixed rate</td>`).join("")}</tr></table>`
+    : "";
+  const text = [
+    `Dear ${name},`,
+    `Thank you for your interest in ${company}. I wanted to introduce a certificate program for larger placements that need FDIC insurance beyond a single bank.`,
+    "CDARS, the Certificate of Deposit Account Registry Service, places $500,000 to $50 million in certificates held at other FDIC-insured banks. You keep one relationship with us and receive one statement for the whole placement.",
+    "Funds are allocated so the amount at any one bank, including interest paid at maturity, stays within FDIC coverage. That limit is currently $250,000 per depositor, per insured bank, per ownership category.",
+    "You choose a 1-month, 3-month, 6-month, or 12-month term. You may also name any banks that should not be used.",
+    ...terms.map((term) => `${term.months}-month CDARS ${shown(term)}% APY, fixed`),
+    "One competitive rate is paid on the entire amount. The rate is fixed for the term you choose. Interest is compounded daily and paid at maturity.",
+    "The minimum placement is $500,000. The maximum is $50 million. An early withdrawal is subject to a penalty.",
+    "If this fits what you are looking for, reply to this email or call us. We will walk through the terms and send the application when you are ready.",
+    sign.text,
+  ].filter(Boolean).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">CDARS places $500,000 to $50 million in certificates across FDIC-insured banks, with one statement.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;"><tr><td align="center" style="padding:20px 10px;">
+    <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
+      <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
+      <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
+      <tr><td style="padding:28px 36px 24px 36px;">
+        <p style="margin:0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Certificate of deposit</p>
+        <h1 style="margin:8px 0 0 0; font-size:26px; line-height:32px; color:#12315c;">An introduction to CDARS</h1>
+        <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Thank you for your interest in ${escapeHtml(company)}. I wanted to introduce a certificate program for larger placements that need FDIC insurance beyond a single bank.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;"><strong>CDARS</strong>, the Certificate of Deposit Account Registry Service, places <strong>$500,000 to $50 million</strong> in certificates held at other FDIC-insured banks. You keep one relationship with ${escapeHtml(company)} and receive one statement for the whole placement.</p>
+        <p style="margin:22px 0 0 0; font-size:16px; line-height:22px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase; color:#12315c;">How it works</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Funds are allocated among banks so the amount at any one institution, including interest paid at maturity, stays within FDIC coverage. That limit is currently <strong>$250,000 per depositor, per insured bank, per ownership category</strong>.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">You choose a <strong>1-month, 3-month, 6-month, or 12-month</strong> term. You may also name any banks that should not be used.</p>
+        ${table}
+        <p style="margin:22px 0 0 0; font-size:16px; line-height:22px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase; color:#12315c;">What the placement pays</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">1. One competitive rate on the entire amount.<br>2. A fixed rate for the term you choose.<br>3. Interest compounded daily and paid at maturity.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">The minimum placement is <strong>$500,000</strong>. The maximum is <strong>$50 million</strong>. An early withdrawal is subject to a penalty.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">If this fits what you are looking for, reply to this email or call us. We will walk through the terms and send the application when you are ready.</p>
+        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+      </td></tr>
+      <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+        <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+        <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
+      </td></tr>
+      <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
+        <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">CDARS placements are certificates issued by FDIC-insured banks. Insurance is subject to FDIC limits and ownership rules. Rates, if shown, can change before an application is submitted. A penalty may apply to an early withdrawal.</p>
+        <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+  return { subject, text, html };
+}
+
+function sampleCdarsIntroLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  return cdarsIntroLetter({
+    leadName: "Jonah Hale",
+    company: DEFAULT_COMPANY_NAME,
+    portalUrl,
+    advisor,
+    companyPhone,
+    terms: [
+      { months: 1, apy: "4.00%" },
+      { months: 3, apy: "4.10%" },
+      { months: 6, apy: "4.20%" },
+      { months: 12, apy: "4.35%" },
+    ],
+  }).html;
+}
+
+function sampleCdarsLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  const base = applicationUrl(portalUrl);
+  return cdarsLetter({
+    leadName: "Jonah Hale",
+    company: DEFAULT_COMPANY_NAME,
+    portalUrl,
+    advisor,
+    companyPhone,
+    link: base || "#",
+    terms: [
+      { months: 1, apy: "4.00%" },
+      { months: 3, apy: "4.10%" },
+      { months: 6, apy: "4.20%" },
+      { months: 12, apy: "4.35%" },
+    ],
   }).html;
 }
 
