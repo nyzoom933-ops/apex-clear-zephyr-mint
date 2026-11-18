@@ -234,6 +234,7 @@ if (typeof window === "undefined" && dbSource === "pglite") {
     .then(() => {
       startBackupSchedule();
       startInviteReminders();
+      startInboxSchedule();
       startMailStatusSchedule();
     })
     .catch((err) => {

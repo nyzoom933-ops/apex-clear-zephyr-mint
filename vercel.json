@@ -8,6 +8,14 @@
     {
       "path": "/api/cron/lead-reminders",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/cron/inbox",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/mail-status",
+      "schedule": "5,20,35,50 * * * *"
     }
   ]
 }

@@ -3,13 +3,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
-import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, cdarsIntroLetter, cdarsLetter, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
+import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, accountReadyLetter, cdarsIntroLetter, cdarsLetter, cdUpdateLetter, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
 import {
   adminLogin,
   adminLogout,
   deleteAdvisor,
   createDeskLogin,
   getAdminSession,
+  pulseDeskSync,
   getMailSetup,
   approvePayment,
   rejectPayment,
@@ -45,8 +46,14 @@ import {
   deleteCrmLead,
   deleteFunding,
   createClientFunding,
+  saveExistingActiveCd,
+  sendActiveCdUpdate,
+  updateActiveCdReferences,
   clearDatabase,
   signInAsClient,
+  listManualCdClients,
+  createManualPortalLogin,
+  sendManualPortalLogin,
   setSiteBrand,
   runDatabaseBackup,
   restoreDatabaseBackup,
@@ -70,6 +77,8 @@ import {
   sendLeadHtr,
   sendLeadFollowup,
   sendLeadPromoReminder,
+  sendLeadAccountReady,
+  applicationAccountTerms,
   sendLeadApplication,
   sendLeadExclusiveApplication,
   resendOpenApplication,
@@ -183,6 +192,27 @@ function Cabinet({
     refresh().catch(() => setError("Applications could not be loaded."));
     getMailSetup().then(setup => setMailReady(Boolean(setup.hasSmtpKey && setup.mailFrom))).catch(() => setMailReady(false));
   }, []);
+  useEffect(() => {
+    let stopped = false;
+    const run = () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      pulseDeskSync().then(result => {
+        if (!stopped && result && !result.skipped) window.dispatchEvent(new Event("desk-mail-sync"));
+      }).catch(() => undefined);
+    };
+    const first = window.setTimeout(run, 3000);
+    const timer = window.setInterval(run, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
   const stats = useMemo(() => {
     const list = rows ?? [];
     return {
@@ -251,7 +281,7 @@ function Cabinet({
               kind: "promo"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onStatus={(id, status) => void updateStatus(id, status)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status) => void updateStatus(id, status)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
 }
 function LetterPreview({
   html,
@@ -389,6 +419,11 @@ function MailStatusPanel() {
   }
   useEffect(() => {
     load().catch(() => setError("Email status could not be loaded."));
+    const onSync = () => {
+      load().catch(() => undefined);
+    };
+    window.addEventListener("desk-mail-sync", onSync);
+    return () => window.removeEventListener("desk-mail-sync", onSync);
   }, []);
   async function sync() {
     setPending(true);
@@ -404,7 +439,7 @@ function MailStatusPanel() {
       setPending(false);
     }
   }
-  return <section><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Email status</h1><p className="mt-2 max-w-2xl text-fg">Advisor letters are sent through SMTP2GO, which records when they are opened. Other desk mail still uses Resend. Sync after the recipient has had time to open the letter.</p></div><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button></div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[980px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">When</th><th className="px-4 py-3 font-semibold">To</th><th className="px-4 py-3 font-semibold">Subject</th><th className="px-4 py-3 font-semibold">Sent</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Opened</th><th className="px-4 py-3 font-semibold">Link</th><th className="px-4 py-3 font-semibold">Expires</th></tr></thead><tbody>{(rows ?? []).map(row => {
+  return <section><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Email status</h1><p className="mt-2 max-w-2xl text-fg">Advisor letters are sent through SMTP2GO, which records when they are opened. Other desk mail still uses Resend. Status refreshes on its own while this desk is open. Use Sync status to check immediately.</p></div><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button></div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[980px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">When</th><th className="px-4 py-3 font-semibold">To</th><th className="px-4 py-3 font-semibold">Subject</th><th className="px-4 py-3 font-semibold">Sent</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Opened</th><th className="px-4 py-3 font-semibold">Link</th><th className="px-4 py-3 font-semibold">Expires</th></tr></thead><tbody>{(rows ?? []).map(row => {
             const opened = row.mailStatus === "opened" || row.mailStatus === "clicked";
             const expiry = inviteExpiry(row.expiresAt, row.usedAt);
             return <tr key={row.id} className="border-b border-border last:border-0"><td className="px-4 py-3 whitespace-nowrap">{row.createdAt} UTC</td><td className="px-4 py-3"><span className="block">{row.recipient}</span><span className="text-xs text-[#8c8c8c]">{row.mailProvider === "telegram" ? "Telegram" : row.audience === "admin" ? "Desk" : "Client"}</span></td><td className="px-4 py-3">{row.subject}</td><td className="px-4 py-3">{row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"}</td><td className="px-4 py-3">{MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")}</td><td className="px-4 py-3">{opened ? <span className="font-semibold text-[#0d6e4f]">Opened</span> : "—"}</td><td className="px-4 py-3">{row.link ? <a className="block max-w-[220px] truncate font-semibold text-action" href={row.link} title={row.link} target="_blank" rel="noreferrer">{row.link.replace(/^https?:\/\/[^/]+/, "")}</a> : "—"}</td><td className={"px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : "")}>{expiry}</td></tr>;
@@ -1324,20 +1359,182 @@ function InvoiceCard({
 function ActiveCdsDesk() {
   const [rows, setRows] = useState(null);
   const [offer, setOffer] = useState(null);
+  const [advisors, setAdvisors] = useState([]);
   const [error, setError] = useState("");
-  useEffect(() => {
-    Promise.all([listFundings(), getPromo()]).then(([next, promo]) => {
+  const [notice, setNotice] = useState("");
+  function load() {
+    return Promise.all([listFundings(), getPromo()]).then(([next, promo]) => {
       setRows(next.filter(row => row.status === "payment_approved"));
       setOffer(promo);
-    }).catch(() => setError("Active CDs could not be loaded."));
+    });
+  }
+  useEffect(() => {
+    load().catch(() => setError("Active CDs could not be loaded."));
+    listAdvisors().then(setAdvisors).catch(() => setAdvisors([]));
   }, []);
-  return <section><h1 className="text-3xl font-semibold">Active CDs{rows ? ` (${rows.length})` : ""}</h1><p className="mt-2 text-fg">Certificates whose payment the advisor confirmed. An active CD is removed only when the client is deleted.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{!rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.length === 0 ? <p className="mt-4 text-sm text-fg">No active certificates yet.</p> : <ul className="mt-4 grid gap-3">{rows.map(row => <ActiveCdDeskRow key={row.id} row={row} offer={offer} />)}</ul>}</section>;
+  return <section>
+    <h1 className="text-3xl font-semibold">Active CDs{rows ? ` (${rows.length})` : ""}</h1>
+    <p className="mt-2 text-fg">Certificates whose payment the advisor confirmed. Add a client who already holds an active CD. An active CD is removed only when the client is deleted.</p>
+    <AddExistingCd rows={rows || []} onSaved={message => { setNotice(message); setError(""); return load(); }} />
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+    {!rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.length === 0 ? <p className="mt-4 text-sm text-fg">No active certificates yet.</p> : <ul className="mt-4 grid gap-3">{rows.map(row => <ActiveCdDeskRow key={row.id} row={row} offer={offer} rows={rows} advisors={advisors} onSent={message => setNotice(message)} onChanged={() => load()} />)}</ul>}
+  </section>;
+}
+function AddExistingCd({ rows, onSaved }) {
+  const brand = useBrand();
+  const [advisors, setAdvisors] = useState([]);
+  const [leadQuery, setLeadQuery] = useState("");
+  const [leads, setLeads] = useState([]);
+  const [leadId, setLeadId] = useState("");
+  const [picked, setPicked] = useState(null);
+  const [advisorId, setAdvisorId] = useState("");
+  const [openedOn, setOpenedOn] = useState("");
+  const [asOf, setAsOf] = useState(() => localDateInput());
+  const [amount, setAmount] = useState("");
+  const [apy, setApy] = useState("");
+  const [months, setMonths] = useState("");
+  const [depositCode, setDepositCode] = useState("");
+  const [depositNumber, setDepositNumber] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [referenceNumber, setReferenceNumber] = useState("");
+  const [savedId, setSavedId] = useState("");
+  const [styles, setStyles] = useState(null);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState("");
+  useEffect(() => {
+    listAdvisors().then(setAdvisors).catch(() => setAdvisors([]));
+    getEmailStyles().then(setStyles).catch(() => setStyles(null));
+  }, []);
+  useEffect(() => {
+    const query = leadQuery.trim();
+    const handle = window.setTimeout(() => {
+      listCrmLeads({ data: { query, withEmail: true, page: 1 } }).then(page => setLeads(page.rows || [])).catch(() => setLeads([]));
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [leadQuery]);
+  const lead = picked && picked.id === leadId ? picked : leads.find(item => item.id === leadId) || null;
+  const advisor = advisors.find(item => item.id === advisorId) || null;
+  const principal = Number(String(amount).replace(/[^0-9.]/g, ""));
+  const ready = lead && advisor && openedOn && asOf && Number.isFinite(principal) && principal > 0 && apy.trim() && Number(months) > 0;
+  const holdings = ready ? portfolioHoldings(rows, lead.email, savedId, { months: Number(months), openedOn, apy, principal }) : [];
+  const letter = ready ? cdUpdateLetter({
+    leadName: lead.name,
+    company: brand.companyName,
+    asOf,
+    holdings,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone
+  }) : null;
+  const previewHtml = letter ? applyEmailStyle(letter.html, styles?.advisor || "classic", styles?.colors || null) : "";
+  function chooseLead(id) {
+    const next = leads.find(item => item.id === id) || null;
+    setLeadId(id);
+    setPicked(next);
+    setSavedId("");
+    if (!next) return;
+    setAdvisorId(current => current || next.advisorId || "");
+    setAmount(current => current || next.amount || "");
+    const term = String(next.term || "").match(/\d+/)?.[0] || "";
+    setMonths(current => current || term);
+  }
+  async function save(send) {
+    setError("");
+    setPending(send ? "send" : "save");
+    try {
+      const result = await saveExistingActiveCd({
+        data: {
+          id: savedId,
+          leadId,
+          advisorId,
+          openedOn,
+          asOf,
+          amount,
+          apy,
+          months: Number(months),
+          depositCode,
+          depositNumber,
+          accountNumber,
+          referenceNumber,
+          send
+        }
+      });
+      setSavedId(result.id);
+      await onSaved(send ? `Portfolio update sent to ${result.email}.` : `Active CD added for ${result.email}. No email was sent.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The certificate could not be saved.");
+    } finally {
+      setPending("");
+    }
+  }
+  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void save(false); }}>
+    <h2 className="text-lg font-semibold text-primary">Add an existing client</h2>
+    <p className="mt-1 text-sm text-fg">Use this for someone who is already a client and already holds an active CD. The update lists every active CD for that client. Current value compounds daily from the open date through the as-of date.</p>
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <label className="block text-sm sm:col-span-2"><span className="font-semibold text-primary">Find a lead</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Name or email" onChange={event => setLeadQuery(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Lead</span><select className={`${controlClass} mt-1`} value={leadId} onChange={event => chooseLead(event.target.value)}><option value="">Choose a lead</option>{lead && !leads.some(item => item.id === lead.id) ? <option value={lead.id}>{lead.name} · {lead.email}</option> : null}{leads.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Choose an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Date CD opened</span><input type="date" className={`${controlClass} mt-1`} value={openedOn} onChange={event => setOpenedOn(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">As of</span><input type="date" className={`${controlClass} mt-1`} value={asOf} onChange={event => setAsOf(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Principal</span><input className={`${controlClass} mt-1`} inputMode="decimal" placeholder="575,470.95" value={amount} onChange={event => setAmount(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Rate</span><input className={`${controlClass} mt-1`} placeholder="5.125%" value={apy} onChange={event => setApy(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" placeholder="60" value={months} onChange={event => setMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Deposit code</span><input className={`${controlClass} mt-1`} value={depositCode} onChange={event => setDepositCode(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Deposit number</span><input className={`${controlClass} mt-1`} value={depositNumber} onChange={event => setDepositNumber(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Account number</span><input className={`${controlClass} mt-1`} value={accountNumber} onChange={event => setAccountNumber(event.target.value)} /></label>
+      <label className="block text-sm"><span className="font-semibold text-primary">Reference number</span><input className={`${controlClass} mt-1`} value={referenceNumber} onChange={event => setReferenceNumber(event.target.value)} /></label>
+    </div>
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {letter ? <LetterPreview html={previewHtml} title={letter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.mailbox ? `${advisor.name} <${advisor.mailbox}>` : advisor?.name || "Advisor"}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{`${lead.name} <${lead.email}>`}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /> : <p className="mt-3 text-sm text-fg">Choose the lead, advisor, open date, principal, rate, and term to preview the update.</p>}
+    <div className="mt-3 flex flex-wrap gap-2">
+      <button type="submit" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={Boolean(pending)}>{pending === "save" ? "Saving…" : savedId ? "Update active CD" : "Add active CD"}</button>
+      <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !letter} onClick={() => void save(true)}>{pending === "send" ? "Sending…" : "Send current update"}</button>
+    </div>
+  </form>;
+}
+function localDateInput() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+function portfolioHoldings(rows, email, savedId, current) {
+  const address = String(email || "").trim().toLowerCase();
+  const others = (rows || []).flatMap(row => {
+    if (String(row.email || "").trim().toLowerCase() !== address || row.id === savedId) return [];
+    const term = Number(String(row.termLabel || "").match(/(\d+)-month/)?.[1] || 0);
+    const principal = Number(String(row.amount || "").replace(/[^0-9.]/g, ""));
+    const rate = row.finalApy || String(row.termLabel || "").match(/([\d.]+)%/)?.[1] || "";
+    if (!term || !Number.isFinite(principal) || principal <= 0) return [];
+    return [{ months: term, openedOn: row.createdAt, apy: rate, principal }];
+  });
+  return [...others, ...(current ? [current] : [])].sort((a, b) => String(a.openedOn).localeCompare(String(b.openedOn)));
 }
 function ActiveCdDeskRow({
   row,
-  offer
+  offer,
+  rows,
+  advisors,
+  onSent,
+  onChanged
 }) {
+  const brand = useBrand();
   const [open, setOpen] = useState(false);
+  const [review, setReview] = useState(false);
+  const [asOf, setAsOf] = useState(localDateInput);
+  const [advisorId, setAdvisorId] = useState(row.advisorId || "");
+  const [depositCode, setDepositCode] = useState(row.depositCode || "");
+  const [depositNumber, setDepositNumber] = useState(row.depositNumber || "");
+  const [accountNumber, setAccountNumber] = useState(row.accountNumber || "");
+  const [referenceNumber, setReferenceNumber] = useState(row.referenceNumber || "");
+  const [codesError, setCodesError] = useState("");
+  const [codesPending, setCodesPending] = useState(false);
+  const [styles, setStyles] = useState(null);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (review) getEmailStyles().then(setStyles).catch(() => setStyles(null));
+  }, [review]);
   const months = Number(row.termLabel.match(/(\d+)-month/)?.[1] ?? 0);
   const base = parseApy(row.termLabel);
   const amount = Number(row.amount.replace(/[^0-9.]/g, ""));
@@ -1353,7 +1550,66 @@ function ActiveCdDeskRow({
     currency: "USD",
     maximumFractionDigits: 0
   }) : "—"], ["Issue date", row.createdAt], ["Matures", matures], ["Confirmation date", row.confirmedOn], ["Deposit code", row.depositCode], ["Deposit number", row.depositNumber], ["Account number", row.accountNumber], ["Reference number", row.referenceNumber], ["Interest rate", "Fixed"], ["Compounding", "Daily"], ["Callable feature", "Non-callable"], ["Minimum", row.minimumInvestment], ["Capital protection", row.capitalProtection], ["Advisor", row.advisorName ? `${row.advisorName}${row.advisorPhone ? ` · ${row.advisorPhone}` : ""}` : "—"], ["Signed", row.signerName ? `${row.signerName}${row.signedOn ? ` · ${row.signedOn}` : ""}` : "Not signed"], ["Contact", row.contactBy === "email" ? "Email only" : row.contactPhone || "—"], ["Wire confirmation", row.paymentFileName || "—"]];
-  return <li className="rounded-lg border border-border bg-surface"><button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left" aria-expanded={open} onClick={() => setOpen(value => !value)}><span className="min-w-0 flex-1"><span className="block font-semibold text-primary">{row.signerName || row.email}</span><span className="mt-0.5 block text-sm text-fg">{row.termLabel || row.name} · {row.amount} · opened {row.createdAt}</span></span><span className="hidden text-sm text-fg sm:block">{row.advisorName || "No advisor"}</span><ChevronDown className={"size-4 shrink-0 text-primary transition-transform " + (open ? "rotate-180" : "")} aria-hidden="true" /></button>{open ? <dl className="grid border-t border-border sm:grid-cols-2 lg:grid-cols-3">{facts.map(([label, value]) => <div key={label} className="border-b border-border px-4 py-3"><dt className="text-[11px] font-semibold tracking-wide text-heading uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}</dl> : null}</li>;
+  const advisor = advisors.find(item => item.id === (advisorId || row.advisorId)) || null;
+  const holdings = review ? portfolioHoldings(rows, row.email, "", null) : [];
+  const letter = review && advisor && holdings.length ? cdUpdateLetter({
+    leadName: row.signerName || row.email,
+    company: brand.companyName,
+    asOf,
+    holdings,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone
+  }) : null;
+  const previewHtml = letter ? applyEmailStyle(letter.html, styles?.advisor || "classic", styles?.colors || null) : "";
+  async function sendUpdate() {
+    setError("");
+    setPending(true);
+    try {
+      const result = await sendActiveCdUpdate({ data: { id: row.id, asOf, advisorId: advisor?.id || row.advisorId || "" } });
+      setReview(false);
+      onSent(`Portfolio update sent to ${result.email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The update could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return <li className="rounded-lg border border-border bg-surface">
+    <div className="flex w-full items-center gap-3 px-4 py-3">
+      <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        <span className="min-w-0 flex-1"><span className="block font-semibold text-primary">{row.signerName || row.email}</span><span className="mt-0.5 block text-sm text-fg">{row.termLabel || row.name} · {row.amount} · opened {row.createdAt}</span></span>
+        <span className="hidden text-sm text-fg sm:block">{row.advisorName || "No advisor"}</span>
+        <ChevronDown className={"size-4 shrink-0 text-primary transition-transform " + (open ? "rotate-180" : "")} aria-hidden="true" />
+      </button>
+      <button type="button" className="min-h-11 shrink-0 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => { setReview(value => !value); setError(""); }}>{review ? "Hide update" : "Send update"}</button>
+    </div>
+    {review ? <div className="border-t border-border px-4 py-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm"><span className="font-semibold text-primary">As of</span><input type="date" className={`${controlClass} mt-1`} value={asOf} onChange={event => setAsOf(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId || row.advisorId || ""} onChange={event => setAdvisorId(event.target.value)}><option value="">Choose an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      </div>
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      {letter ? <LetterPreview html={previewHtml} title={letter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor.mailbox ? `${advisor.name} <${advisor.mailbox}>` : advisor.name}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{`${row.signerName || row.email} <${row.email}>`}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /> : <p className="mt-3 text-sm text-fg">Choose an advisor to preview the portfolio update.</p>}
+      <button type="button" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending || !letter} onClick={() => void sendUpdate()}>{pending ? "Sending…" : "Send current update"}</button>
+    </div> : null}
+    {open ? <div className="border-t border-border px-4 py-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm"><span className="font-semibold text-primary">Deposit code</span><input className={`${controlClass} mt-1`} value={depositCode} onChange={event => setDepositCode(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Deposit number</span><input className={`${controlClass} mt-1`} value={depositNumber} onChange={event => setDepositNumber(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Account number</span><input className={`${controlClass} mt-1`} value={accountNumber} onChange={event => setAccountNumber(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Reference number</span><input className={`${controlClass} mt-1`} value={referenceNumber} onChange={event => setReferenceNumber(event.target.value)} /></label>
+      </div>
+      {codesError ? <p className="mt-3 text-sm text-danger">{codesError}</p> : null}
+      <button type="button" className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={codesPending} onClick={() => {
+        setCodesError("");
+        setCodesPending(true);
+        updateActiveCdReferences({ data: { id: row.id, depositCode, depositNumber, accountNumber, referenceNumber } }).then(() => onChanged()).catch(caught => setCodesError(caught instanceof Error && caught.message ? caught.message : "The reference numbers could not be saved.")).finally(() => setCodesPending(false));
+      }}>{codesPending ? "Saving…" : "Save reference numbers"}</button>
+      <dl className="mt-4 grid border-t border-border sm:grid-cols-2 lg:grid-cols-3">{facts.map(([label, value]) => <div key={label} className="border-b border-border px-4 py-3"><dt className="text-[11px] font-semibold tracking-wide text-heading uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}</dl>
+    </div> : null}
+  </li>;
 }
 function addMonths(iso, months) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -2507,6 +2763,7 @@ function PipelineLeadsPanel() {
 
 function ClientsPanel({
   rows,
+  onRefresh,
   onStatus,
   onMailed,
   onRemove
@@ -2514,7 +2771,8 @@ function ClientsPanel({
   const [pendingId, setPendingId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [error, setError] = useState("");
-  const selected = rows.find(row => row.id === selectedId) ?? null;
+  const listed = rows.filter(row => row.payload?.source !== "desk-cd");
+  const selected = listed.find(row => row.id === selectedId) ?? null;
   async function openAs(id) {
     setError("");
     setPendingId(id);
@@ -2530,11 +2788,98 @@ function ClientsPanel({
       setPendingId(null);
     }
   }
-  if (rows.length === 0) return <section><h1 className="text-3xl font-semibold">Clients</h1><p className="mt-4 rounded-lg border border-border bg-surface px-4 py-6 text-sm text-fg">No approved clients yet.</p></section>;
-  return <section><h1 className="text-3xl font-semibold">Clients</h1><p className="mt-2 text-fg">Approved investors. Select a row to open the full application. Sign in as a client to open their portal.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[640px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">Client</th><th className="px-4 py-3 font-semibold">Account</th><th className="px-4 py-3 font-semibold">Approved</th><th className="px-4 py-3 font-semibold" /></tr></thead><tbody>{rows.map(row => <tr key={row.id} className={"cursor-pointer border-b border-border last:border-0 " + (row.id === selectedId ? "bg-step-idle" : "")} onClick={() => setSelectedId(row.id)}><td className="px-4 py-3"><span className="block font-semibold text-primary">{row.applicantName}</span><span className="text-fg">{row.email}</span></td><td className="px-4 py-3">{row.accountType}</td><td className="px-4 py-3">{row.submittedAt} UTC</td><td className="px-4 py-3 text-right"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pendingId === row.id} onClick={event => {
+  return <section>
+    <h1 className="text-3xl font-semibold">Clients</h1>
+    <p className="mt-2 text-fg">Approved investors, including clients whose active CD was added on the desk. Sign in as a client to open their portal.</p>
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    <ManualCdClients onRefresh={onRefresh} onOpen={openAs} pendingId={pendingId} />
+    {listed.length === 0 ? <p className="mt-4 rounded-lg border border-border bg-surface px-4 py-6 text-sm text-fg">No approved application clients yet.</p> : <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[640px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">Client</th><th className="px-4 py-3 font-semibold">Account</th><th className="px-4 py-3 font-semibold">Approved</th><th className="px-4 py-3 font-semibold" /></tr></thead><tbody>{listed.map(row => <tr key={row.id} className={"cursor-pointer border-b border-border last:border-0 " + (row.id === selectedId ? "bg-step-idle" : "")} onClick={() => setSelectedId(row.id)}><td className="px-4 py-3"><span className="block font-semibold text-primary">{row.applicantName}</span><span className="text-fg">{row.email}</span></td><td className="px-4 py-3">{row.accountType}</td><td className="px-4 py-3">{row.submittedAt} UTC</td><td className="px-4 py-3 text-right"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pendingId === row.id} onClick={event => {
                 event.stopPropagation();
                 openAs(row.id);
-              }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>{selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onMailed={onMailed} onRemove={() => onRemove(selected.id)} /> : null}</section>;
+              }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>}
+    {selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onMailed={onMailed} onRemove={() => onRemove(selected.id)} /> : null}
+  </section>;
+}
+function ManualCdClients({ onRefresh, onOpen, pendingId }) {
+  const brand = useBrand();
+  const [rows, setRows] = useState(null);
+  const [selectedEmail, setSelectedEmail] = useState("");
+  const [styles, setStyles] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState("");
+  function load() {
+    return listManualCdClients().then(setRows);
+  }
+  useEffect(() => {
+    load().catch(() => setError("Desk clients could not be loaded."));
+    getEmailStyles().then(setStyles).catch(() => setStyles(null));
+  }, []);
+  const selected = (rows || []).find(row => row.email === selectedEmail) || null;
+  const letter = selected?.pendingPassword ? renderStep("portal_login", "client", {
+    name: selected.name,
+    email: selected.email,
+    detail: `Sign-in email: ${selected.email}\nTemporary password: ${selected.pendingPassword}`,
+    companyName: brand.companyName,
+    companyPhone: brand.companyPhone,
+    emailLogo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    transactionalStyle: styles?.transactional,
+    emailColors: styles?.colors
+  }) : null;
+  async function createLogin(email) {
+    setError("");
+    setNotice("");
+    setPending(email);
+    try {
+      const result = await createManualPortalLogin({ data: { email } });
+      await load();
+      await onRefresh();
+      setSelectedEmail(result.email);
+      setNotice(`Portal login created for ${result.email}. Sign in as this client before you send the email.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The portal login could not be created.");
+    } finally {
+      setPending("");
+    }
+  }
+  async function send(email) {
+    setError("");
+    setNotice("");
+    setPending(email);
+    try {
+      await sendManualPortalLogin({ data: { email } });
+      await load();
+      setNotice(`Portal sign-in email sent to ${email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The email could not be sent.");
+    } finally {
+      setPending("");
+    }
+  }
+  return <div className="mt-6">
+    <h2 className="text-lg font-semibold text-primary">Active CDs added on the desk</h2>
+    <p className="mt-1 text-sm text-fg">Create the portal login first, open the portal as the client, then send the transactional email.</p>
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+    {!rows ? <p className="mt-3 text-sm text-fg">Loading…</p> : rows.length === 0 ? <p className="mt-3 text-sm text-fg">No manually added active CDs yet.</p> : <ul className="mt-3 grid gap-3">{rows.map(row => <li key={row.email} className="rounded-lg border border-border bg-surface px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-semibold text-primary">{row.name}</p>
+          <p className="text-sm text-fg">{row.email} · CD opened {row.openedOn}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending === row.email} onClick={() => void createLogin(row.email)}>{pending === row.email && !row.pendingPassword ? "Creating…" : row.hasLogin ? "New temporary password" : "Create portal login"}</button>
+          {row.applicationId ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pendingId === row.applicationId} onClick={() => onOpen(row.applicationId)}>{pendingId === row.applicationId ? "Signing in…" : "Sign in as client"}</button> : null}
+          <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => setSelectedEmail(current => current === row.email ? "" : row.email)}>{selectedEmail === row.email ? "Hide email" : "Preview email"}</button>
+        </div>
+      </div>
+      {selectedEmail === row.email ? <div className="mt-3 border-t border-border pt-3">
+        {letter ? <LetterPreview html={letter.html} title={letter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-16 text-[#8c8c8c]">From</span>Transactional mailbox</p><p className="mt-1"><span className="inline-block w-16 text-[#8c8c8c]">To</span>{`${row.name} <${row.email}>`}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-16 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /> : <p className="text-sm text-fg">Create the portal login to preview the email. The temporary password is included.</p>}
+        <button type="button" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={!row.pendingPassword || pending === row.email} onClick={() => void send(row.email)}>{pending === row.email && row.pendingPassword ? "Sending…" : "Send portal email"}</button>
+      </div> : null}
+    </li>)}</ul>}
+  </div>;
 }
 const PIPELINE_STEPS = ["Promo", "Application", "Investment", "Invoice", "Payment receipt", "Confirmation package", "CD active"];
 
@@ -2690,6 +3035,7 @@ function PipelineSteps({
 function IntroOpensPanel({
   onApplication
 }) {
+  const brand = useBrand();
   const [rows, setRows] = useState(null);
   const [advisors, setAdvisors] = useState([]);
   const [query, setQuery] = useState("");
@@ -2705,6 +3051,7 @@ function IntroOpensPanel({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
+  const [review, setReview] = useState(null);
   function load(next = view) {
     return (next === "trash" ? listTrashOpens() : listIntroOpens()).then(setRows);
   }
@@ -2713,6 +3060,11 @@ function IntroOpensPanel({
   }, []);
   useEffect(() => {
     load(view).catch(() => setError(view === "trash" ? "Trash could not be loaded." : "Opened introductions could not be loaded."));
+    const onSync = () => {
+      load(view).catch(() => undefined);
+    };
+    window.addEventListener("desk-mail-sync", onSync);
+    return () => window.removeEventListener("desk-mail-sync", onSync);
   }, [view]);
   async function sync() {
     setPending(true);
@@ -2860,6 +3212,65 @@ function IntroOpensPanel({
       setPending(false);
     }
   }
+  async function openAccountReview(row) {
+    setError("");
+    setNotice("");
+    setPending(true);
+    const fallbackMonths = Number(String(row.term || "").match(/\d+/)?.[0] || 10);
+    try {
+      const found = await applicationAccountTerms({ data: { email: row.email } });
+      const months = found.months || (Number.isFinite(fallbackMonths) && fallbackMonths > 0 ? fallbackMonths : 10);
+      setReview({
+        email: row.email,
+        name: row.name,
+        advisorId: row.advisorId,
+        amount: found.amount || row.amount || "",
+        apy: found.apy || "",
+        months: String(months)
+      });
+      if (!found.months && !found.apy) setNotice("No submitted application was found, so the term was taken from the lead.");
+    } catch (caught) {
+      setReview({
+        email: row.email,
+        name: row.name,
+        advisorId: row.advisorId,
+        amount: row.amount || "",
+        apy: "",
+        months: Number.isFinite(fallbackMonths) && fallbackMonths > 0 ? String(fallbackMonths) : "10"
+      });
+      setError(caught instanceof Error && caught.message ? caught.message : "The application rate could not be loaded.");
+    } finally {
+      setPending(false);
+    }
+  }
+  async function sendAccountReady() {
+    if (!review) return;
+    setError("");
+    setNotice("");
+    if (!review.advisorId) {
+      setError("This open has no advisor, so the email cannot be sent.");
+      return;
+    }
+    setPending(true);
+    try {
+      await sendLeadAccountReady({
+        data: {
+          advisorId: review.advisorId,
+          name: review.name,
+          email: review.email,
+          amount: review.amount,
+          apy: review.apy,
+          months: Number(review.months)
+        }
+      });
+      setReview(null);
+      setNotice(`Application received email sent to ${review.email}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The email could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
   async function remove(email) {
     setError("");
     setNotice("");
@@ -2871,6 +3282,18 @@ function IntroOpensPanel({
       setError(caught instanceof Error && caught.message ? caught.message : "Could not remove this open.");
     }
   }
+  const reviewAdvisor = review ? advisors.find(item => item.id === review.advisorId) : null;
+  const reviewLetter = review ? accountReadyLetter({
+    leadName: review.name,
+    company: brand.companyName,
+    amount: review.amount || "0",
+    apy: review.apy || "0",
+    months: Number(review.months) || 10,
+    advisor: reviewAdvisor || undefined,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone
+  }) : null;
   return <section>
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -2884,6 +3307,20 @@ function IntroOpensPanel({
     </div>
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+    {review && reviewLetter ? <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void sendAccountReady(); }}>
+      <h2 className="text-lg font-semibold text-primary">Review before sending</h2>
+      <p className="mt-1 text-sm text-fg">This confirms the application and photo identification for {review.name} ({review.email}). Check the amount, rate, and term, then send.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} value={review.amount} placeholder="500,000" onChange={event => setReview(current => ({ ...current, amount: event.target.value }))} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">APY</span><input className={`${controlClass} mt-1`} value={review.apy} placeholder="5.5%" onChange={event => setReview(current => ({ ...current, apy: event.target.value }))} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={review.months} onChange={event => setReview(current => ({ ...current, months: event.target.value }))} /></label>
+      </div>
+      <LetterPreview html={reviewLetter.html} title={reviewLetter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{reviewAdvisor?.mailbox ? `${reviewAdvisor.name} <${reviewAdvisor.mailbox}>` : reviewAdvisor?.name || "Advisor"}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{`${review.name} <${review.email}>`}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{reviewLetter.subject}</p></div>} />
+      <div className="mt-3 flex gap-2">
+        <button type="submit" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : "Send email"}</button>
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setReview(null)}>Cancel</button>
+      </div>
+    </form> : null}
     <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
       <label className="block text-sm">
         <span className="font-semibold text-primary">Search lead</span>
@@ -2981,6 +3418,7 @@ function IntroOpensPanel({
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendExclusive(row)}>Exclusive promo</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendReminder(row)}>Promo reminder</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendCdars(row)}>CDARS</button> : null}
+            {view === "open" && applied ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void openAccountReview(row)}>App & ID received</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void restore(row.email)}>Restore</button> : null}
             {view === "trash" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void remove(row.email)}>Remove</button> : <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void trash(row.email)}>Delete</button>}
           </div>
@@ -3102,9 +3540,16 @@ function InboxPanel() {
     syncInboxNow().then(() => load()).catch(() => undefined);
   }, []);
   useEffect(() => {
+    const onSync = () => {
+      load(advisorId).catch(() => undefined);
+    };
+    window.addEventListener("desk-mail-sync", onSync);
+    return () => window.removeEventListener("desk-mail-sync", onSync);
+  }, [advisorId]);
+  useEffect(() => {
     const timer = setInterval(() => {
-      syncInboxNow().then(() => load(advisorId)).catch(() => undefined);
-    }, 120000);
+      load(advisorId).catch(() => undefined);
+    }, 60000);
     return () => clearInterval(timer);
   }, [advisorId]);
   useEffect(() => {

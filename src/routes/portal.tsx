@@ -1,12 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, FileUp, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TrendingUp, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
+import { BadgePercent, Banknote, Bell, CalendarClock, CalendarRange, Check, FileUp, Landmark, LayoutDashboard, Lock, Menu, Percent, Plus, Receipt, Shield, SlidersHorizontal, TrendingUp, TriangleAlert, User, Wallet, X, type LucideIcon } from "lucide-react";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import { SignaturePad } from "@/components/signature-pad";
-import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, downloadPaymentReceipt, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, updatePreparedAmount, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
+import { cancelFunding, downloadInvestmentPdf, downloadInvoicePdf, downloadPaymentReceipt, getAdminSession, getCdTerms, getInvestorPortal, getInvestorSession, getInvestmentTypes, getMyFundings, getPaymentFile, getPromo, investorLogout, changeInvestorPassword, listMyNotifications, markMyNotificationsRead, signFunding, submitFunding, updatePreparedAmount, updateInvestorProfile, uploadPaymentConfirmation, type ApplicationPayload, type CdTerm, type FundingPosition, type InvestmentType } from "@/lib/admin.functions";
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
+import { cdPortfolioValue } from "@/lib/email-templates";
 import { amountRange, dollarInputError, EMPTY_PROMO, formatBonus, formatOfferDate, matchTier, parseApy, parseDollarAmount, PROMO_MINIMUM, promoMonths, type PromoOffer } from "@/lib/promo";
 
 export const Route = createFileRoute("/portal")({
@@ -76,13 +77,13 @@ function PortalPage() {
           <p className="text-sm text-fg">Opening your account…</p>
         </main>
       ) : (
-        <PortalBody account={account} />
+        <PortalBody account={account} onAccount={setAccount} />
       )}
     </div>
   );
 }
 
-type PortalTab = "dashboard" | "active" | "transactions" | "investments" | "fund" | "manage";
+type PortalTab = "dashboard" | "active" | "transactions" | "investments" | "fund" | "manage" | "account";
 
 const PromoContext = createContext<PromoOffer>(EMPTY_PROMO);
 
@@ -97,11 +98,12 @@ const PORTAL_TABS: { id: PortalTab; label: string; icon: LucideIcon }[] = [
   { id: "investments", label: "Investments", icon: Wallet },
   { id: "fund", label: "Add investment", icon: Plus },
   { id: "manage", label: "Manage", icon: SlidersHorizontal },
+  { id: "account", label: "Account settings", icon: User },
 ];
 
-function PortalMenu({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalTab) => void }) {
+function PortalMenu({ tab, tabs, onChange }: { tab: PortalTab; tabs: typeof PORTAL_TABS; onChange: (tab: PortalTab) => void }) {
   const [open, setOpen] = useState(false);
-  const current = PORTAL_TABS.find((item) => item.id === tab) ?? PORTAL_TABS[0];
+  const current = tabs.find((item) => item.id === tab) ?? tabs[0];
 
   function choose(next: PortalTab) {
     onChange(next);
@@ -133,7 +135,7 @@ function PortalMenu({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalT
         <>
           <button type="button" className="fixed inset-0 z-20 bg-primary/20 md:hidden" aria-label="Close menu" onClick={() => setOpen(false)} />
           <ul className="menu-drop absolute inset-x-0 top-full z-30 grid gap-1 rounded-xl border border-border bg-surface p-2 shadow-lg md:hidden">
-            {PORTAL_TABS.map((item) => {
+            {tabs.map((item) => {
               const selected = tab === item.id;
               return (
                 <li key={item.id}>
@@ -158,7 +160,7 @@ function PortalMenu({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalT
         </>
       ) : null}
       <ul className="hidden gap-1 md:flex">
-        {PORTAL_TABS.map((item) => {
+        {tabs.map((item) => {
           const selected = tab === item.id;
           return (
             <li key={item.id}>
@@ -180,7 +182,7 @@ function PortalMenu({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalT
   );
 }
 
-function PortalBody({ account }: { account: PortalAccount }) {
+function PortalBody({ account, onAccount }: { account: PortalAccount; onAccount: (account: PortalAccount) => void }) {
   const [tab, setTab] = useState<PortalTab>("dashboard");
   const [positions, setPositions] = useState<FundingPosition[]>([]);
   const [notice, setNotice] = useState("");
@@ -197,12 +199,20 @@ function PortalBody({ account }: { account: PortalAccount }) {
 
   const holdings = positions.filter((position) => position.status === "payment_approved");
   const pipeline = positions.filter((position) => position.status !== "cancelled" && position.status !== "payment_approved");
+  const showManage = holdings.length === 0 || pipeline.length > 0;
+  const showInvestments = pipeline.length > 0;
+  const tabs = PORTAL_TABS.filter((item) => (item.id !== "manage" || showManage) && (item.id !== "investments" || showInvestments));
+
+  useEffect(() => {
+    if (!showManage && tab === "manage") setTab(holdings.length ? "active" : "dashboard");
+    if (!showInvestments && tab === "investments") setTab(holdings.length ? "active" : "dashboard");
+  }, [showManage, showInvestments, tab, holdings.length]);
 
   return (
     <PromoContext.Provider value={offer}>
       <div className="flex flex-1 flex-col">
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
-          <PortalMenu tab={tab} onChange={setTab} />
+          <PortalMenu tab={tab} tabs={tabs} onChange={setTab} />
           {notice ? <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg">{notice}</p> : null}
           <CelebrationBanners holdings={holdings} onActive={() => setTab("active")} />
           <PreparedBanners pipeline={pipeline} onReview={() => setTab("investments")} onChanged={() => void refresh()} />
@@ -219,22 +229,22 @@ function PortalBody({ account }: { account: PortalAccount }) {
           ) : null}
           {tab === "active" ? <ActiveCds positions={holdings} waiting={pipeline.length} account={account} onAdd={() => setTab("fund")} /> : null}
           {tab === "transactions" ? <Transactions positions={holdings} /> : null}
-          {tab === "investments" ? <InvestmentList positions={pipeline} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
+          {tab === "investments" && showInvestments ? <InvestmentList positions={pipeline} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onSigned={() => void refresh()} /> : null}
           {tab === "fund" ? (
             <FundingPanel
               preferredTerm={account.payload.preferredTerm ?? ""}
               preferredAmount={account.payload.preferredAmount ?? ""}
               onSubmitted={() => {
                 setNotice("Investment submitted. Accept the terms on the investment to continue.");
-                setTab("investments");
-                void refresh();
+                void refresh().then(() => setTab("investments"));
               }}
             />
           ) : null}
-          {tab === "manage" ? <ManageInvestments positions={positions} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onChanged={() => void refresh()} /> : null}
+          {tab === "manage" && showManage ? <ManageInvestments positions={positions} signature={account.payload.signature} phone={[account.payload.phoneCountry, account.payload.phone].filter(Boolean).join(" ")} email={account.email} onAdd={() => setTab("fund")} onChanged={() => void refresh()} /> : null}
+          {tab === "account" ? <AccountSettings account={account} onAccount={onAccount} /> : null}
           </div>
         </main>
-        <PortalFooter tab={tab} onChange={setTab} />
+        <PortalFooter tab={tab} tabs={tabs} onChange={setTab} />
       </div>
     </PromoContext.Provider>
   );
@@ -242,7 +252,7 @@ function PortalBody({ account }: { account: PortalAccount }) {
 
 const DEFAULT_FOOTER_TEXT = "FDIC insurance covers the first $250,000 per individual or $500,000 per joint account. Rates and calculator results are illustrations. Early withdrawal penalties may apply.";
 
-function PortalFooter({ tab, onChange }: { tab: PortalTab; onChange: (tab: PortalTab) => void }) {
+function PortalFooter({ tab, tabs, onChange }: { tab: PortalTab; tabs: typeof PORTAL_TABS; onChange: (tab: PortalTab) => void }) {
   const { companyName, companyPhone, footerLogo, footerText } = useBrand();
   const name = companyName || DEFAULT_COMPANY_NAME;
   const note = footerText.trim() || DEFAULT_FOOTER_TEXT;
@@ -262,7 +272,7 @@ function PortalFooter({ tab, onChange }: { tab: PortalTab; onChange: (tab: Porta
         <nav aria-label="Portal">
           <p className="text-xs font-semibold tracking-widest text-heading uppercase">Portal</p>
           <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-            {PORTAL_TABS.map((item) => (
+            {tabs.map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
@@ -878,12 +888,17 @@ function formatDate(date: Date) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
+function portfolioAsOf() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
 function currentValue(principal: number, rate: number, opened: string, months: number) {
-  const start = Date.parse(`${opened}T00:00:00Z`);
-  if (!principal || !Number.isFinite(start)) return principal;
-  const years = Math.max(0, (Date.now() - start) / (365.25 * 24 * 60 * 60 * 1000));
-  const termYears = months > 0 ? months / 12 : years;
-  return principal * Math.pow(1 + rate, Math.min(years, termYears));
+  return cdPortfolioValue(principal, String(rate * 100), opened, portfolioAsOf(), months).current;
+}
+
+function earnedInterest(principal: number, rate: number, opened: string, months: number) {
+  return cdPortfolioValue(principal, String(rate * 100), opened, portfolioAsOf(), months).interest;
 }
 
 function elapsed(start: string, end: Date | null) {
@@ -893,7 +908,7 @@ function elapsed(start: string, end: Date | null) {
   return Math.min(Math.max(((Date.now() - opened) / span) * 100, 0), 100);
 }
 
-function TermChart({ items }: { items: Array<{ id: string; months: number; amount: number; start: string; end: Date | null }> }) {
+function TermChart({ items }: { items: Array<{ id: string; months: number; amount: number; start: string; end: Date | null; earned?: number }> }) {
   return (
     <ul className="mt-4 grid gap-4">
       {items.map((item) => (
@@ -901,7 +916,7 @@ function TermChart({ items }: { items: Array<{ id: string; months: number; amoun
           <div className="relative h-10 overflow-hidden rounded-md bg-[#e7f6fc]">
             <div className="absolute inset-y-0 left-0 bg-[#6cc4ee]" style={{ width: `${elapsed(item.start, item.end)}%` }} />
             <span className="relative flex h-full items-center px-3 text-xs font-semibold text-heading">
-              {item.months}-month · {money(item.amount)}
+              {item.months}-month · {money(item.amount)}{typeof item.earned === "number" ? ` · earned ${money(item.earned)}` : ""}
             </span>
           </div>
           <div className="mt-1 flex justify-between text-xs text-fg">
@@ -1133,7 +1148,8 @@ function Dashboard({
   const lines = holdings.map((position) => ({ position, ...investmentRates(position, offer) }));
   const waiting = pipeline.map((position) => ({ position, ...investmentRates(position, offer) }));
   const total = lines.reduce((sum, line) => sum + line.principal, 0);
-  const interest = lines.reduce((sum, line) => sum + line.principal * (Math.pow(1 + line.rate, line.months / 12) - 1), 0);
+  const earned = lines.reduce((sum, line) => sum + earnedInterest(line.principal, line.rate, line.position.createdAt, line.months), 0);
+  const maturityInterest = lines.reduce((sum, line) => sum + line.principal * (Math.pow(1 + line.rate, line.months / 12) - 1), 0);
   const blended = total > 0 ? lines.reduce((sum, line) => sum + line.principal * line.rate, 0) / total : 0;
   const toSign = waiting.filter((line) => !line.position.signed && line.position.status !== "cancelled");
   const awaitingCall = waiting.filter((line) => line.position.status === "pending" && line.position.signed);
@@ -1143,7 +1159,7 @@ function Dashboard({
     .map((line) => {
       const start = line.position.createdAt;
       const end = maturityOn(start, line.months);
-      return { id: line.position.id, months: line.months, amount: line.principal, start, end };
+      return { id: line.position.id, months: line.months, amount: line.principal, earned: earnedInterest(line.principal, line.rate, line.position.createdAt, line.months), start, end };
     })
     .sort((a, b) => a.months - b.months || a.start.localeCompare(b.start));
   const schedule = lines
@@ -1178,8 +1194,8 @@ function Dashboard({
       ) : null}
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Committed" value={money(total)} icon={Wallet} />
-        <Stat label="Interest to maturity" value={money(interest)} icon={Landmark} />
-        <Stat label="Value at maturity" value={money(total + interest)} icon={LayoutDashboard} />
+        <Stat label="Interest earned" value={money(earned)} icon={Landmark} />
+        <Stat label="Value at maturity" value={money(total + maturityInterest)} icon={LayoutDashboard} />
         <Stat label={holdings.length === 1 ? "APY" : "Average APY"} value={total ? formatApy(blended) : "—"} icon={Percent} />
       </div>
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -1441,7 +1457,7 @@ function ActiveCd({ position, account }: { position: FundingPosition; account: P
         <Highlight icon={CalendarRange} label="Term" value={rates.months ? `${rates.months} months` : position.termLabel} />
         <Highlight icon={CalendarClock} label="Matures" value={matures ? formatDate(matures) : "—"} />
       </div>
-      <TermChart items={[{ id: position.id, months: rates.months, amount: rates.principal, start: opened, end: matures }]} />
+      <TermChart items={[{ id: position.id, months: rates.months, amount: rates.principal, earned: earnedInterest(rates.principal, rates.rate, opened, rates.months), start: opened, end: matures }]} />
       <button type="button" className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         {open ? "Hide CD details" : "CD details"}
       </button>
@@ -1698,14 +1714,28 @@ function openDataFile(file: string, name: string) {
 
 function Transactions({ positions }: { positions: FundingPosition[] }) {
   const receipts = positions.filter((position) => position.paymentFileName);
+  const openings = positions.filter((position) => !position.paymentFileName);
+  const empty = receipts.length === 0 && openings.length === 0;
   return (
     <section className="mt-6">
       <h1 className="text-3xl font-semibold">Transactions</h1>
-      <p className="mt-2 text-fg">Payment receipts for confirmed certificates.</p>
-      {receipts.length === 0 ? (
-        <p className="mt-6 text-sm text-fg">No payment receipts yet.</p>
+      <p className="mt-2 text-fg">Opening deposits and payment receipts for confirmed certificates.</p>
+      {empty ? (
+        <p className="mt-6 text-sm text-fg">No transactions yet.</p>
       ) : (
         <ul className="mt-4 grid gap-3">
+          {openings.map((position) => {
+            const rates = investmentRates(position, usePromo());
+            const opened = position.createdAt || position.confirmedOn;
+            return (
+              <li key={position.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-border bg-surface px-4 py-3">
+                <p className="font-semibold text-primary">Opening deposit</p>
+                <p className="text-sm text-fg">{certificateTitle(position, rates.months, rates.final)}</p>
+                <p className="text-sm font-semibold text-primary">{position.amount}</p>
+                {opened ? <p className="text-sm text-fg">{slashDate(opened)}</p> : null}
+              </li>
+            );
+          })}
           {receipts.map((position) => {
             const rates = investmentRates(position, usePromo());
             return (
@@ -2276,6 +2306,105 @@ function NotificationBell() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function AccountSettings({ account, onAccount }: { account: PortalAccount; onAccount: (account: PortalAccount) => void }) {
+  const payload = account.payload;
+  const [firstName, setFirstName] = useState(payload.firstName || "");
+  const [middleName, setMiddleName] = useState(payload.middleName || "");
+  const [surname, setSurname] = useState(payload.surname || "");
+  const [phoneCountry, setPhoneCountry] = useState(payload.phoneCountry || "");
+  const [phone, setPhone] = useState(payload.phone || "");
+  const [street, setStreet] = useState(payload.street || "");
+  const [apt, setApt] = useState(payload.apt || "");
+  const [city, setCity] = useState(payload.city || "");
+  const [region, setRegion] = useState(payload.region || "");
+  const [postal, setPostal] = useState(payload.postal || "");
+  const [country, setCountry] = useState(payload.country || "");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState(false);
+  const field = "mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3";
+  async function save(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setPending(true);
+    try {
+      await updateInvestorProfile({ data: { firstName, middleName, surname, phoneCountry, phone, street, apt, city, region, postal, country } });
+      onAccount(await getInvestorPortal());
+      setNotice("Account details saved.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The account details could not be saved.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <section className="mt-6">
+      <h1 className="text-3xl font-semibold">Account settings</h1>
+      <p className="mt-2 text-fg">Your sign-in email stays the same. Update the phone number and address on the account, and change the portal password here.</p>
+      <form className="mt-4 rounded-md border border-border bg-surface p-4" onSubmit={(event) => void save(event)}>
+        <h2 className="text-lg font-semibold text-primary">Personal information</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm"><span className="font-semibold text-primary">First name</span><input className={field} value={firstName} onChange={(event) => setFirstName(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Middle name</span><input className={field} value={middleName} onChange={(event) => setMiddleName(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Last name</span><input className={field} value={surname} onChange={(event) => setSurname(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Email</span><input className={field} value={account.email} readOnly /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Phone country</span><input className={field} value={phoneCountry} onChange={(event) => setPhoneCountry(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Phone</span><input className={field} value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
+          <label className="block text-sm sm:col-span-2"><span className="font-semibold text-primary">Street</span><input className={field} value={street} onChange={(event) => setStreet(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Apartment</span><input className={field} value={apt} onChange={(event) => setApt(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">City</span><input className={field} value={city} onChange={(event) => setCity(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">State or region</span><input className={field} value={region} onChange={(event) => setRegion(event.target.value)} /></label>
+          <label className="block text-sm"><span className="font-semibold text-primary">Postal code</span><input className={field} value={postal} onChange={(event) => setPostal(event.target.value)} /></label>
+          <label className="block text-sm sm:col-span-2"><span className="font-semibold text-primary">Country</span><input className={field} value={country} onChange={(event) => setCountry(event.target.value)} /></label>
+        </div>
+        {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+        {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+        <button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Saving…" : "Save details"}</button>
+      </form>
+      <ChangePassword />
+    </section>
+  );
+}
+
+function ChangePassword() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [nextPassword, setNextPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState(false);
+  async function save(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    setPending(true);
+    try {
+      await changeInvestorPassword({ data: { currentPassword, nextPassword, confirmPassword } });
+      setCurrentPassword("");
+      setNextPassword("");
+      setConfirmPassword("");
+      setNotice("Password changed.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The password could not be changed.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <form className="mt-4 max-w-md rounded-md border border-border bg-surface p-4" onSubmit={(event) => void save(event)}>
+      <h2 className="text-lg font-semibold text-primary">Change password</h2>
+      <p className="mt-1 text-sm text-fg">Use the temporary password from the sign-in email as the current password the first time.</p>
+      <label className="mt-3 block text-sm"><span className="font-semibold text-primary">Current password</span><input type="password" autoComplete="current-password" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
+      <label className="mt-3 block text-sm"><span className="font-semibold text-primary">New password</span><input type="password" autoComplete="new-password" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} /></label>
+      <label className="mt-3 block text-sm"><span className="font-semibold text-primary">Confirm new password</span><input type="password" autoComplete="new-password" className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-3" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+      {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
+      <button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Saving…" : "Save password"}</button>
+    </form>
   );
 }
 

@@ -102,6 +102,13 @@ export const getAdminSession = createServerFn({ method: "GET" }).handler(async (
   return { signedIn: await readSignedIn(), needsSetup: !desk.passwordHash };
 });
 
+export const pulseDeskSync = createServerFn({ method: "POST" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const { syncDeskMail } = await import("@/lib/desk-sync.server");
+  return syncDeskMail(await getSql());
+});
+
 export const adminLogin = createServerFn({ method: "POST" })
   .validator((input: { email: string; password: string }) => input)
   .handler(async ({ data }) => {
@@ -1632,6 +1639,229 @@ export const createClientFunding = createServerFn({ method: "POST" })
     return { id, amount: formatted, term: label, email: client.email, emailed: !data.skipEmail };
   });
 
+export const saveExistingActiveCd = createServerFn({ method: "POST" })
+  .validator((input: { id?: string; leadId: string; advisorId: string; openedOn: string; amount: string; apy: string; months: number; asOf: string; send?: boolean; depositCode?: string; depositNumber?: string; accountNumber?: string; referenceNumber?: string }) => {
+    const leadId = (input.leadId || "").trim();
+    const advisorId = (input.advisorId || "").trim();
+    const openedOn = (input.openedOn || "").trim();
+    const asOf = (input.asOf || "").trim();
+    const apy = (input.apy || "").trim().replace(/\s*APY/i, "");
+    const months = Math.round(Number(input.months));
+    const amount = parseDollarAmount(input.amount || "");
+    const depositCode = (input.depositCode || "").trim();
+    const depositNumber = (input.depositNumber || "").trim();
+    const accountNumber = (input.accountNumber || "").trim();
+    const referenceNumber = (input.referenceNumber || "").trim();
+    if (!leadId) throw new Error("Choose a lead.");
+    if (!advisorId) throw new Error("Choose an advisor.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(openedOn) || Number.isNaN(Date.parse(`${openedOn}T12:00:00.000Z`))) throw new Error("Enter the date the CD opened.");
+    if (openedOn > new Date().toISOString().slice(0, 10)) throw new Error("The open date cannot be in the future.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(`${asOf}T12:00:00.000Z`))) throw new Error("Enter the as-of date.");
+    if (asOf > new Date().toISOString().slice(0, 10)) throw new Error("The as-of date cannot be in the future.");
+    if (amount == null) throw new Error(dollarInputError(input.amount || ""));
+    if (!/^\d+(\.\d{1,3})?%?$/.test(apy)) throw new Error("Enter the rate, such as 5.125%.");
+    if (!Number.isFinite(months) || months < 1 || months > 120) throw new Error("Enter a term between 1 and 120 months.");
+    if (!depositCode || !depositNumber || !accountNumber || !referenceNumber) throw new Error("Enter the deposit code, deposit number, account number, and reference number.");
+    return { id: (input.id || "").trim(), leadId, advisorId, openedOn, asOf, amount: String(amount), apy: apy.endsWith("%") ? apy : `${apy}%`, months, send: Boolean(input.send), depositCode, depositNumber, accountNumber, referenceNumber };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { cdUpdateLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    await ensureFundingExtras(sql);
+    await ensureCrmLeads(sql);
+    const leads = await sql<{ name: string; email: string }>`select name, email from crm_leads where id = ${data.leadId} limit 1`;
+    const lead = leads[0];
+    const email = (lead?.email || "").trim().toLowerCase();
+    if (!lead || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Choose a lead with an email address.");
+    const advisors = await sql<{ id: string }>`select id from advisors where id = ${data.advisorId}`;
+    if (!advisors[0]) throw new Error("Choose an advisor.");
+    const types = await sql<{ id: string }>`select id from investment_types where id = 'cd'`;
+    if (!types[0]) throw new Error("Certificates are not available.");
+    const opened = `${data.openedOn}T12:00:00.000Z`;
+    const dollars = Number(data.amount);
+    const formatted = dollars.toLocaleString("en-US", { style: "currency", currency: "USD" });
+    const label = `${data.months}-month · ${data.apy.includes("APY") ? data.apy : `${data.apy} APY`}`;
+    const name = lead.name.trim() || email;
+    const clash = await sql<{ id: string }>`
+      select id from fundings
+      where id is distinct from nullif(${data.id}, '')::uuid
+        and (
+          deposit_code = ${data.depositCode}
+          or deposit_number = ${data.depositNumber}
+          or account_number = ${data.accountNumber}
+          or reference_number = ${data.referenceNumber}
+        )
+      limit 1
+    `;
+    if (clash[0]) throw new Error("That number is already used on another investment.");
+    let id = data.id;
+    if (id) {
+      const existing = await sql<{ id: string }>`select id from fundings where id = ${id} and origin = 'existing' limit 1`;
+      if (!existing[0]) throw new Error("This certificate could not be updated.");
+      await sql`
+        update fundings
+        set email = ${email}, amount = ${formatted}, term_label = ${label}, promo_apy = ${"—"}, final_apy = ${data.apy},
+            advisor_id = ${data.advisorId}, signer_name = ${name}, status = ${"payment_approved"},
+            created_at = ${opened}::timestamptz, payment_approved_at = ${opened}::timestamptz,
+            signed_at = coalesce(signed_at, ${opened}::timestamptz),
+            deposit_code = ${data.depositCode}, deposit_number = ${data.depositNumber},
+            account_number = ${data.accountNumber}, reference_number = ${data.referenceNumber}
+        where id = ${id}
+      `;
+    } else {
+      id = crypto.randomUUID();
+      await sql`
+        insert into fundings (
+          id, email, type_id, amount, frequency, term_label, status, advisor_id,
+          deposit_code, deposit_number, account_number, reference_number, promo_apy, final_apy,
+          origin, signer_name, signature, signed_at, created_at, payment_approved_at
+        ) values (
+          ${id}, ${email}, ${"cd"}, ${formatted}, ${""}, ${label}, ${"payment_approved"}, ${data.advisorId},
+          ${data.depositCode}, ${data.depositNumber}, ${data.accountNumber}, ${data.referenceNumber}, ${"—"}, ${data.apy},
+          ${"existing"}, ${name}, ${""}, ${opened}::timestamptz, ${opened}::timestamptz, ${opened}::timestamptz
+        )
+      `;
+    }
+    if (data.send) {
+      const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo', 'public_domain')`;
+      const stored = await sql<{ amount: string; term_label: string; final_apy: string; opened_on: string }>`
+        select amount, term_label, final_apy, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as opened_on
+        from fundings
+        where lower(email) = ${email} and status = 'payment_approved'
+        order by created_at asc
+      `;
+      const holdings = stored.flatMap((row) => {
+        const months = Number(row.term_label.match(/(\d+)-month/)?.[1] || 0);
+        const principal = Number(String(row.amount).replace(/[^0-9.]/g, ""));
+        const apy = (row.final_apy || row.term_label.match(/([\d.]+)%/)?.[1] || "").trim();
+        if (!months || !Number.isFinite(principal) || principal <= 0) return [];
+        return [{ months, openedOn: row.opened_on, apy, principal }];
+      });
+      const letter = cdUpdateLetter({
+        leadName: name,
+        company: settings.find((row) => row.key === "company_name")?.value || "",
+        asOf: data.asOf,
+        holdings,
+        companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+        logo: settings.find((row) => row.key === "email_logo")?.value || null,
+        portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
+      });
+      await sendAdvisorClientLetter(sql, {
+        to: email,
+        name,
+        advisorId: data.advisorId,
+        subject: letter.subject,
+        message: letter.message,
+        step: "cd_status_update",
+        relatedId: id,
+      });
+    }
+    return { id, amount: formatted, term: label, email, emailed: data.send };
+  });
+
+export const updateActiveCdReferences = createServerFn({ method: "POST" })
+  .validator((input: { id: string; depositCode: string; depositNumber: string; accountNumber: string; referenceNumber: string }) => {
+    const id = (input.id || "").trim();
+    const depositCode = (input.depositCode || "").trim();
+    const depositNumber = (input.depositNumber || "").trim();
+    const accountNumber = (input.accountNumber || "").trim();
+    const referenceNumber = (input.referenceNumber || "").trim();
+    if (!id) throw new Error("Choose a certificate.");
+    if (!depositCode || !depositNumber || !accountNumber || !referenceNumber) throw new Error("Enter the deposit code, deposit number, account number, and reference number.");
+    return { id, depositCode, depositNumber, accountNumber, referenceNumber };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const current = await sql<{ id: string; status: string }>`select id, status from fundings where id = ${data.id} limit 1`;
+    if (!current[0] || current[0].status !== "payment_approved") throw new Error("This certificate is not active.");
+    const clash = await sql<{ id: string }>`
+      select id from fundings
+      where id <> ${data.id}
+        and (
+          deposit_code = ${data.depositCode}
+          or deposit_number = ${data.depositNumber}
+          or account_number = ${data.accountNumber}
+          or reference_number = ${data.referenceNumber}
+        )
+      limit 1
+    `;
+    if (clash[0]) throw new Error("That number is already used on another investment.");
+    await sql`
+      update fundings
+      set deposit_code = ${data.depositCode}, deposit_number = ${data.depositNumber},
+          account_number = ${data.accountNumber}, reference_number = ${data.referenceNumber}
+      where id = ${data.id}
+    `;
+    return { ok: true as const };
+  });
+
+export const sendActiveCdUpdate = createServerFn({ method: "POST" })
+  .validator((input: { id: string; asOf: string; advisorId?: string }) => {
+    const id = (input.id || "").trim();
+    const asOf = (input.asOf || "").trim();
+    const advisorId = (input.advisorId || "").trim();
+    if (!id) throw new Error("Choose a certificate.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(`${asOf}T12:00:00.000Z`))) throw new Error("Enter the as-of date.");
+    if (asOf > new Date().toISOString().slice(0, 10)) throw new Error("The as-of date cannot be in the future.");
+    return { id, asOf, advisorId };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { cdUpdateLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    const found = await sql<{ email: string; signer_name: string; advisor_id: string | null; status: string }>`
+      select email, coalesce(signer_name, '') as signer_name, advisor_id, status
+      from fundings where id = ${data.id} limit 1
+    `;
+    const certificate = found[0];
+    if (!certificate || certificate.status !== "payment_approved") throw new Error("This certificate is not active.");
+    const email = certificate.email.trim().toLowerCase();
+    const advisorId = data.advisorId || certificate.advisor_id || "";
+    if (!advisorId) throw new Error("Choose an advisor.");
+    const advisors = await sql<{ id: string }>`select id from advisors where id = ${advisorId}`;
+    if (!advisors[0]) throw new Error("Choose an advisor.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo', 'public_domain')`;
+    const stored = await sql<{ amount: string; term_label: string; final_apy: string; opened_on: string }>`
+      select amount, term_label, final_apy, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as opened_on
+      from fundings
+      where lower(email) = ${email} and status = 'payment_approved'
+      order by created_at asc
+    `;
+    const holdings = stored.flatMap((row) => {
+      const months = Number(row.term_label.match(/(\d+)-month/)?.[1] || 0);
+      const principal = Number(String(row.amount).replace(/[^0-9.]/g, ""));
+      const apy = (row.final_apy || row.term_label.match(/([\d.]+)%/)?.[1] || "").trim();
+      if (!months || !Number.isFinite(principal) || principal <= 0) return [];
+      return [{ months, openedOn: row.opened_on, apy, principal }];
+    });
+    if (!holdings.length) throw new Error("This certificate has no term or amount to report.");
+    const name = certificate.signer_name.trim() || email;
+    const letter = cdUpdateLetter({
+      leadName: name,
+      company: settings.find((row) => row.key === "company_name")?.value || "",
+      asOf: data.asOf,
+      holdings,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
+    });
+    await sendAdvisorClientLetter(sql, {
+      to: email,
+      name,
+      advisorId,
+      subject: letter.subject,
+      message: letter.message,
+      step: "cd_status_update",
+      relatedId: data.id,
+    });
+    return { email };
+  });
+
 export const updatePreparedAmount = createServerFn({ method: "POST" })
   .validator((input: { id: string; amount: string }) => {
     const id = (input.id || "").trim();
@@ -2209,6 +2439,103 @@ export const sendLeadPromoReminder = createServerFn({ method: "POST" })
     });
     await releaseOpen(sql, data.email);
     return { ok: true as const };
+  });
+
+export const sendLeadAccountReady = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; amount: string; apy: string; months: number }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    const amount = input.amount.trim();
+    const apy = input.apy.trim().replace(/\s*APY/i, "");
+    const months = Math.round(Number(input.months));
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    const cleaned = amount.replace(/[$\s]/g, "");
+    const grouped = cleaned.includes(",") ? /^\d{1,3}(,\d{3})+(\.\d{1,2})?$/ : /^\d+(\.\d{1,2})?$/;
+    const dollars = grouped.test(cleaned) ? Number(cleaned.replace(/,/g, "")) : NaN;
+    if (!Number.isFinite(dollars) || dollars <= 0) throw new Error("Enter the account amount, such as 500,000.");
+    if (!/^\d+(\.\d{1,3})?%?$/.test(apy)) throw new Error("Enter the rate, such as 5.5%.");
+    if (!Number.isFinite(months) || months < 1 || months > 120) throw new Error("Enter a term between 1 and 120 months.");
+    return { advisorId: input.advisorId, name, email, amount, apy: apy.endsWith("%") ? apy : `${apy}%`, months };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { accountReadyLetter } = await import("@/lib/email-templates");
+    const sql = await getSql();
+    const submitted = await sql<{ id: string }>`select id from applications where lower(email) = ${data.email} limit 1`;
+    if (!submitted[0]) throw new Error("This lead has not submitted an application.");
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    const letter = accountReadyLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      amount: data.amount,
+      apy: data.apy,
+      months: data.months,
+      advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+    });
+    await sendStep(sql, {
+      step: "lead_account_ready",
+      clientEmail: data.email,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: `${data.amount} · ${data.apy} · ${data.months}-month`,
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    return { ok: true as const };
+  });
+
+export const applicationAccountTerms = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = input.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { matchTier, parseApy, parseDollarAmount } = await import("@/lib/promo");
+    const sql = await getSql();
+    const rows = await sql<{ payload: ApplicationPayload | string }>`
+      select payload from applications
+      where lower(email) = ${data.email}
+      order by submitted_at desc
+      limit 1
+    `;
+    const payload = rows[0] ? (typeof rows[0].payload === "string" ? JSON.parse(rows[0].payload) as ApplicationPayload : rows[0].payload) : null;
+    if (!payload) return { amount: "", apy: "", months: 0 };
+    const months = Math.round(Number(payload.preferredTerm));
+    const amount = (payload.preferredAmount || "").trim();
+    const locked = (payload.exclusiveApy || payload.cdarsApy || "").trim();
+    if (locked) return { amount, apy: locked, months: Number.isFinite(months) ? months : 0 };
+    if (!Number.isFinite(months) || months < 1) return { amount, apy: "", months: 0 };
+    const terms = await sql<{ apy: string }>`select apy from cd_terms where months = ${months} order by featured desc, sort_order asc limit 1`;
+    const base = terms[0]?.apy || "";
+    const dollars = parseDollarAmount(amount) ?? Number(String(amount).replace(/[^0-9.]/g, ""));
+    const offer = await loadPromo(sql);
+    const tier = Number.isFinite(dollars) ? matchTier(offer, months, dollars) : null;
+    if (!base) return { amount, apy: "", months };
+    const final = parseApy(base) * 100 + (tier?.bonusPercent || 0);
+    const digits = Math.round(final * 1000) % 10 === 0 ? 2 : 3;
+    return { amount, apy: `${final.toFixed(digits)}%`, months };
   });
 
 async function readCdarsRates(sql: Sql): Promise<CdarsRate[]> {
@@ -4649,6 +4976,218 @@ export const sendPortalAccess = createServerFn({ method: "POST" })
       relatedId: data.id,
     });
     return { ok: true as const, email, password };
+  });
+
+export const listManualCdClients = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  await sql`alter table applications add column if not exists portal_password_pending text not null default ''`;
+  const rows = await sql<{
+    email: string;
+    name: string;
+    opened_on: string;
+    application_id: string | null;
+    applicant_name: string | null;
+    status: string | null;
+    has_login: boolean;
+    pending_password: string | null;
+  }>`
+    select distinct on (lower(f.email))
+      lower(f.email) as email,
+      coalesce(nullif(f.signer_name, ''), nullif(l.name, ''), f.email) as name,
+      to_char(f.created_at at time zone 'UTC', 'YYYY-MM-DD') as opened_on,
+      a.id as application_id,
+      a.applicant_name,
+      a.status,
+      (a.password_hash is not null) as has_login,
+      coalesce(a.portal_password_pending, '') as pending_password
+    from fundings f
+    left join crm_leads l on lower(l.email) = lower(f.email)
+    left join lateral (
+      select id, applicant_name, status, password_hash, portal_password_pending
+      from applications
+      where lower(email) = lower(f.email)
+      order by submitted_at desc
+      limit 1
+    ) a on true
+    where f.status = 'payment_approved' and f.origin = 'existing'
+    order by lower(f.email), f.created_at desc
+  `;
+  return rows.map((row) => ({
+    email: row.email,
+    name: row.applicant_name?.trim() || row.name,
+    openedOn: row.opened_on,
+    applicationId: row.application_id || "",
+    approved: row.status === "approved",
+    hasLogin: Boolean(row.has_login),
+    pendingPassword: row.pending_password || "",
+  }));
+});
+
+export const createManualPortalLogin = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Choose a client.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { hashPassword } = await import("@/lib/passwords.server");
+    const { EMPTY_FORM } = await import("@/lib/application-data");
+    const sql = await getSql();
+    await sql`alter table applications add column if not exists portal_password_pending text not null default ''`;
+    const fundings = await sql<{ signer_name: string; lead_name: string | null; phone: string }>`
+      select coalesce(nullif(f.signer_name, ''), '') as signer_name,
+             l.name as lead_name,
+             coalesce(nullif(f.contact_phone, ''), nullif(l.phone, ''), '') as phone
+      from fundings f
+      left join crm_leads l on lower(l.email) = lower(f.email)
+      where lower(f.email) = ${data.email} and f.status = 'payment_approved' and f.origin = 'existing'
+      order by f.created_at desc
+      limit 1
+    `;
+    if (!fundings[0]) throw new Error("This client has no manually added active CD.");
+    const name = (fundings[0].signer_name || fundings[0].lead_name || data.email).trim();
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    const password = Array.from(randomBytes(12), (byte) => alphabet[byte % alphabet.length]).join("");
+    const passwordHash = await hashPassword(password);
+    const existing = await sql<{ id: string }>`
+      select id from applications where lower(email) = ${data.email} order by submitted_at desc limit 1
+    `;
+    let id = existing[0]?.id || "";
+    if (id) {
+      await sql`
+        update applications
+        set status = 'approved', password_hash = ${passwordHash}, portal_password_pending = ${password}, applicant_name = coalesce(nullif(applicant_name, ''), ${name})
+        where id = ${id}
+      `;
+    } else {
+      const parts = name.split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || name;
+      const surname = parts.slice(1).join(" ");
+      const { password: _password, confirmPassword: _confirm, ...base } = EMPTY_FORM;
+      void _password;
+      void _confirm;
+      const payload = { ...base, firstName, surname, email: data.email, phone: fundings[0].phone, process: "portal" as const, source: "desk-cd" };
+      id = crypto.randomUUID();
+      await sql`
+        insert into applications (id, status, applicant_name, email, account_type, currency, payload, password_hash, portal_password_pending)
+        values (${id}, ${"approved"}, ${name}, ${data.email}, ${"Individual"}, ${"USD"}, ${JSON.stringify(payload)}::jsonb, ${passwordHash}, ${password})
+      `;
+    }
+    await sql`
+      insert into investor_users (email, password_hash, application_id)
+      values (${data.email}, ${passwordHash}, ${id})
+      on conflict (email) do update
+      set password_hash = excluded.password_hash, application_id = excluded.application_id
+    `;
+    return { id, email: data.email, name, password };
+  });
+
+export const sendManualPortalLogin = createServerFn({ method: "POST" })
+  .validator((input: { email: string }) => {
+    const email = (input.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Choose a client.");
+    return { email };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`alter table applications add column if not exists portal_password_pending text not null default ''`;
+    const rows = await sql<{ id: string; applicant_name: string; status: string; pending: string }>`
+      select id, applicant_name, status, coalesce(portal_password_pending, '') as pending
+      from applications
+      where lower(email) = ${data.email}
+      order by submitted_at desc
+      limit 1
+    `;
+    const row = rows[0];
+    if (!row || row.status !== "approved" || !row.pending) throw new Error("Create the portal login before sending the email.");
+    await sendStep(sql, {
+      step: "portal_login",
+      clientEmail: data.email,
+      clientName: row.applicant_name,
+      detail: [`Sign-in email: ${data.email}`, `Temporary password: ${row.pending}`].join("\n"),
+      adminDetail: "Portal sign-in emailed. The temporary password is not included in this notice.",
+      relatedId: row.id,
+      subject: "Your investor portal sign-in",
+    });
+    await sql`update applications set portal_password_pending = '' where id = ${row.id}`;
+    return { ok: true as const, email: data.email };
+  });
+
+export const changeInvestorPassword = createServerFn({ method: "POST" })
+  .validator((input: { currentPassword: string; nextPassword: string; confirmPassword: string }) => {
+    const currentPassword = input.currentPassword || "";
+    const nextPassword = input.nextPassword || "";
+    const confirmPassword = input.confirmPassword || "";
+    if (!currentPassword) throw new Error("Enter the current password.");
+    if (nextPassword.length < 8) throw new Error("Use at least 8 characters.");
+    if (nextPassword !== confirmPassword) throw new Error("The new passwords do not match.");
+    return { currentPassword, nextPassword };
+  })
+  .handler(async ({ data }) => {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    const email = getCookie("ah_investor")?.trim().toLowerCase();
+    if (!email) throw new Error("Sign in required.");
+    const { getSql } = await import("@/lib/db");
+    const { hashPassword, verifyPassword } = await import("@/lib/passwords.server");
+    const sql = await getSql();
+    await sql`alter table applications add column if not exists portal_password_pending text not null default ''`;
+    const rows = await sql<{ id: string; password_hash: string | null }>`
+      select id, password_hash from applications where lower(email) = ${email} and status = 'approved' order by submitted_at desc limit 1
+    `;
+    const row = rows[0];
+    if (!row?.password_hash || !(await verifyPassword(data.currentPassword, row.password_hash))) throw new Error("The current password is not correct.");
+    const passwordHash = await hashPassword(data.nextPassword);
+    await sql`update applications set password_hash = ${passwordHash}, portal_password_pending = '' where id = ${row.id}`;
+    await sql`
+      insert into investor_users (email, password_hash, application_id)
+      values (${email}, ${passwordHash}, ${row.id})
+      on conflict (email) do update
+      set password_hash = excluded.password_hash, application_id = excluded.application_id
+    `;
+    return { ok: true as const };
+  });
+
+export const updateInvestorProfile = createServerFn({ method: "POST" })
+  .validator((input: { firstName?: string; middleName?: string; surname?: string; phoneCountry?: string; phone?: string; street?: string; apt?: string; city?: string; region?: string; postal?: string; country?: string }) => {
+    const clean = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const profile = {
+      firstName: clean(input.firstName, 80),
+      middleName: clean(input.middleName, 80),
+      surname: clean(input.surname, 80),
+      phoneCountry: clean(input.phoneCountry, 80),
+      phone: clean(input.phone, 40),
+      street: clean(input.street, 120),
+      apt: clean(input.apt, 40),
+      city: clean(input.city, 80),
+      region: clean(input.region, 80),
+      postal: clean(input.postal, 20),
+      country: clean(input.country, 80),
+    };
+    if (!profile.firstName && !profile.surname) throw new Error("Enter your name.");
+    return profile;
+  })
+  .handler(async ({ data }) => {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    const email = getCookie("ah_investor")?.trim().toLowerCase();
+    if (!email) throw new Error("Sign in required.");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ id: string; payload: ApplicationPayload | string }>`
+      select id, payload from applications where lower(email) = ${email} and status = 'approved' order by submitted_at desc limit 1
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("Account not found.");
+    const current = typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload;
+    const payload = { ...current, ...data, email };
+    const name = [data.firstName, data.middleName, data.surname].filter(Boolean).join(" ");
+    await sql`update applications set applicant_name = ${name}, payload = ${JSON.stringify(payload)}::jsonb where id = ${row.id}`;
+    return { ok: true as const };
   });
 
 export const requestPortalAccess = createServerFn({ method: "POST" })

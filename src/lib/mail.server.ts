@@ -665,6 +665,21 @@ const STATUS_LABEL: Record<string, string> = {
   complained: "Complained",
 };
 
+export async function watchMailStatuses() {
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const mail = await readMailConfig(sql);
+  if (!mail.statusWatch || !mail.smtpKey) return { checked: 0, updated: 0 };
+  const result = await syncResendStatuses(sql, { quiet: true });
+  if (result.changes.length) {
+    const lines = result.changes.slice(0, 12).map((change) => `${STATUS_LABEL[change.status] || change.status} · ${change.recipient}\n${change.subject}`);
+    const more = result.changes.length > 12 ? `\n\n+${result.changes.length - 12} more` : "";
+    const subject = result.changes.length === 1 ? `Email ${(STATUS_LABEL[result.changes[0].status] || result.changes[0].status).toLowerCase()}` : `${result.changes.length} email statuses changed`;
+    await sendTelegramNotice(sql, subject, `${lines.join("\n\n")}${more}`);
+  }
+  return { checked: result.checked, updated: result.updated };
+}
+
 export function ensureMailStatusSchedule() {
   const globalRef = globalThis as typeof globalThis & { __mailStatusTimer?: ReturnType<typeof setInterval>; __mailStatusRunning?: boolean };
   if (globalRef.__mailStatusTimer) return;
@@ -672,16 +687,7 @@ export function ensureMailStatusSchedule() {
     if (globalRef.__mailStatusRunning) return;
     globalRef.__mailStatusRunning = true;
     try {
-      const { getSql } = await import("@/lib/db");
-      const sql = await getSql();
-      const mail = await readMailConfig(sql);
-      if (!mail.statusWatch || !mail.smtpKey) return;
-      const result = await syncResendStatuses(sql, { quiet: true });
-      if (!result.changes.length) return;
-      const lines = result.changes.slice(0, 12).map((change) => `${STATUS_LABEL[change.status] || change.status} · ${change.recipient}\n${change.subject}`);
-      const more = result.changes.length > 12 ? `\n\n+${result.changes.length - 12} more` : "";
-      const subject = result.changes.length === 1 ? `Email ${ (STATUS_LABEL[result.changes[0].status] || result.changes[0].status).toLowerCase() }` : `${result.changes.length} email statuses changed`;
-      await sendTelegramNotice(sql, subject, `${lines.join("\n\n")}${more}`);
+      await watchMailStatuses();
     } catch (error) {
       console.error("[mail] Status check failed:", error);
     } finally {

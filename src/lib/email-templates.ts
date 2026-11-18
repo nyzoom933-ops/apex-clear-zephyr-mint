@@ -4,6 +4,7 @@ import { amountRange, formatBonus, formatOfferDate, parseApy, type PromoOffer } 
 export type MailStep =
   | "application_submitted"
   | "application_approved"
+  | "portal_login"
   | "application_hold"
   | "application_pending"
   | "investment_submitted"
@@ -25,13 +26,14 @@ export type MailStep =
   | "lead_exclusive"
   | "lead_cdars"
   | "lead_cdars_intro"
+  | "lead_account_ready"
   | "invoice_advisor";
 
 export function mailStepLabel(step: string) {
   return STEPS[step as MailStep]?.label || step;
 }
 
-export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "invoice_advisor"]);
+export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "lead_account_ready", "invoice_advisor"]);
 
 export type MailAudience = "client" | "admin";
 
@@ -69,6 +71,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     clientNext: "Sign in with this email and the password from your application. Open Funding to choose a certificate.",
     adminSubject: "Application approved for {{name}}",
     adminLead: "{{name}} ({{email}}) was approved. Their investor sign-in is active.",
+  },
+  portal_login: {
+    label: "Portal sign-in",
+    clientSubject: "Your investor portal sign-in",
+    clientLead: "A sign-in for the investor portal is ready. Use the email and temporary password below.",
+    clientNext: "After you sign in, open Manage and choose Change password. Enter the temporary password, then a new password of at least 8 characters, and save it.",
+    adminSubject: "Portal sign-in sent to {{name}}",
+    adminLead: "A portal sign-in was emailed to {{name}} ({{email}}). The temporary password is not included here.",
   },
   application_hold: {
     label: "Application on hold",
@@ -237,6 +247,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     clientNext: "",
     adminSubject: "CDARS introduction sent to {{name}}",
     adminLead: "A CDARS introduction was sent to {{name}} ({{email}}).",
+  },
+  lead_account_ready: {
+    label: "Application and ID received",
+    clientSubject: "Your Promotional CD account is ready for funding",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Account ready notice sent to {{name}}",
+    adminLead: "The application and photo identification were confirmed received for {{name}} ({{email}}).",
   },
   invoice_advisor: {
     label: "Advisor invoice letter",
@@ -423,7 +441,7 @@ export function renderStep(
   const subject = fill(input.copy?.subject ?? (audience === "client" ? item.clientSubject : item.adminSubject), name, input.email, company);
   const nextRaw = input.copy?.next ?? item.clientNext;
   const next = audience === "client" && nextRaw ? fill(nextRaw, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "invoice_advisor";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "lead_account_ready" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -438,7 +456,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_account_ready" ? sampleAccountReadyLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   const chosenStyle = isFullLetter ? input.advisorStyle : input.transactionalStyle;
   return {
     step,
@@ -1697,6 +1715,196 @@ function samplePromoReminderLetter(portalUrl?: string, advisor?: MailAdvisor, co
     promoCode: "CDPROMO",
     link: base || "#",
   }).html;
+}
+
+export function accountReadyLetter(input: {
+  leadName: string;
+  company: string;
+  amount: string;
+  apy: string;
+  months: number;
+  advisor?: MailAdvisor;
+  logo?: string | null;
+  portalUrl?: string;
+  companyPhone?: string;
+}) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.leadName.trim() || "Client";
+  const subject = "Your Promotional CD account is ready for funding";
+  const amount = formatAccountAmount(input.amount);
+  const apy = formatAccountApy(input.apy);
+  const term = `${input.months}-Month CD`;
+  const established = `Your Promotional CD account for the amount of ${amount}, with a ${apy} APY - ${term}, has now been successfully established and is ready for funding.`;
+  const logo = emailLogoSrc(input.logo, input.portalUrl);
+  const mark = logo
+    ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
+    : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
+  const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
+  const help = companyHelp(input.companyPhone);
+  const text = [
+    `Dear ${name},`,
+    "This email is to confirm that your application for the Promotional CD account, along with the photo identification, have been received and approved.",
+    established,
+    "Once you confirm that you are ready to proceed, we will provide the funding instructions and one of our Senior Advisors will assist you through the process.",
+    sign.text,
+    input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : "",
+  ].filter(Boolean).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">Your application and photo identification have been received. The promotional CD account is ready for funding.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;"><tr><td align="center" style="padding:20px 10px;">
+    <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
+      <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
+      <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
+      <tr><td style="padding:28px 36px 24px 36px;">
+        <p style="margin:0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Promotional CD</p>
+        <h1 style="margin:8px 0 0 0; font-size:26px; line-height:32px; color:#12315c;">Application and identification received</h1>
+        <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">This email is to confirm that your application for the Promotional CD account, along with the photo identification, have been received and approved.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Your Promotional CD account for the amount of <strong>${escapeHtml(amount)}</strong>, with a <strong>${escapeHtml(apy)} APY</strong> — <strong>${escapeHtml(term)}</strong>, has now been successfully established and is ready for funding.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Once you confirm that you are ready to proceed, we will provide the funding instructions and one of our Senior Advisors will assist you through the process.</p>
+        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+      </td></tr>
+      <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
+        <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
+        <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
+      </td></tr>
+      <tr><td style="padding:16px 36px 22px 36px; background:#f7fbfe;">
+        <p style="margin:0; font-size:11px; line-height:16px; color:#5a6a7a;">This notice confirms receipt and approval of the application and photo identification. Funding instructions are sent only after you confirm that you are ready to proceed. A penalty may apply to an early withdrawal.</p>
+        <p style="margin:8px 0 0 0; font-size:11px; line-height:16px; color:#8a9aaa;">${companyCredit(company)}</p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+  return { subject, text, html };
+}
+
+function formatAccountAmount(raw: string) {
+  const cleaned = raw.trim().replace(/[$\s]/g, "");
+  const grouped = cleaned.includes(",") ? /^\d{1,3}(,\d{3})+(\.\d{1,2})?$/ : /^\d+(\.\d{1,2})?$/;
+  if (!grouped.test(cleaned)) return raw.trim() || "$0";
+  const value = Number(cleaned.replace(/,/g, ""));
+  if (!Number.isFinite(value)) return raw.trim();
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value % 1 ? 2 : 0 });
+}
+
+function formatAccountApy(raw: string) {
+  const value = raw.trim().replace(/\s*APY/i, "").replace(/%/g, "");
+  return value ? `${value}%` : "—";
+}
+
+function sampleAccountReadyLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  return accountReadyLetter({
+    leadName: "Jonah Hale",
+    company: DEFAULT_COMPANY_NAME,
+    portalUrl,
+    advisor,
+    companyPhone,
+    amount: "500000",
+    apy: "5.5%",
+    months: 10,
+  }).html;
+}
+
+export type CdHolding = {
+  months: number;
+  openedOn: string;
+  apy: string;
+  principal: number;
+};
+
+export function cdPortfolioValue(principal: number, apy: string, openedOn: string, asOf: string, months: number) {
+  const rate = Number(String(apy).replace(/[^0-9.]/g, ""));
+  const clean = roundCents(principal);
+  if (!Number.isFinite(clean) || !Number.isFinite(rate) || !openedOn || !asOf) return { current: clean || 0, interest: 0 };
+  const maturity = addCalendarMonths(openedOn, months);
+  const open = Date.parse(`${openedOn.slice(0, 10)}T00:00:00.000Z`);
+  const end = Date.parse(`${asOf.slice(0, 10)}T00:00:00.000Z`);
+  const mature = maturity ? Date.parse(`${maturity}T00:00:00.000Z`) : end;
+  if (!Number.isFinite(open) || !Number.isFinite(end) || end <= open) return { current: clean, interest: 0 };
+  const capped = Math.min(end, Number.isFinite(mature) ? mature : end);
+  const days = Math.max(0, Math.round((capped - open) / 86400000));
+  const current = roundCents(clean * Math.pow(1 + rate / 100 / 365, days));
+  return { current, interest: roundCents(current - clean) };
+}
+
+function roundCents(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function portfolioMoney(value: number) {
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function cdUpdateLetter(input: {
+  leadName: string;
+  company: string;
+  asOf: string;
+  holdings: CdHolding[];
+  advisor?: MailAdvisor;
+  logo?: string | null;
+  portalUrl?: string;
+  companyPhone?: string;
+}) {
+  const company = input.company.trim() || DEFAULT_COMPANY_NAME;
+  const name = input.leadName.trim() || "Client";
+  const asOf = formatLongDate(input.asOf);
+  const subject = `Update on Your CD Portfolio as of ${asOf}`;
+  const rows = input.holdings
+    .filter((item) => item.months > 0 && Number.isFinite(item.principal))
+    .map((item) => {
+      const value = cdPortfolioValue(item.principal, item.apy, item.openedOn, input.asOf, item.months);
+      return {
+        name: `${item.months}-Month CD`,
+        opened: formatLongDate(item.openedOn),
+        term: `${item.months} months`,
+        rate: formatAccountApy(item.apy),
+        principal: roundCents(item.principal),
+        current: value.current,
+        interest: value.interest,
+      };
+    });
+  const totals = rows.reduce((sum, row) => ({
+    principal: roundCents(sum.principal + row.principal),
+    current: roundCents(sum.current + row.current),
+    interest: roundCents(sum.interest + row.interest),
+  }), { principal: 0, current: 0, interest: 0 });
+  const intro = `As requested, I have provided you with a quick update on your current Certificates of Deposit (CDs) held with ${company} as of ${asOf}.`;
+  const close = "Please let me know if you’d like to discuss purchasing an additional CD or if you’d like me to prepare projections through each maturity date.";
+  const message = [
+    intro,
+    "",
+    "CD | Open Date | Term | Rate | Principal | Interest Earned | Current Value",
+    ":--- | :--- | :--- | ---: | ---: | ---: | ---:",
+    ...rows.map((row) => `${row.name} | ${row.opened} | ${row.term} | ${row.rate} | ${portfolioMoney(row.principal)} | ${portfolioMoney(row.interest)} | ${portfolioMoney(row.current)}`),
+    `**Total** |  |  |  | **${portfolioMoney(totals.principal)}** | **${portfolioMoney(totals.interest)}** | **${portfolioMoney(totals.current)}**`,
+    "",
+    close,
+  ].join("\n");
+  const advisor = input.advisor || { name: "Your advisor", phone: "", email: "", role: "" };
+  const letter = advisorNoteLetter({
+    company,
+    companyPhone: input.companyPhone,
+    logo: input.logo,
+    pageUrl: input.portalUrl,
+    advisor,
+    greeting: `Dear ${name},`,
+    message,
+  });
+  return { subject, text: letter.text, html: letter.html, message };
+}
+
+function formatLongDate(iso: string) {
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return iso || "—";
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function addCalendarMonths(iso: string, months: number) {
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day || !months) return "";
+  return new Date(Date.UTC(year, month - 1 + months, day)).toISOString().slice(0, 10);
 }
 
 export type ExclusiveCopy = {

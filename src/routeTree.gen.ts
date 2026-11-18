@@ -18,7 +18,9 @@ import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as InvoiceTokenRouteImport } from './routes/invoice/$token'
 import { Route as ApiCronBackupRouteImport } from './routes/api/cron/backup'
+import { Route as ApiCronInboxRouteImport } from './routes/api/cron/inbox'
 import { Route as ApiCronLeadRemindersRouteImport } from './routes/api/cron/lead-reminders'
+import { Route as ApiCronMailStatusRouteImport } from './routes/api/cron/mail-status'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -65,9 +67,19 @@ const ApiCronBackupRoute = ApiCronBackupRouteImport.update({
   path: '/api/cron/backup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronInboxRoute = ApiCronInboxRouteImport.update({
+  id: '/api/cron/inbox',
+  path: '/api/cron/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCronLeadRemindersRoute = ApiCronLeadRemindersRouteImport.update({
   id: '/api/cron/lead-reminders',
   path: '/api/cron/lead-reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCronMailStatusRoute = ApiCronMailStatusRouteImport.update({
+  id: '/api/cron/mail-status',
+  path: '/api/cron/mail-status',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -81,7 +93,9 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/invoice/$token': typeof InvoiceTokenRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
+  '/api/cron/inbox': typeof ApiCronInboxRoute
   '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
+  '/api/cron/mail-status': typeof ApiCronMailStatusRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -93,7 +107,9 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/invoice/$token': typeof InvoiceTokenRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
+  '/api/cron/inbox': typeof ApiCronInboxRoute
   '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
+  '/api/cron/mail-status': typeof ApiCronMailStatusRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -106,7 +122,9 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/invoice/$token': typeof InvoiceTokenRoute
   '/api/cron/backup': typeof ApiCronBackupRoute
+  '/api/cron/inbox': typeof ApiCronInboxRoute
   '/api/cron/lead-reminders': typeof ApiCronLeadRemindersRoute
+  '/api/cron/mail-status': typeof ApiCronMailStatusRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -120,7 +138,9 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/invoice/$token'
     | '/api/cron/backup'
+    | '/api/cron/inbox'
     | '/api/cron/lead-reminders'
+    | '/api/cron/mail-status'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -132,7 +152,9 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/invoice/$token'
     | '/api/cron/backup'
+    | '/api/cron/inbox'
     | '/api/cron/lead-reminders'
+    | '/api/cron/mail-status'
   id:
     | '__root__'
     | '/'
@@ -144,7 +166,9 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/invoice/$token'
     | '/api/cron/backup'
+    | '/api/cron/inbox'
     | '/api/cron/lead-reminders'
+    | '/api/cron/mail-status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -157,7 +181,9 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   InvoiceTokenRoute: typeof InvoiceTokenRoute
   ApiCronBackupRoute: typeof ApiCronBackupRoute
+  ApiCronInboxRoute: typeof ApiCronInboxRoute
   ApiCronLeadRemindersRoute: typeof ApiCronLeadRemindersRoute
+  ApiCronMailStatusRoute: typeof ApiCronMailStatusRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -225,11 +251,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronBackupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/inbox': {
+      id: '/api/cron/inbox'
+      path: '/api/cron/inbox'
+      fullPath: '/api/cron/inbox'
+      preLoaderRoute: typeof ApiCronInboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cron/lead-reminders': {
       id: '/api/cron/lead-reminders'
       path: '/api/cron/lead-reminders'
       fullPath: '/api/cron/lead-reminders'
       preLoaderRoute: typeof ApiCronLeadRemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cron/mail-status': {
+      id: '/api/cron/mail-status'
+      path: '/api/cron/mail-status'
+      fullPath: '/api/cron/mail-status'
+      preLoaderRoute: typeof ApiCronMailStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -245,7 +285,9 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   InvoiceTokenRoute: InvoiceTokenRoute,
   ApiCronBackupRoute: ApiCronBackupRoute,
+  ApiCronInboxRoute: ApiCronInboxRoute,
   ApiCronLeadRemindersRoute: ApiCronLeadRemindersRoute,
+  ApiCronMailStatusRoute: ApiCronMailStatusRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
