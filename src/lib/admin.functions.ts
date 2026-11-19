@@ -479,9 +479,17 @@ export const requestApplicationDocuments = createServerFn({ method: "POST" })
     if (!row) throw new Error("Application not found.");
     if (row.status === "approved") throw new Error("This application is already approved.");
     const email = String(row.email).trim().toLowerCase();
+    await ensureCrmLeads(sql);
+    const leads = await sql<{ name: string }>`
+      select name from crm_leads
+      where lower(email) = ${email} and name <> ''
+      order by received_at desc
+      limit 1
+    `;
+    const name = leads[0]?.name?.trim() || row.applicant_name;
     await sendAdvisorClientLetter(sql, {
       to: email,
-      name: row.applicant_name,
+      name,
       subject: data.subject,
       message: data.message,
       step: "documents_requested",
@@ -489,7 +497,7 @@ export const requestApplicationDocuments = createServerFn({ method: "POST" })
       advisorId: data.advisorId,
     });
     const { sendTelegramNotice } = await import("@/lib/mail.server");
-    await sendTelegramNotice(sql, `Documents requested from ${row.applicant_name}`, `${row.applicant_name} (${email}) was asked to send identification and proof of address before approval.\n\n${data.message}`).catch(() => undefined);
+    await sendTelegramNotice(sql, `Documents requested from ${name}`, `${name} (${email}) was asked to send identification and proof of address before approval.\n\n${data.message}`).catch(() => undefined);
     return { ok: true as const, email };
   });
 

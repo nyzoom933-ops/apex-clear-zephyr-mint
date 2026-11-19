@@ -1,4 +1,5 @@
-import { lookup } from "node:dns/promises";
+import { lookup, Resolver } from "node:dns/promises";
+import { isIP } from "node:net";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import type { Sql } from "@/lib/db";
@@ -139,25 +140,36 @@ async function reportInboxFailure(sql: Sql, text: string) {
   await sendTelegramNotice(sql, "Inbox sync failed", key).catch(() => undefined);
 }
 
-async function openMailbox(advisor: MailboxRow) {
-  const name = advisor.imap_host.trim().replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
-  const port = Number(advisor.imap_port) || 993;
-  const secure = port === 143 ? false : port === 993 ? true : advisor.imap_secure !== false;
-  let address = name;
+async function mailboxAddresses(host: string) {
+  if (isIP(host)) return [host];
+  const fresh = new Resolver();
   try {
-    address = (await lookup(name, { family: 4 })).address;
+    fresh.setServers(["1.1.1.1", "8.8.8.8", "9.9.9.9"]);
+    const found = await fresh.resolve4(host);
+    if (found.length) return [...new Set(found)];
   } catch {
-    address = name;
+    /* public DNS did not answer; fall back to the system resolver */
   }
+  try {
+    const found = await lookup(host, { family: 4, all: true });
+    const addresses = [...new Set(found.map((item) => item.address))];
+    if (addresses.length) return addresses;
+  } catch {
+    /* connect with the hostname itself */
+  }
+  return [host];
+}
+
+async function connectMailbox(name: string, address: string, port: number, secure: boolean, advisor: MailboxRow) {
   const client = new ImapFlow({
     host: address,
     port,
     secure,
     auth: { user: advisor.imap_user, pass: advisor.imap_password },
-    tls: { rejectUnauthorized: false, servername: name },
+    tls: { rejectUnauthorized: false, ...(isIP(name) ? {} : { servername: name }) },
     logger: false,
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
     socketTimeout: 45000,
     disableAutoIdle: true,
   });
@@ -172,11 +184,27 @@ async function openMailbox(advisor: MailboxRow) {
       /* the failed socket is already closed */
     }
     const message = caught instanceof Error && caught.message ? caught.message : "could not connect";
-    if (/required time|timed out|timeout/i.test(message)) {
-      throw new Error(`Could not reach ${name} on port ${port}. Nothing answered. In Advisors, set the IMAP host to the mail server hostname, usually mail.yourdomain.com, port 993, with SSL checked.`);
-    }
-    throw new Error(`${name} on port ${port}: ${message}`);
+    throw new Error(`${address}: ${message}`);
   }
+}
+
+async function openMailbox(advisor: MailboxRow) {
+  const name = advisor.imap_host.trim().replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
+  const port = Number(advisor.imap_port) || 993;
+  const secure = port === 143 ? false : port === 993 ? true : advisor.imap_secure !== false;
+  const addresses = await mailboxAddresses(name);
+  let last = "";
+  for (const address of addresses) {
+    try {
+      return await connectMailbox(name, address, port, secure, advisor);
+    } catch (caught) {
+      last = caught instanceof Error ? caught.message : "could not connect";
+    }
+  }
+  if (/required time|timed out|timeout/i.test(last)) {
+    throw new Error(`Could not reach ${name} (${addresses.join(", ")}) on port ${port}. Nothing answered. In Advisors, set the IMAP host to the new mail server address, port 993, with SSL checked.`);
+  }
+  throw new Error(`${name} (${addresses.join(", ")}) on port ${port}: ${last || "could not connect"}`);
 }
 
 async function syncAdvisor(sql: Sql, advisor: MailboxRow) {

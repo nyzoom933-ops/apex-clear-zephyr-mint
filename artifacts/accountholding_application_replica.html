@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Application · Account Holding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3f3ef;
+      --text: #17201c;
+      --accent: #0d6e4f;
+      --border: #d4d4cc;
+      --card: #ffffff;
+      --muted: #5c6661;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 720px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .logo {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin: 8px 0 4px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      margin: 0 0 24px;
+    }
+    .steps {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      font-size: 13px;
+      color: var(--muted);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      gap: 8px;
+      padding-bottom: 4px;
+    }
+    .steps::-webkit-scrollbar { display: none; }
+    .step {
+      text-align: center;
+      flex: 0 0 auto;
+      min-width: 72px;
+      padding: 4px 6px;
+    }
+    .step.active { color: var(--accent); font-weight: 600; }
+    .step.done { color: var(--accent); }
+
+    /* Mobile-friendly compact progress */
+    .mobile-progress {
+      display: none;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .mobile-progress .progress-bar {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      margin: 8px 0 12px;
+      overflow: hidden;
+    }
+    .mobile-progress .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #1a8a63);
+      width: 0%;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 3px;
+      position: relative;
+    }
+    .mobile-progress .progress-fill::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 20px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4));
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+      0% { opacity: 0; transform: translateX(-10px); }
+      50% { opacity: 1; }
+      100% { opacity: 0; transform: translateX(10px); }
+    }
+    .mobile-progress .current-step-label {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--text);
+      transition: opacity 0.3s ease;
+    }
+    .step-panel {
+      display: none;
+      animation: fadeSlide 0.4s ease;
+    }
+    .step-panel.active {
+      display: block;
+    }
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 22px;
+      margin: 0 0 8px;
+    }
+    .description {
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+    .checklist {
+      display: grid;
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .checklist-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .checklist-item strong { display: block; }
+    label {
+      display: block;
+      font-weight: 500;
+      margin: 16px 0 6px;
+      font-size: 14px;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 15px;
+      background: #fff;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 32px;
+    }
+    button {
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-primary:hover { background: #0a5a40; }
+    .btn-secondary {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .note {
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 24px;
+    }
+    .step-panel { display: none; }
+    .step-panel.active { display: block; animation: fadeSlide 0.4s ease; }
+    .radio-group, .check-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .radio-item, .check-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .radio-item input, .check-item input { width: auto; }
+
+    @media (max-width: 640px) {
+      .container { margin: 20px auto; padding: 0 16px; }
+      .steps { display: none; }
+      .mobile-progress { display: block; }
+      .row { grid-template-columns: 1fr !important; }
+      .card { padding: 24px 20px; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">ACCOUNT HOLDING</div>
+      <div style="font-size:13px; letter-spacing:1px; color:var(--muted); margin-bottom:8px;">INVESTOR APPLICATION</div>
+      <h1>Open an account relationship</h1>
+      <p class="subtitle">Complete each section in one session. Your portfolio remains unavailable until the compliance team approves the application.</p>
+    </header>
+
+    <div class="mobile-progress" id="mobileProgress">
+      <div class="current-step-label" id="mobileStepLabel">Step 1 of 7 · Before you begin</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <div class="steps" id="stepIndicator">
+      <div class="step active" data-step="1">1<br>Before you begin</div>
+      <div class="step" data-step="2">2<br>Account and contact</div>
+      <div class="step" data-step="3">3<br>Personal information</div>
+      <div class="step" data-step="4">4<br>Address and tax</div>
+      <div class="step" data-step="5">5<br>Financial profile</div>
+      <div class="step" data-step="6">6<br>Verification documents</div>
+      <div class="step" data-step="7">7<br>Declarations</div>
+    </div>
+
+    <div class="card">
+      <!-- Step 1 -->
+      <div class="step-panel active" data-panel="1">
+        <div class="section-label">PREPARATION</div>
+        <h2>Before you begin</h2>
+        <p class="description">This takes a few minutes. Have a government-issued photo ID and a recent proof-of-address document available. Business and trust applicants will also need formation or governing documents.</p>
+        <div class="checklist">
+          <div class="checklist-item">
+            <strong>Identity</strong>
+            Passport, driver's license or state ID
+          </div>
+          <div class="checklist-item">
+            <strong>Address</strong>
+            Recent statement, bill or official correspondence
+          </div>
+          <div class="checklist-item">
+            <strong>Your details</strong>
+            Have your identity, address and tax information ready
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step-panel" data-panel="2">
+        <div class="section-label">SECTION</div>
+        <h2>Account and contact</h2>
+        <p class="description">Choose the legal account structure and create the primary holder's access.</p>
+        <label>Account structure</label>
+        <select>
+          <option>Individual</option>
+          <option>Joint</option>
+          <option>Business</option>
+          <option>Trust</option>
+        </select>
+        <label>Reporting currency</label>
+        <select>
+          <option>USD</option>
+          <option>GBP</option>
+          <option>CAD</option>
+        </select>
+        <div class="row">
+          <div>
+            <label>First name</label>
+            <input type="text">
+          </div>
+          <div>
+            <label>Middle name (Optional)</label>
+            <input type="text">
+          </div>
+        </div>
+        <label>Surname</label>
+        <input type="text">
+        <label>Email address</label>
+        <input type="email">
+        <label>Telephone country</label>
+        <select>
+          <option>United States / Canada (+1)</option>
+          <option>Mexico (+52)</option>
+          <option>United Kingdom (+44)</option>
+          <option>Ireland (+353)</option>
+          <option>France (+33)</option>
+          <option>Germany (+49)</option>
+          <option>Spain (+34)</option>
+          <option>Italy (+39)</option>
+          <option>Netherlands (+31)</option>
+          <option>Switzerland (+41)</option>
+          <option>United Arab Emirates (+971)</option>
+          <option>Saudi Arabia (+966)</option>
+          <option>Australia (+61)</option>
+          <option>New Zealand (+64)</option>
+          <option>Singapore (+65)</option>
+          <option>Hong Kong (+852)</option>
+          <option>Japan (+81)</option>
+          <option>South Korea (+82)</option>
+          <option>India (+91)</option>
+          <option>Other international code</option>
+        </select>
+        <label>Telephone number</label>
+        <input type="tel">
+        <label>Create password</label>
+        <input type="password">
+        <label>Confirm password</label>
+        <input type="password">
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step-panel" data-panel="3">
+        <div class="section-label">SECTION</div>
+        <h2>Personal information</h2>
+        <p class="description">Provide information exactly as it appears on official records.</p>
+        <label>Date of birth</label>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr;">
+          <select><option>Year</option><option>1990</option><option>1985</option><option>1980</option></select>
+          <select><option>Month</option><option>Jan</option><option>Feb</option><option>Mar</option></select>
+          <select><option>Day</option><option>1</option><option>15</option><option>30</option></select>
+        </div>
+        <label>Nationality</label>
+        <select>
+          <option>United States</option>
+          <option>Canada</option>
+          <option>United Kingdom</option>
+          <option>Australia</option>
+        </select>
+        <label>Country of residence</label>
+        <select>
+          <option>United States</option>
+          <option>Canada</option>
+          <option>United Kingdom</option>
+        </select>
+        <label>Occupation</label>
+        <select>
+          <option>Select occupation</option>
+          <option>Executive or senior management</option>
+          <option>Professional</option>
+          <option>Business owner</option>
+          <option>Self-employed</option>
+          <option>Finance or investment professional</option>
+          <option>Healthcare professional</option>
+          <option>Legal professional</option>
+          <option>Technology professional</option>
+          <option>Education professional</option>
+          <option>Government employee</option>
+          <option>Retired</option>
+          <option>Homemaker</option>
+          <option>Student</option>
+          <option>Unemployed</option>
+          <option>Other</option>
+        </select>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="step-panel" data-panel="4">
+        <div class="section-label">SECTION</div>
+        <h2>Address and tax</h2>
+        <p class="description">Provide your residential address and tax residency information.</p>
+        <label>Street address</label>
+        <input type="text">
+        <label>Apartment, suite, etc. (optional)</label>
+        <input type="text">
+        <div class="row">
+          <div>
+            <label>City</label>
+            <input type="text">
+          </div>
+          <div>
+            <label>State / Region</label>
+            <input type="text">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Postal code</label>
+            <input type="text">
+          </div>
+          <div>
+            <label>Country</label>
+            <select><option>United States</option><option>Canada</option><option>United Kingdom</option></select>
+          </div>
+        </div>
+        <label>Tax residence</label>
+        <select>
+          <option>United States</option>
+          <option>Canada</option>
+          <option>United Kingdom</option>
+        </select>
+        <label>Tax identification number (optional)</label>
+        <input type="text">
+      </div>
+
+      <!-- Step 5 -->
+      <div class="step-panel" data-panel="5">
+        <div class="section-label">SECTION</div>
+        <h2>Financial profile</h2>
+        <p class="description">Tell us about your sources of wealth and investment objectives.</p>
+        <label>Source of wealth</label>
+        <select>
+          <option>Select</option>
+          <option>Employment income</option>
+          <option>Business ownership</option>
+          <option>Sale of a business</option>
+          <option>Investment returns</option>
+          <option>Inheritance</option>
+          <option>Other</option>
+        </select>
+        <label>Source of funds</label>
+        <select>
+          <option>Select</option>
+          <option>Personal savings</option>
+          <option>Employment income</option>
+          <option>Brokerage or investment liquidation</option>
+          <option>Business proceeds</option>
+          <option>Other</option>
+        </select>
+        <label>Investment purpose</label>
+        <select>
+          <option>Select</option>
+          <option>Capital preservation</option>
+          <option>Income generation</option>
+          <option>Long-term growth</option>
+          <option>Retirement planning</option>
+          <option>Other</option>
+        </select>
+        <label>Estimated net worth (USD)</label>
+        <select>
+          <option>Select range</option>
+          <option>Under $100,000</option>
+          <option>$100,000 – $500,000</option>
+          <option>$500,000 – $1,000,000</option>
+          <option>$1,000,000 – $5,000,000</option>
+          <option>Over $5,000,000</option>
+        </select>
+      </div>
+
+      <!-- Step 6 -->
+      <div class="step-panel" data-panel="6">
+        <div class="section-label">SECTION</div>
+        <h2>Verification documents</h2>
+        <p class="description">Upload or indicate the documents you will provide for identity and address verification.</p>
+        <label>Identity document type</label>
+        <select>
+          <option>Passport</option>
+          <option>Driver’s license</option>
+          <option>Government-issued identification card</option>
+          <option>Permanent Resident Card</option>
+        </select>
+        <label>Address document type</label>
+        <select>
+          <option>Bank or credit-card statement</option>
+          <option>Utility bill</option>
+          <option>Government correspondence or tax statement</option>
+          <option>Mortgage statement</option>
+          <option>Current lease agreement</option>
+        </select>
+        <label>Upload identity document</label>
+        <input type="file">
+        <label>Upload address document</label>
+        <input type="file">
+      </div>
+
+      <!-- Step 7 -->
+      <div class="step-panel" data-panel="7">
+        <div class="section-label">SECTION</div>
+        <h2>Declarations</h2>
+        <p class="description">Please review and confirm the following declarations.</p>
+        <div class="check-group">
+          <div class="check-item">
+            <input type="checkbox" id="d1">
+            <label for="d1" style="margin:0; font-weight:400;">I confirm that the information provided is true, accurate, and complete.</label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="d2">
+            <label for="d2" style="margin:0; font-weight:400;">I understand that my account remains unavailable until approved by the compliance team.</label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="d3">
+            <label for="d3" style="margin:0; font-weight:400;">I agree to the terms of service and privacy policy.</label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="d4">
+            <label for="d4" style="margin:0; font-weight:400;">I am not a politically exposed person (PEP) and am not acting on behalf of one.</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-secondary" id="backBtn" style="visibility:hidden;">Back</button>
+        <button class="btn-primary" id="continueBtn">Continue</button>
+      </div>
+    </div>
+
+    <p class="note">Keep this page open until your application has been submitted.</p>
+  </div>
+
+  <script>
+    let currentStep = 1;
+    const totalSteps = 7;
+
+    const stepNames = [
+      "",
+      "Before you begin",
+      "Account and contact",
+      "Personal information",
+      "Address and tax",
+      "Financial profile",
+      "Verification documents",
+      "Declarations"
+    ];
+
+    function updateUI() {
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+      document.querySelector(`.step-panel[data-panel="${currentStep}"]`).classList.add('active');
+
+      document.querySelectorAll('.step').forEach(s => {
+        const stepNum = parseInt(s.dataset.step);
+        s.classList.toggle('active', stepNum === currentStep);
+        s.classList.toggle('done', stepNum < currentStep);
+        const label = s.innerHTML.split('<br>')[1] || stepNames[stepNum];
+        if (stepNum < currentStep) s.innerHTML = `✓<br>${label}`;
+        else s.innerHTML = `${stepNum}<br>${label}`;
+      });
+
+      // Mobile progress
+      const percent = ((currentStep - 1) / (totalSteps - 1)) * 100;
+      document.getElementById('progressFill').style.width = percent + '%';
+      document.getElementById('mobileStepLabel').textContent =
+        `Step ${currentStep} of ${totalSteps} · ${stepNames[currentStep]}`;
+
+      document.getElementById('backBtn').style.visibility = currentStep > 1 ? 'visible' : 'hidden';
+      document.getElementById('continueBtn').textContent = currentStep === totalSteps ? 'Submit Application' : 'Continue';
+    }
+
+    document.getElementById('continueBtn').addEventListener('click', () => {
+      if (currentStep < totalSteps) {
+        currentStep++;
+        updateUI();
+      } else {
+        alert('Application submitted (demo replica). In the real form this would go to compliance review.');
+      }
+    });
+
+    document.getElementById('backBtn').addEventListener('click', () => {
+      if (currentStep > 1) {
+        currentStep--;
+        updateUI();
+      }
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>

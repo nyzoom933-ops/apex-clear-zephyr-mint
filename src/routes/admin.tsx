@@ -2476,7 +2476,7 @@ function AdvisorsPanel() {
       setError("Could not remove this advisor.");
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Advisors</h1><p className="mt-2 text-fg">Assign one of these advisors when a client investment needs a call. The role, such as Senior Advisor, is the last line of that advisor’s email signature. The verified mailbox is the SMTP2GO address the letters are sent from.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<ul className="mt-4 grid gap-3">{(rows ?? []).map(advisor => <li key={advisor.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface px-4 py-3"><div><p className="font-semibold text-primary">{advisor.name}</p><p className="text-sm text-fg">{advisor.role || "No role"} · {advisor.phone || "No phone"}{advisor.email ? ` · ${advisor.email}` : ""}{advisor.mailbox ? ` · ${advisor.mailbox}` : " · No verified mailbox"}</p></div><div className="flex gap-2"><button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setDraft(advisor)}>Edit</button><button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => void remove(advisor.id)}>Remove</button></div></li>)}</ul><form className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={event => void save(event)}><h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit advisor" : "Add advisor"}</h2><AdminField label="Name" value={draft.name} onChange={name => setDraft({
+  return <section><h1 className="text-3xl font-semibold">Advisors</h1><p className="mt-2 text-fg">Assign one of these advisors when a client investment needs a call. The role, such as Senior Advisor, is the last line of that advisor’s email signature. The verified mailbox is the SMTP2GO address the letters are sent from.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<ul className="mt-4 grid gap-3">{(rows ?? []).map(advisor => <li key={advisor.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface px-4 py-3"><div><p className="font-semibold text-primary">{advisor.name}</p><p className="text-sm text-fg">{advisor.role || "No role"} · {advisor.phone || "No phone"}{advisor.email ? ` · ${advisor.email}` : ""}{advisor.mailbox ? ` · ${advisor.mailbox}` : " · No verified mailbox"}{advisor.imapHost ? ` · IMAP ${advisor.imapHost}` : ""}</p></div><div className="flex gap-2"><button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setDraft(advisor)}>Edit</button><button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => void remove(advisor.id)}>Remove</button></div></li>)}</ul><form className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={event => void save(event)}><h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit advisor" : "Add advisor"}</h2><AdminField label="Name" value={draft.name} onChange={name => setDraft({
         ...draft,
         name
       })} /><AdminField label="Role" value={draft.role} onChange={role => setDraft({
@@ -4040,15 +4040,10 @@ function ApplicationDetail({
   const fields = [["Account", form.accountType], ["Phone", `${form.phoneCountry} ${form.phone}`], ["Date of birth", [form.dobDay, form.dobMonth, form.dobYear].filter(Boolean).join(" ")], ["Nationality", form.nationality], ["Residence", form.residence], ["Occupation", form.occupation], ["Address", [form.street, form.apt, form.city, form.region, form.postal, form.country].filter(Boolean).join(", ")], ["Tax residence", form.taxResidence], ["Tax ID", form.taxId], ["Source of wealth", form.sourceOfWealth], ["Source of funds", form.sourceOfFunds], ["Purpose", form.investmentPurpose], ["Net worth", form.netWorth], ["Preferred amount", form.preferredAmount], ["Preferred term", form.preferredTerm ? `${form.preferredTerm}-month` : ""], ["Promotional code", form.promoCode], ["Identity document", `${form.idType}${form.idFileName ? ` · ${form.idFileName}` : ""}`], ["Address document", `${form.addressDocType}${form.addressFileName ? ` · ${form.addressFileName}` : ""}`], ["Bank", form.bankName], ["Account holder", form.accountHolder], ["Bank address", [form.bankStreet, form.bankLine2, form.bankCity, form.bankState, form.bankZip].filter(Boolean).join(", ")], ["Routing number", form.routingNumber], ["Account number", form.accountNumber]];
   return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode, portal) => onMailed(email, mode, row.status === "approved", portal)} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}<DocumentRequest row={row} /><PortalAccess row={row} /></article>;
 }
-function documentRequestCopy(row) {
-  const form = row.payload || {};
-  const missing = [];
-  if (!form.idFile) missing.push("a photo of your government-issued identification (passport or driver's license)");
-  if (!form.addressFile) missing.push("a proof of address dated within the last 90 days, such as a utility bill or bank statement showing your name and address");
-  const list = missing.length ? missing.map(item => `- ${item}`).join("\n") : "- a photo of your government-issued identification\n- a proof of address dated within the last 90 days";
+function documentRequestCopy() {
   return {
-    subject: "Please send your identification and proof of address",
-    message: `Thank you for your application. We cannot approve it yet because these documents were not attached:\n\n${list}\n\nPlease reply to this email and attach clear copies. A photo or a PDF is fine.\n\nThe application stays unapproved until we have the documents on file.`
+    subject: "Additional Documentation Needed to Complete Your Application",
+    message: "Thank you for submitting your application.\n\nTo complete the review of your application, we kindly ask that you provide the following documents, which were not included with your submission:\n\n- **Valid government-issued photo identification** (driver's license or passport).\n- **Proof of address dated within the last 90 days**, such as a utility bill or bank statement displaying your name and current residential address.\n\nPlease reply directly to this email and attach clear copies of both documents. You may send them as photo attachments or PDF files.\n\nOnce the requested documentation has been received, our Compliance Department can proceed with the review of your application.\n\nThank you for your cooperation. We appreciate your prompt attention to this request."
   };
 }
 function DocumentRequest({ row }) {
@@ -4056,7 +4051,7 @@ function DocumentRequest({ row }) {
   const form = row.payload || {};
   const missingId = !form.idFile;
   const missingAddress = !form.addressFile;
-  const copy = documentRequestCopy(row);
+  const copy = documentRequestCopy();
   const [open, setOpen] = useState(false);
   const [subject, setSubject] = useState(copy.subject);
   const [message, setMessage] = useState(copy.message);
@@ -4066,14 +4061,22 @@ function DocumentRequest({ row }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [leadName, setLeadName] = useState("");
   useEffect(() => {
     if (row.status === "approved" || (!missingId && !missingAddress)) return;
+    const email = String(row.email || "").trim().toLowerCase();
+    if (email) {
+      listCrmLeads({ data: { query: email, withEmail: true, page: 1 } }).then(page => {
+        const match = (page.rows || []).find(item => String(item.email || "").trim().toLowerCase() === email);
+        setLeadName(match?.name?.trim() || "");
+      }).catch(() => undefined);
+    }
     listAdvisors().then(people => {
       setAdvisors(people);
       setAdvisorId(current => current || people.find(item => item.mailbox?.trim())?.id || "");
     }).catch(() => undefined);
     getEmailStyles().then(setStyles).catch(() => undefined);
-  }, [row.status, missingId, missingAddress]);
+  }, [row.email, row.status, missingId, missingAddress]);
   if (row.status === "approved" || (!missingId && !missingAddress)) return null;
   const advisor = advisors.find(item => item.id === advisorId);
   const portal = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : "";
@@ -4083,7 +4086,7 @@ function DocumentRequest({ row }) {
     logo: brand.emailLogo,
     pageUrl: portal,
     advisor,
-    greeting: `Dear ${row.applicantName},`,
+    greeting: `Dear ${leadName || row.applicantName},`,
     message
   }).html, styles.advisor, styles.colors) : "";
   async function send() {
