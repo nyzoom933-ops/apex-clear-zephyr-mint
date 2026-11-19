@@ -103,7 +103,7 @@ export function ApplicationForm() {
   const [session, setSession] = useState<InvestorSession | null | undefined>(undefined);
   const [terms, setTerms] = useState<CdTerm[]>([]);
   const [offer, setOffer] = useState<PromoOffer>(EMPTY_PROMO);
-  const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired" | "used">("none");
+  const [inviteGate, setInviteGate] = useState<"none" | "checking" | "open" | "expired" | "used" | "missing">("none");
   const [inviteKind, setInviteKind] = useState("");
   const [inviteProcess, setInviteProcess] = useState("");
   const [inviteToken, setInviteToken] = useState("");
@@ -146,6 +146,11 @@ export function ApplicationForm() {
       .then((result) => {
         if (result.status === "used") {
           setInviteGate("used");
+          setReady(true);
+          return;
+        }
+        if (result.status === "missing") {
+          setInviteGate("missing");
           setReady(true);
           return;
         }
@@ -250,15 +255,15 @@ export function ApplicationForm() {
     );
   }
 
-  if (inviteGate === "expired" || inviteGate === "used") {
+  if (inviteGate === "expired" || inviteGate === "used" || inviteGate === "missing") {
     return (
       <div className="min-h-screen">
         <SiteHeader eyebrow="Investor application" />
         <AppCover />
         <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
           <section className="rounded-lg border border-border bg-surface px-6 py-12 text-center shadow-sm sm:px-10">
-            <h1 className="text-3xl font-semibold">{inviteGate === "used" ? "Application already sent" : "Promo link expired"}</h1>
-            <p className="mx-auto mt-3 max-w-md text-fg">{inviteGate === "used" ? "This link was already used to submit an application." : "This link lasted 48 hours. Request a new one and your advisor will send it."}</p>
+            <h1 className="text-3xl font-semibold">{inviteGate === "used" ? "Application already sent" : inviteGate === "missing" ? "Application link not found" : "Promo link expired"}</h1>
+            <p className="mx-auto mt-3 max-w-md text-fg">{inviteGate === "used" ? "This link was already used to submit an application." : inviteGate === "missing" ? "This link is not on this site. Ask your advisor to send a new one from the desk that clients use." : "This link lasted 48 hours. Request a new one and your advisor will send it."}</p>
             {inviteGate === "expired" ? inviteRequested ? <p className="mt-6 text-sm font-semibold text-primary">Request sent. Your advisor will send a new link.</p> : <button type="button" disabled={requestPending} className="mt-6 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" onClick={() => {
               setRequestError("");
               setRequestPending(true);

@@ -50,6 +50,15 @@ export async function createLeadInvite(
       ${expiresAt}
     )
   `;
+  await sql`
+    update lead_invites
+    set expires_at = now()
+    where lower(email) = ${input.email}
+      and kind = ${input.kind}
+      and token <> ${token}
+      and used_at is null
+      and expires_at > now()
+  `;
   return token;
 }
 
@@ -61,8 +70,8 @@ export function inviteApplicationUrl(origin: string, token: string) {
 
 export async function readLeadInvite(sql: Sql, token: string) {
   await ensureInviteColumns(sql);
-  const rows = await sql<InviteRow & { used_at: string | Date | null; renew_requested_at: string | Date | null }>`
-    select token, email, name, months, promo_code, kind, coalesce(process, 'portal') as process, coalesce(exclusive_apy, '') as exclusive_apy, advisor_name, advisor_phone, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone, expires_at, used_at, renew_requested_at
+  const rows = await sql<InviteRow & { used_at: string | Date | null; renew_requested_at: string | Date | null; is_open: boolean | string }>`
+    select token, email, name, months, promo_code, kind, coalesce(process, 'portal') as process, coalesce(exclusive_apy, '') as exclusive_apy, advisor_name, advisor_phone, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone, expires_at, used_at, renew_requested_at, (expires_at > now()) as is_open
     from lead_invites
     where token = ${token}
     limit 1
@@ -70,11 +79,12 @@ export async function readLeadInvite(sql: Sql, token: string) {
   const row = rows[0];
   if (!row) return { status: "missing" as const };
   if (row.used_at) return { status: "used" as const };
-  const expiresAt = new Date(row.expires_at);
-  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+  const open = row.is_open === true || row.is_open === "t" || row.is_open === "true";
+  if (!open) {
     await noteExpiredVisit(sql, row);
     return { status: "expired" as const, requested: Boolean(row.renew_requested_at) };
   }
+  const expiresAt = row.expires_at instanceof Date ? row.expires_at : new Date(row.expires_at);
   return {
     status: "open" as const,
     name: row.name,
@@ -85,7 +95,7 @@ export async function readLeadInvite(sql: Sql, token: string) {
     process: row.process === "assisted" ? ("assisted" as const) : ("portal" as const),
     advisorName: row.advisor_name,
     advisorMailbox: row.advisor_mailbox,
-    expiresAt: expiresAt.toISOString(),
+    expiresAt: Number.isNaN(expiresAt.getTime()) ? "" : expiresAt.toISOString(),
   };
 }
 

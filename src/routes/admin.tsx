@@ -82,6 +82,7 @@ import {
   sendLeadApplication,
   sendLeadExclusiveApplication,
   resendOpenApplication,
+  requestApplicationDocuments,
   updateFunding,
   downloadInvoicePdf,
   previewAdvisorInvoice,
@@ -3157,7 +3158,7 @@ function IntroOpensPanel({
     try {
       await resendOpenApplication({ data: { email: row.email } });
       await load();
-      setNotice(`Application email sent again to ${row.email}. The same link is still open.`);
+      setNotice(`A new 48-hour application link was sent to ${row.email}. Older links for that email no longer open.`);
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "The application email could not be sent.");
     } finally {
@@ -3384,21 +3385,7 @@ function IntroOpensPanel({
             </div>
             <p className="text-sm text-fg">{row.advisorName || "No advisor"}</p>
             <p className="text-sm whitespace-nowrap text-fg">{row.sentAt} UTC</p>
-            {view === "open" && linkExpired ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
-              id: row.leadId,
-              name: row.name,
-              email: row.email,
-              phone: row.phone,
-              amount: row.amount,
-              term: row.term,
-              objective: "",
-              liquidity: "",
-              source: "",
-              status: "",
-              notes: "",
-              advisorId: row.advisorId,
-              receivedAt: new Date().toISOString()
-            })}>Resend new link</button> : view === "open" && !row.applicationSent && !applied ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
+            {view === "open" && linkExpired ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void resendApplication(row)}>Send new link</button> : view === "open" && !row.applicationSent && !applied ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => onApplication({
               id: row.leadId,
               name: row.name,
               email: row.email,
@@ -3413,7 +3400,7 @@ function IntroOpensPanel({
               advisorId: row.advisorId,
               receivedAt: new Date().toISOString()
             })}>Application email</button> : null}
-            {view === "open" && row.applicationSent && row.inviteStatus === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void resendApplication(row)}>Resend application</button> : null}
+            {view === "open" && row.applicationSent && row.inviteStatus === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void resendApplication(row)}>Send new link</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void resendPromo(row)}>Resend promo</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendExclusive(row)}>Exclusive promo</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendReminder(row)}>Promo reminder</button> : null}
@@ -4051,5 +4038,74 @@ function ApplicationDetail({
 }) {
   const form = row.payload;
   const fields = [["Account", form.accountType], ["Phone", `${form.phoneCountry} ${form.phone}`], ["Date of birth", [form.dobDay, form.dobMonth, form.dobYear].filter(Boolean).join(" ")], ["Nationality", form.nationality], ["Residence", form.residence], ["Occupation", form.occupation], ["Address", [form.street, form.apt, form.city, form.region, form.postal, form.country].filter(Boolean).join(", ")], ["Tax residence", form.taxResidence], ["Tax ID", form.taxId], ["Source of wealth", form.sourceOfWealth], ["Source of funds", form.sourceOfFunds], ["Purpose", form.investmentPurpose], ["Net worth", form.netWorth], ["Preferred amount", form.preferredAmount], ["Preferred term", form.preferredTerm ? `${form.preferredTerm}-month` : ""], ["Promotional code", form.promoCode], ["Identity document", `${form.idType}${form.idFileName ? ` · ${form.idFileName}` : ""}`], ["Address document", `${form.addressDocType}${form.addressFileName ? ` · ${form.addressFileName}` : ""}`], ["Bank", form.bankName], ["Account holder", form.accountHolder], ["Bank address", [form.bankStreet, form.bankLine2, form.bankCity, form.bankState, form.bankZip].filter(Boolean).join(", ")], ["Routing number", form.routingNumber], ["Account number", form.accountNumber]];
-  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode, portal) => onMailed(email, mode, row.status === "approved", portal)} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}<PortalAccess row={row} /></article>;
+  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode, portal) => onMailed(email, mode, row.status === "approved", portal)} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}<DocumentRequest row={row} /><PortalAccess row={row} /></article>;
+}
+function documentRequestCopy(row) {
+  const form = row.payload || {};
+  const missing = [];
+  if (!form.idFile) missing.push("a photo of your government-issued identification (passport or driver's license)");
+  if (!form.addressFile) missing.push("a proof of address dated within the last 90 days, such as a utility bill or bank statement showing your name and address");
+  const list = missing.length ? missing.map(item => `- ${item}`).join("\n") : "- a photo of your government-issued identification\n- a proof of address dated within the last 90 days";
+  return {
+    subject: "Please send your identification and proof of address",
+    message: `Thank you for your application. We cannot approve it yet because these documents were not attached:\n\n${list}\n\nPlease reply to this email and attach clear copies. A photo or a PDF is fine.\n\nThe application stays unapproved until we have the documents on file.`
+  };
+}
+function DocumentRequest({ row }) {
+  const brand = useBrand();
+  const form = row.payload || {};
+  const missingId = !form.idFile;
+  const missingAddress = !form.addressFile;
+  const copy = documentRequestCopy(row);
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState(copy.subject);
+  const [message, setMessage] = useState(copy.message);
+  const [advisors, setAdvisors] = useState([]);
+  const [advisorId, setAdvisorId] = useState("");
+  const [styles, setStyles] = useState({ advisor: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (row.status === "approved" || (!missingId && !missingAddress)) return;
+    listAdvisors().then(people => {
+      setAdvisors(people);
+      setAdvisorId(current => current || people.find(item => item.mailbox?.trim())?.id || "");
+    }).catch(() => undefined);
+    getEmailStyles().then(setStyles).catch(() => undefined);
+  }, [row.status, missingId, missingAddress]);
+  if (row.status === "approved" || (!missingId && !missingAddress)) return null;
+  const advisor = advisors.find(item => item.id === advisorId);
+  const portal = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : "";
+  const letter = advisor ? applyEmailStyle(advisorNoteLetter({
+    company: brand.companyName,
+    companyPhone: brand.companyPhone,
+    logo: brand.emailLogo,
+    pageUrl: portal,
+    advisor,
+    greeting: `Dear ${row.applicantName},`,
+    message
+  }).html, styles.advisor, styles.colors) : "";
+  async function send() {
+    setError("");
+    setNotice("");
+    setPending(true);
+    try {
+      const result = await requestApplicationDocuments({
+        data: {
+          id: row.id,
+          advisorId,
+          subject,
+          message
+        }
+      });
+      setNotice(`Request sent to ${result.email}. The application was not approved.`);
+      setOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The request could not be sent.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return <div className="mt-6 rounded-md border border-border p-4"><p className="font-semibold text-primary">Identification still needed</p><p className="mt-1 text-sm text-fg">{[missingId ? "No identity document." : "", missingAddress ? "No proof of address." : ""].filter(Boolean).join(" ")} Send an advisor email and ask the client to reply with the files. This does not approve the application.</p>{notice ? <p className="mt-2 text-sm text-fg">{notice}</p> : null}<button type="button" className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setOpen(value => !value)}>{open ? "Close request" : "Request documents"}</button>{open ? <div className="mt-4 grid gap-3"><label className="block text-sm"><span className="font-semibold text-primary">Subject</span><input className={`${controlClass} mt-1`} value={subject} onChange={event => setSubject(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-40`} value={message} onChange={event => setMessage(event.target.value)} /></label><label className="block max-w-md text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Choose an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>{letter ? <LetterPreview html={letter} title={subject} height="h-[520px]" meta={<p className="mt-3 text-sm text-fg"><span className="font-semibold text-primary">Subject.</span> {subject}</p>} /> : <p className="text-sm text-fg">Choose an advisor to preview the letter.</p>}{error ? <p className="text-sm text-danger">{error}</p> : null}<button type="button" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending || !advisorId || !subject.trim() || !message.trim() || !advisor?.mailbox} onClick={() => void send()}>{pending ? "Sending…" : "Send from advisor"}</button></div> : null}</div>;
 }

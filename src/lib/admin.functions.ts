@@ -219,7 +219,17 @@ export const submitApplication = createServerFn({ method: "POST" })
       values (${id}, ${name}, ${email}, ${stored.accountType}, ${stored.currency}, ${JSON.stringify(stored)}::jsonb, ${passwordHash})
     `;
     if (inviteToken) await sql`update lead_invites set used_at = now() where token = ${inviteToken} and used_at is null`;
+    const deskDetail = applicationDeskDetail(stored);
+    const deskFiles = applicationFiles(stored);
     if (assisted) {
+      const { sendTelegramNotice } = await import("@/lib/mail.server");
+      await sendTelegramNotice(
+        sql,
+        `New application from ${name}`,
+        `${name} (${email}) submitted an application.\nAdvisor assisted. No portal sign-in.${invited?.advisorName ? `\nAdvisor: ${invited.advisorName}` : ""}`,
+        deskDetail,
+        deskFiles,
+      ).catch(() => undefined);
       await sendAdvisorClientLetter(sql, {
         to: email,
         name,
@@ -236,8 +246,8 @@ export const submitApplication = createServerFn({ method: "POST" })
         clientEmail: email,
         clientName: name,
         detail: [`${payload.accountType} account`, `Sign-in email ${email}`].join("\n"),
-        adminDetail: applicationDeskDetail(payload),
-        attachments: applicationFiles(payload),
+        adminDetail: deskDetail,
+        attachments: deskFiles,
         relatedId: id,
       });
     }
@@ -445,6 +455,42 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
     `;
     await sendTelegramNotice(sql, `Application approved for ${rows[0].applicant_name}`, `${rows[0].applicant_name} (${email}) was approved. ${advisor.name} sent the letter.${assisted ? " No portal sign-in was created." : ""}`).catch(() => undefined);
     return { ok: true as const, loginEmail: email, mode: data.mode, portal: !assisted as boolean };
+  });
+
+export const requestApplicationDocuments = createServerFn({ method: "POST" })
+  .validator((input: { id: string; advisorId: string; subject: string; message: string }) => {
+    const id = (input.id || "").trim();
+    const advisorId = (input.advisorId || "").trim();
+    const subject = (input.subject || "").trim().slice(0, 200);
+    const message = (input.message || "").trim().slice(0, 4000);
+    if (!id) throw new Error("Application not found.");
+    if (!advisorId) throw new Error("Choose an advisor.");
+    if (!subject || !message) throw new Error("Add a subject and a message.");
+    return { id, advisorId, subject, message };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ email: string; applicant_name: string; status: string }>`
+      select email, applicant_name, status from applications where id = ${data.id}
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("Application not found.");
+    if (row.status === "approved") throw new Error("This application is already approved.");
+    const email = String(row.email).trim().toLowerCase();
+    await sendAdvisorClientLetter(sql, {
+      to: email,
+      name: row.applicant_name,
+      subject: data.subject,
+      message: data.message,
+      step: "documents_requested",
+      relatedId: data.id,
+      advisorId: data.advisorId,
+    });
+    const { sendTelegramNotice } = await import("@/lib/mail.server");
+    await sendTelegramNotice(sql, `Documents requested from ${row.applicant_name}`, `${row.applicant_name} (${email}) was asked to send identification and proof of address before approval.\n\n${data.message}`).catch(() => undefined);
+    return { ok: true as const, email };
   });
 
 export const deleteApplication = createServerFn({ method: "POST" })
@@ -2860,17 +2906,19 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
     const sql = await getSql();
     await sql`alter table lead_invites add column if not exists advisor_role text not null default ''`;
     await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
-    const invites = await sql<{ token: string; name: string; months: number; promo_code: string; kind: string; advisor_name: string; advisor_email: string; advisor_mailbox: string; advisor_phone: string; advisor_role: string; advisor_personal_phone: string }>`
-      select token, name, months, promo_code, kind, advisor_name, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_phone, '') as advisor_phone, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone
+    await sql`alter table lead_invites add column if not exists exclusive_apy text not null default ''`;
+    await sql`alter table lead_invites add column if not exists process text not null default 'portal'`;
+    const invites = await sql<{ name: string; months: number; promo_code: string; kind: string; process: string; exclusive_apy: string; advisor_name: string; advisor_email: string; advisor_mailbox: string; advisor_phone: string; advisor_role: string; advisor_personal_phone: string }>`
+      select name, months, promo_code, kind, coalesce(process, 'assisted') as process, coalesce(exclusive_apy, '') as exclusive_apy, advisor_name, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_phone, '') as advisor_phone, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone
       from lead_invites
-      where lower(email) = ${data.email} and used_at is null and expires_at > now()
+      where lower(email) = ${data.email}
       order by created_at desc
       limit 1
     `;
     const invite = invites[0];
-    if (!invite) throw new Error("This application link has expired.");
-    const notes = await sql<{ step: string; subject: string; body: string; html: string; advisor_id: string }>`
-      select step, subject, body, coalesce(html, '') as html, coalesce(advisor_id, '') as advisor_id
+    if (!invite) throw new Error("This lead has no application to resend. Send one from Emails first.");
+    const notes = await sql<{ advisor_id: string }>`
+      select coalesce(advisor_id, '') as advisor_id
       from notifications
       where audience = 'client'
         and lower(recipient) = ${data.email}
@@ -2892,66 +2940,67 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
     if (!mailbox) throw new Error("Add this advisor's verified mailbox before resending.");
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const origin = settings.find((row) => row.key === "public_domain")?.value || "";
-    const { inviteApplicationUrl } = await import("@/lib/lead-invites.server");
-    const link = inviteApplicationUrl(origin, invite.token);
-    const sameLetter = Boolean(note?.html && note.html.includes(invite.token));
-    let step: MailStep = note?.step === "lead_followup" || note?.step === "lead_promo_reminder" || note?.step === "lead_cdars" || note?.step === "lead_application" || note?.step === "lead_promo" ? note.step : invite.kind === "custom" ? "lead_application" : invite.kind === "cdars" ? "lead_cdars" : "lead_promo";
-    let subject = note?.subject || "";
-    let text = note?.body || "";
-    let html = sameLetter ? note.html : "";
-    if (!sameLetter) {
-      const company = await readCompanyName(sql);
-      const logo = settings.find((row) => row.key === "email_logo")?.value || null;
-      const companyPhone = settings.find((row) => row.key === "company_phone")?.value || "";
-      const mailAdvisor = {
-        name: advisor?.name || invite.advisor_name,
-        phone: advisor?.phone || invite.advisor_phone,
-        email: advisor?.email || invite.advisor_email,
-        mailbox,
-        role: advisor?.role || invite.advisor_role,
-        personalPhone: advisor?.personal_phone || invite.advisor_personal_phone,
-      };
-      if (step === "lead_followup" || step === "lead_promo_reminder") {
-        const { followupLetter, promoReminderLetter } = await import("@/lib/email-templates");
-        const letter = step === "lead_promo_reminder"
-          ? promoReminderLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, promoCode: invite.promo_code, link })
-          : followupLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, promoCode: invite.promo_code, link });
-        subject = letter.subject;
-        text = letter.text;
-        html = letter.html;
-      } else if (step === "lead_cdars") {
-        const { cdarsLetter } = await import("@/lib/email-templates");
-        const letter = cdarsLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, link, terms: await readCdarsRates(sql) });
-        subject = letter.subject;
-        text = letter.text;
-        html = letter.html;
-      } else {
-        const offer = await loadPromo(sql);
-        const allTerms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
-        const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
-        const months = Number(invite.months) || 0;
-        const chosen = allTerms.find((term) => Number(term.months) === months);
-        const { applicationLetter } = await import("@/lib/email-templates");
-        const letter = applicationLetter({
-          leadName: invite.name || data.email,
-          company,
-          months: invite.kind === "promo" && months <= 0 ? 0 : months,
-          apy: chosen?.apy || "",
-          terms: invite.kind === "promo" ? allTerms.filter((term) => promoMonths.has(Number(term.months))).map((term) => ({ months: Number(term.months), apy: term.apy })) : undefined,
-          offer,
-          advisor: mailAdvisor,
-          logo,
-          portalUrl: origin,
-          companyPhone,
-          link,
-          variant: invite.kind === "custom" ? "custom" : "promo",
-          copy: { subject: "", headline: "", hope: "", ready: "", instruction: "", codeNote: "", followUp: "", thanks: "", promoCode: invite.promo_code },
-        });
-        subject = letter.subject;
-        text = letter.text;
-        html = letter.html;
-        step = invite.kind === "custom" ? "lead_application" : "lead_promo";
-      }
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    const mailAdvisor = {
+      name: advisor?.name || invite.advisor_name,
+      phone: advisor?.phone || invite.advisor_phone,
+      email: advisor?.email || invite.advisor_email,
+      mailbox,
+      role: advisor?.role || invite.advisor_role,
+      personalPhone: advisor?.personal_phone || invite.advisor_personal_phone,
+    };
+    const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
+    const process = invite.process === "portal" ? "portal" as const : "assisted" as const;
+    const kind = invite.kind === "custom" || invite.kind === "exclusive" || invite.kind === "cdars" || invite.kind === "promo" ? invite.kind : "promo";
+    const token = await createLeadInvite(sql, {
+      email: data.email,
+      name: invite.name || data.email,
+      months: Number(invite.months) || 0,
+      promoCode: invite.promo_code || "",
+      kind,
+      process,
+      exclusiveApy: invite.exclusive_apy || "",
+      advisor: mailAdvisor,
+    });
+    const link = inviteApplicationUrl(origin, token);
+    const company = await readCompanyName(sql);
+    const logo = settings.find((row) => row.key === "email_logo")?.value || null;
+    const companyPhone = settings.find((row) => row.key === "company_phone")?.value || "";
+    let step: MailStep = kind === "custom" || kind === "exclusive" ? "lead_application" : kind === "cdars" ? "lead_cdars" : "lead_promo";
+    let subject = "";
+    let text = "";
+    let html = "";
+    if (kind === "cdars") {
+      const { cdarsLetter } = await import("@/lib/email-templates");
+      const letter = cdarsLetter({ leadName: invite.name || data.email, company, advisor: mailAdvisor, logo, portalUrl: origin, companyPhone, link, terms: await readCdarsRates(sql) });
+      subject = letter.subject;
+      text = letter.text;
+      html = letter.html;
+    } else {
+      const offer = await loadPromo(sql);
+      const allTerms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
+      const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
+      const months = Number(invite.months) || 0;
+      const chosen = allTerms.find((term) => Number(term.months) === months);
+      const { applicationLetter } = await import("@/lib/email-templates");
+      const letter = applicationLetter({
+        leadName: invite.name || data.email,
+        company,
+        months: kind === "promo" && months <= 0 ? 0 : months,
+        apy: kind === "exclusive" ? invite.exclusive_apy : chosen?.apy || "",
+        terms: kind === "promo" ? allTerms.filter((term) => promoMonths.has(Number(term.months))).map((term) => ({ months: Number(term.months), apy: term.apy })) : undefined,
+        offer,
+        advisor: mailAdvisor,
+        logo,
+        portalUrl: origin,
+        companyPhone,
+        link,
+        variant: kind === "custom" ? "custom" : kind === "exclusive" ? "exclusive" : "promo",
+        copy: { subject: "", headline: "", hope: "", ready: "", instruction: "", codeNote: "", followUp: "", thanks: "", promoCode: invite.promo_code },
+      });
+      subject = letter.subject;
+      text = letter.text;
+      html = letter.html;
     }
     const { sendFromMailbox, sendTelegramNotice } = await import("@/lib/mail.server");
     const sent = await sendFromMailbox(sql, {
@@ -2960,16 +3009,16 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
       text: text || subject,
       html,
       fromAddress: mailbox,
-      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor?.email || invite.advisor_email) ? (advisor?.email || invite.advisor_email) : mailbox,
-      replyName: advisor?.name || invite.advisor_name,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mailAdvisor.email) ? mailAdvisor.email : mailbox,
+      replyName: mailAdvisor.name,
     });
     if (sent.delivery !== "sent") throw new Error(sent.error || "The application email was not sent.");
     await sql`
       insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
-      values (${crypto.randomUUID()}, 'client', ${data.email}, ${step}, ${subject}, ${text}, ${html}, ${invite.token}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${advisor?.id || note?.advisor_id || ""})
+      values (${crypto.randomUUID()}, 'client', ${data.email}, ${step}, ${subject}, ${text}, ${html}, ${token}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${advisor?.id || note?.advisor_id || ""})
     `;
-    await sendTelegramNotice(sql, `Application resent to ${invite.name || data.email}`, [data.email, subject, link].filter(Boolean).join("\n"));
-    return { ok: true as const };
+    await sendTelegramNotice(sql, `New application link sent to ${invite.name || data.email}`, [data.email, subject, link].filter(Boolean).join("\n"));
+    return { ok: true as const, link };
   });
 
 async function ensureCrmLeads(sql: Sql) {
@@ -5664,12 +5713,12 @@ function applicationFiles(payload: ApplicationPayload) {
 }
 
 function dataFile(name: string, value: string) {
-  const match = value.match(/^data:[^;]+;base64,([a-zA-Z0-9+/=\s]+)$/);
+  const match = value.match(/^data:([^;]+);base64,([a-zA-Z0-9+/=\s]+)$/);
   if (!match) return null;
-  const content = match[1].replace(/\s/g, "");
+  const content = match[2].replace(/\s/g, "");
   if (!content) return null;
   const filename = name.trim() || "document";
-  return { filename, content };
+  return { filename, content, contentType: match[1] };
 }
 
 async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string; copy?: { subject?: string; lead?: string; next?: string } }) {
