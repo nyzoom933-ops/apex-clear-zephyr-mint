@@ -3513,7 +3513,8 @@ function InboxPanel() {
       await load(nextAdvisor);
       const problem = result.errors?.[0];
       if (problem) setError(problem);
-      const headline = result.notified ? `Telegram notice sent for ${result.notified} message${result.notified === 1 ? "" : "s"}.` : result.telegram ? result.telegram : result.checked ? "No Telegram notice was sent." : "No advisor has IMAP settings yet.";
+      const imported = result.added ? `${result.added} new message${result.added === 1 ? "" : "s"}.` : "No new mail in the latest messages on the server.";
+      const headline = result.notified ? `Telegram notice sent for ${result.notified} message${result.notified === 1 ? "" : "s"}.` : result.telegram ? result.telegram : result.checked ? imported : "No advisor has IMAP settings yet.";
       setNotice([headline, result.detail].filter(Boolean).join(" "));
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "Inbox could not be synced.");

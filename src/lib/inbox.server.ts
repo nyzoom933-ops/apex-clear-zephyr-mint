@@ -140,24 +140,43 @@ async function reportInboxFailure(sql: Sql, text: string) {
   await sendTelegramNotice(sql, "Inbox sync failed", key).catch(() => undefined);
 }
 
+async function resolve4(host: string, servers?: string[]) {
+  const resolver = new Resolver();
+  if (servers) resolver.setServers(servers);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      resolver.resolve4(host),
+      new Promise<string[]>((_, reject) => {
+        timer = setTimeout(() => {
+          resolver.cancel();
+          reject(new Error("timeout"));
+        }, 4000);
+      }),
+    ]);
+  } catch {
+    return [];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function mailboxAddresses(host: string) {
   if (isIP(host)) return [host];
-  const fresh = new Resolver();
+  const found: string[] = [];
+  const add = (list: string[]) => {
+    for (const ip of list) if (ip && !found.includes(ip)) found.push(ip);
+  };
+  add(await resolve4(host));
+  add(await resolve4(host, ["1.1.1.1", "8.8.8.8"]));
+  if (found.length) return found.slice(0, 3);
   try {
-    fresh.setServers(["1.1.1.1", "8.8.8.8", "9.9.9.9"]);
-    const found = await fresh.resolve4(host);
-    if (found.length) return [...new Set(found)];
-  } catch {
-    /* public DNS did not answer; fall back to the system resolver */
-  }
-  try {
-    const found = await lookup(host, { family: 4, all: true });
-    const addresses = [...new Set(found.map((item) => item.address))];
-    if (addresses.length) return addresses;
+    const looked = await lookup(host, { family: 4, all: true });
+    add(looked.map((item) => item.address));
   } catch {
     /* connect with the hostname itself */
   }
-  return [host];
+  return found.length ? found.slice(0, 3) : [host];
 }
 
 async function connectMailbox(name: string, address: string, port: number, secure: boolean, advisor: MailboxRow) {
@@ -253,7 +272,7 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
     const box = client.mailbox;
     const exists = box && typeof box === "object" ? Number(box.exists || 0) : 0;
     if (!exists) return { added: 0, detail: folder === "INBOX" ? "INBOX is empty" : "" };
-    const start = Math.max(1, exists - 14);
+    const start = Math.max(1, exists - 29);
     for await (const message of client.fetch(`${start}:${exists}`, { uid: true, source: true, internalDate: true })) {
       const uid = Number(message.uid || 0);
       if (!uid || !message.source) continue;
@@ -268,28 +287,32 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
       const rawSource = (parsed.text || rawHtml.replace(/<[^>]+>/g, " ") || "").replace(/\s+\n/g, "\n").trim().slice(0, 12000);
       const body = latestMessageText(rawSource).slice(0, 20000);
       const receivedAt = message.internalDate instanceof Date ? message.internalDate : parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime()) ? parsed.date : new Date();
-      latest = `${parsed.subject || "(no subject)"} from ${fromEmail || "unknown"}`;
+      const messageId = (parsed.messageId || "").slice(0, 300);
+      const subject = (parsed.subject || "(no subject)").slice(0, 300);
+      latest = `${subject} from ${fromEmail || "unknown"}`;
       if (folder !== "INBOX" && Date.now() - receivedAt.getTime() > 2 * DAY) continue;
-      const existing = await sql<{ id: string; attachments: unknown }>`
-        select id, attachments from inbox_messages where advisor_id = ${advisor.id} and direction = 'in' and uid = ${uid} and coalesce(folder, 'INBOX') = ${folder} limit 1
-      `;
       const images = emailFiles(parsed.attachments);
-      if (existing[0]) {
-        const storedCount = storedInboxFiles(existing[0].attachments).length;
+      const known = messageId
+        ? await sql<{ id: string; attachments: unknown }>`
+            select id, attachments from inbox_messages
+            where direction = 'in' and message_id = ${messageId}
+            limit 1
+          `
+        : await sql<{ id: string; attachments: unknown }>`
+            select id, attachments from inbox_messages
+            where advisor_id = ${advisor.id} and direction = 'in' and uid = ${uid} and coalesce(folder, 'INBOX') = ${folder}
+              and from_email = ${fromEmail.slice(0, 160)} and subject = ${subject}
+            limit 1
+          `;
+      if (known[0]) {
+        const storedCount = storedInboxFiles(known[0].attachments).length;
         if (images.length > storedCount) {
           const stored = JSON.stringify(images.map((file) => ({ filename: file.filename, contentType: file.contentType, content: file.content })));
-          await sql`update inbox_messages set attachments = ${stored}::jsonb, telegram_notified = false, telegram_attempts = 0 where id = ${existing[0].id}`;
-          fresh.push(existing[0].id);
-          pictures.set(existing[0].id, images);
+          await sql`update inbox_messages set attachments = ${stored}::jsonb, telegram_notified = false, telegram_attempts = 0 where id = ${known[0].id}`;
+          fresh.push(known[0].id);
+          pictures.set(known[0].id, images);
         }
         continue;
-      }
-      const messageId = (parsed.messageId || "").slice(0, 300);
-      if (messageId) {
-        const duplicate = await sql<{ id: string }>`
-          select id from inbox_messages where direction = 'in' and message_id = ${messageId} limit 1
-        `;
-        if (duplicate[0]) continue;
       }
       const id = crypto.randomUUID();
       const stored = JSON.stringify(images.map((file) => ({ filename: file.filename, contentType: file.contentType, content: file.content })));
@@ -306,7 +329,7 @@ async function readFolder(sql: Sql, client: ImapFlow, advisor: MailboxRow, folde
           ${fromEmail.slice(0, 160)},
           ${(to?.name || "").slice(0, 160)},
           ${(to?.address || advisor.imap_user).slice(0, 160)},
-          ${(parsed.subject || "(no subject)").slice(0, 300)},
+          ${subject},
           ${body},
           ${rawSource},
           ${lead[0]?.id || ""},

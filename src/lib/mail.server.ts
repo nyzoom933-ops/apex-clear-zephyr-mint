@@ -397,29 +397,35 @@ async function deliver(to: string, subject: string, text: string, html: string, 
 async function deliverSmtp2go(to: string, subject: string, text: string, html: string, apiKey: string, from: string, replyTo: string, replyName: string, attachments: MailFile[]) {
   if (!apiKey) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Save the SMTP2GO API key in Misc settings." };
   if (!from) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "This advisor has no verified mailbox." };
-  try {
-    const response = await fetch("https://api.smtp2go.com/v3/email/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": apiKey, accept: "application/json" },
-      signal: AbortSignal.timeout(20000),
-      body: JSON.stringify({
-        sender: senderAddress(from, replyName),
-        to: [to],
-        subject,
-        html_body: html,
-        text_body: text,
-        ...(replyTo ? { custom_headers: [{ header: "Reply-To", value: replyTo }] } : {}),
-        ...smtpFiles(attachments),
-      }),
-    });
-    const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number; error?: string; error_code?: string } };
-    const emailId = payload.data?.email_id ? String(payload.data.email_id) : "";
-    const ok = response.ok && Boolean(emailId) && !payload.data?.failed;
-    const error = payload.data?.error || payload.data?.error_code || "";
-    return { delivery: ok ? "sent" : "failed", messageId: ok ? emailId : "", provider: "smtp2go", error: ok ? "" : error || "SMTP2GO did not accept the message." };
-  } catch (caught) {
-    return { delivery: "failed", messageId: "", provider: "smtp2go", error: caught instanceof Error && caught.message ? caught.message : "SMTP2GO did not respond." };
+  let last = "SMTP2GO did not respond.";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch("https://api.smtp2go.com/v3/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": apiKey, accept: "application/json" },
+        signal: AbortSignal.timeout(60000),
+        body: JSON.stringify({
+          sender: senderAddress(from, replyName),
+          to: [to],
+          subject,
+          html_body: html,
+          text_body: text,
+          ...(replyTo ? { custom_headers: [{ header: "Reply-To", value: replyTo }] } : {}),
+          ...smtpFiles(attachments),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { data?: { email_id?: string; failed?: number; error?: string; error_code?: string } };
+      const emailId = payload.data?.email_id ? String(payload.data.email_id) : "";
+      const ok = response.ok && Boolean(emailId) && !payload.data?.failed;
+      const error = payload.data?.error || payload.data?.error_code || "";
+      return { delivery: ok ? "sent" : "failed", messageId: ok ? emailId : "", provider: "smtp2go", error: ok ? "" : error || "SMTP2GO did not accept the message." };
+    } catch (caught) {
+      const message = caught instanceof Error && caught.message ? caught.message : "";
+      last = /aborted|timeout/i.test(message) ? "SMTP2GO took too long to answer. The send was tried again." : message || last;
+      if (attempt === 1 || !/aborted|timeout|fetch failed|network/i.test(message)) break;
+    }
   }
+  return { delivery: "failed", messageId: "", provider: "smtp2go", error: last };
 }
 
 export async function sendFromMailbox(
