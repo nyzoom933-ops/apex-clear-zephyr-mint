@@ -20,6 +20,7 @@ import {
   listApplications,
   listCrmLeads,
   importPerfexLeads,
+  importCrmLeads,
   listIntroOpens,
   downloadOpensReport,
   listTrashOpens,
@@ -2574,6 +2575,69 @@ function leadHasEmail(lead) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((lead.email || "").trim());
 }
 
+const LEAD_IMPORT_HEADERS = {
+  name: ["name", "full name", "fullname", "client", "client name", "lead", "lead name", "contact", "contact name"],
+  first: ["first name", "firstname", "first", "given name"],
+  last: ["last name", "lastname", "last", "surname"],
+  email: ["email", "e-mail", "email address", "mail"],
+  phone: ["phone", "telephone", "mobile", "cell", "phone number"],
+  amount: ["amount", "deposit", "preferred amount", "preferred deposit", "investment", "deposit amount"],
+  term: ["term", "cd term", "months", "term months"],
+  objective: ["objective", "goal"],
+  liquidity: ["liquidity"],
+  source: ["source", "lead source"],
+  advisor: ["advisor", "advisor name", "advisor email"],
+  process: ["process", "deal", "path"],
+  status: ["status"],
+  receivedAt: ["received", "received at", "date", "date received", "received on"],
+};
+
+function leadImportKey(label) {
+  const clean = String(label || "").trim().toLowerCase().replace(/[_/]+/g, " ").replace(/\s+/g, " ");
+  const match = Object.entries(LEAD_IMPORT_HEADERS).find(([, names]) => names.includes(clean));
+  return match?.[0] || "";
+}
+
+async function readLeadWorkbook(file) {
+  if (file.size > 2_000_000) throw new Error("Use a file smaller than 2 MB.");
+  const XLSX = await import("xlsx");
+  const book = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const sheet = book.Sheets[book.SheetNames[0]];
+  if (!sheet) throw new Error("The workbook has no sheet.");
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+  const headerIndex = grid.findIndex((row) => row.some((cell) => leadImportKey(cell)));
+  if (headerIndex < 0) throw new Error("Put column names in the first row. Name and Email are the ones that matter.");
+  const keys = grid[headerIndex].map(leadImportKey);
+  if (!keys.includes("name") && !(keys.includes("first") && keys.includes("last")) && !keys.includes("first")) throw new Error("Add a Name column, or First name and Last name.");
+  const leads = [];
+  for (const row of grid.slice(headerIndex + 1)) {
+    const record = {};
+    keys.forEach((key, index) => {
+      if (!key || key === "name") return;
+      const value = String(row[index] ?? "").trim();
+      if (value) record[key] = value;
+    });
+    const named = keys.includes("name") ? String(row[keys.indexOf("name")] ?? "").trim() : "";
+    const name = (named || [record.first, record.last].filter(Boolean).join(" ")).replace(/\s+/g, " ").trim();
+    if (!name && !record.email) continue;
+    leads.push({ ...record, name });
+  }
+  if (!leads.length) throw new Error("No leads were found under the column names.");
+  if (leads.length > 500) throw new Error("Import up to 500 leads at a time. Split the file and import the rest next.");
+  return leads;
+}
+
+async function downloadLeadTemplate() {
+  const XLSX = await import("xlsx");
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Name", "Email", "Phone", "Amount", "Term", "Objective", "Liquidity", "Source", "Advisor", "Process"],
+    ["Jane Hale", "jane@example.com", "555-0100", "250,000", "10 months", "Income", "At maturity", "Website", "Advisor name", "assisted"],
+  ]);
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Leads");
+  XLSX.writeFile(book, "lead-import.xlsx");
+}
+
 const QUICK_MAIL = [
   ["rates", "Rates introduction", "lead_intro"],
   ["exclusive", "Exclusive promo", "lead_exclusive"],
@@ -2738,6 +2802,12 @@ function PipelineLeadsPanel() {
   const [withEmail, setWithEmail] = useState(false);
   const [pageNumber, setPageNumber] = useState(1);
   const [syncing, setSyncing] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [sheetLeads, setSheetLeads] = useState([]);
+  const [sheetName, setSheetName] = useState("");
+  const [importAdvisorId, setImportAdvisorId] = useState("");
+  const [importProcess, setImportProcess] = useState("assisted");
   const [openId, setOpenId] = useState("");
   const [picked, setPicked] = useState([]);
   const [mailLeads, setMailLeads] = useState(null);
@@ -2859,14 +2929,84 @@ function PipelineLeadsPanel() {
     setMailLeads(ready);
   }
 
+  async function chooseSheet(file) {
+    setError("");
+    setNotice("");
+    if (!file) return;
+    try {
+      const leads = await readLeadWorkbook(file);
+      setSheetLeads(leads);
+      setSheetName(file.name);
+      setImportOpen(true);
+    } catch (caught) {
+      setSheetLeads([]);
+      setSheetName("");
+      setError(caught instanceof Error && caught.message ? caught.message : "The spreadsheet could not be read.");
+    }
+  }
+
+  async function importSheet() {
+    if (!sheetLeads.length) return;
+    setImporting(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await importCrmLeads({ data: { leads: sheetLeads, advisorId: importAdvisorId, process: importProcess } });
+      await load(1);
+      const skipped = result.skipped ? ` ${result.skipped} already had the same email and were left as they are.` : "";
+      const problems = result.problems?.length ? ` ${result.problems.join(" ")}` : "";
+      setNotice(`Added ${result.created} ${result.created === 1 ? "lead" : "leads"}.${skipped}${problems}`);
+      setImportOpen(false);
+      setSheetLeads([]);
+      setSheetName("");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The leads could not be imported.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return <section>
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-3xl font-semibold">Leads</h1>
-        <p className="mt-2 max-w-2xl text-fg">Search the pipeline, then filter by source, status, advisor, or when the lead arrived.</p>
+        <p className="mt-2 max-w-2xl text-fg">Search the pipeline, then filter by source, status, advisor, or when the lead arrived. Add many leads at once from an Excel file.</p>
       </div>
-      <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={syncing} onClick={() => void syncLeads()}>{syncing ? "Syncing…" : "Sync leads"}</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setImportOpen((current) => !current)}>{importOpen ? "Close import" : "Import Excel"}</button>
+        <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={syncing} onClick={() => void syncLeads()}>{syncing ? "Syncing…" : "Sync leads"}</button>
+      </div>
     </div>
+    {importOpen ? <div className="mt-4 rounded-lg border border-border bg-surface p-4">
+      <h2 className="text-lg font-semibold text-primary">Add leads from Excel</h2>
+      <p className="mt-1 max-w-2xl text-sm text-fg">Use one row per lead. The first row must be the column names. Name is required. Email, phone, amount, term, objective, liquidity, source, advisor, and process are optional. A lead whose email is already here is skipped.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void downloadLeadTemplate()}>Download template</button>
+        <label className="min-h-11 cursor-pointer rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary">
+          Choose file
+          <input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void chooseSheet(file); }} />
+        </label>
+      </div>
+      {sheetName ? <p className="mt-3 text-sm text-fg">{sheetName} · {sheetLeads.length} {sheetLeads.length === 1 ? "lead" : "leads"} ready</p> : null}
+      {sheetLeads.length ? <ul className="mt-2 max-h-40 overflow-auto text-sm text-fg">{sheetLeads.slice(0, 8).map((lead, index) => <li key={`${lead.email}-${index}`}>{lead.name || "No name"}{lead.email ? ` · ${lead.email}` : ""}</li>)}{sheetLeads.length > 8 ? <li>and {sheetLeads.length - 8} more</li> : null}</ul> : null}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          <span className="font-semibold text-primary">Advisor when the file does not name one</span>
+          <select className={`${controlClass} mt-1`} value={importAdvisorId} onChange={(event) => setImportAdvisorId(event.target.value)}>
+            <option value="">Unassigned</option>
+            {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="font-semibold text-primary">Who completes the certificate</span>
+          <select className={`${controlClass} mt-1`} value={importProcess} onChange={(event) => setImportProcess(event.target.value)}>
+            <option value="assisted">Advisor processes the deal</option>
+            <option value="portal">Client uses the portal</option>
+          </select>
+        </label>
+      </div>
+      <button type="button" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={importing || !sheetLeads.length} onClick={() => void importSheet()}>{importing ? "Importing…" : sheetLeads.length ? `Add ${sheetLeads.length} leads` : "Add leads"}</button>
+    </div> : null}
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
     <div className="mt-4 grid gap-3 lg:grid-cols-4">

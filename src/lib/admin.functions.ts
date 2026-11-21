@@ -3952,6 +3952,78 @@ export const saveCrmLead = createServerFn({ method: "POST" })
     return { id };
   });
 
+export const importCrmLeads = createServerFn({ method: "POST" })
+  .validator((input: { leads?: Array<Record<string, string>>; advisorId?: string; process?: string }) => {
+    const rows = Array.isArray(input.leads) ? input.leads.slice(0, 500) : [];
+    if (!rows.length) throw new Error("The file has no leads.");
+    const clip = (value: unknown, max = 240) => String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+    return {
+      leads: rows.map((row) => ({
+        name: clip(row?.name, 120),
+        email: clip(row?.email, 180).toLowerCase(),
+        phone: clip(row?.phone),
+        amount: clip(row?.amount),
+        term: clip(row?.term),
+        objective: clip(row?.objective),
+        liquidity: clip(row?.liquidity),
+        source: clip(row?.source),
+        status: clip(row?.status, 80),
+        advisor: clip(row?.advisor, 120),
+        process: clip(row?.process, 40).toLowerCase(),
+        receivedAt: clip(row?.receivedAt, 40),
+      })),
+      advisorId: (input.advisorId || "").trim().slice(0, 80),
+      process: input.process === "portal" ? "portal" as const : "assisted" as const,
+    };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    const advisors = await sql<{ id: string; name: string; email: string }>`select id, name, coalesce(email, '') as email from advisors`;
+    const existing = await sql<{ email: string }>`select lower(email) as email from crm_leads where email <> ''`;
+    const emails = new Set(existing.map((row) => row.email));
+    let created = 0;
+    let skipped = 0;
+    const problems: string[] = [];
+    for (const [index, lead] of data.leads.entries()) {
+      const line = index + 2;
+      if (!lead.name && !lead.email) continue;
+      if (lead.name.length < 2) {
+        problems.push(`Row ${line}: enter a name.`);
+        continue;
+      }
+      if (lead.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email)) {
+        problems.push(`Row ${line}: ${lead.email} is not a valid email.`);
+        continue;
+      }
+      if (lead.email && emails.has(lead.email)) {
+        skipped += 1;
+        continue;
+      }
+      let advisorId = data.advisorId;
+      if (lead.advisor) {
+        const needle = lead.advisor.toLowerCase();
+        const found = advisors.find((item) => item.name.trim().toLowerCase() === needle || item.email.trim().toLowerCase() === needle);
+        if (found) advisorId = found.id;
+        else problems.push(`Row ${line}: advisor “${lead.advisor}” was not found, so the selected advisor was used.`);
+      }
+      const process = /portal|client/.test(lead.process) ? "portal" : /assist/.test(lead.process) ? "assisted" : data.process;
+      const received = lead.receivedAt ? new Date(lead.receivedAt) : new Date();
+      const receivedAt = Number.isNaN(received.getTime()) ? new Date().toISOString() : received.toISOString();
+      const id = crypto.randomUUID();
+      await sql`
+        insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, status, advisor_id, process, received_at)
+        values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, ${lead.liquidity}, ${lead.source}, ${lead.status}, ${advisorId}, ${process}, ${receivedAt})
+      `;
+      if (lead.email) emails.add(lead.email);
+      created += 1;
+    }
+    if (!created && !skipped) throw new Error(problems[0] || "No leads could be imported.");
+    return { created, skipped, problems: problems.slice(0, 8), problemCount: problems.length };
+  });
+
 export const getPerfexSetup = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
   const { getSql } = await import("@/lib/db");
