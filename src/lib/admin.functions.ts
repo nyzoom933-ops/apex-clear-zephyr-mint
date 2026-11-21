@@ -3333,6 +3333,7 @@ async function ensureCrmLeads(sql: Sql) {
   await sql`alter table crm_leads add column if not exists notes_at timestamptz`;
   await sql`alter table crm_leads add column if not exists advisor_id text not null default ''`;
   await sql`alter table crm_leads add column if not exists process text not null default 'assisted'`;
+  await sql`alter table crm_leads add column if not exists lead_number text not null default ''`;
 }
 
 export type CrmLead = {
@@ -3349,6 +3350,7 @@ export type CrmLead = {
   notes: string;
   advisorId: string;
   process: "assisted" | "portal";
+  leadNumber: string;
   receivedAt: string;
 };
 
@@ -3384,7 +3386,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     const params: unknown[] = [];
     if (data.query) {
       params.push(`%${data.query}%`);
-      where.push(`(name ilike $${params.length} or email ilike $${params.length} or phone ilike $${params.length})`);
+      where.push(`(name ilike $${params.length} or email ilike $${params.length} or phone ilike $${params.length} or lead_number ilike $${params.length})`);
     }
     if (data.source) {
       params.push(data.source);
@@ -3431,9 +3433,10 @@ export const listCrmLeads = createServerFn({ method: "GET" })
       perfex_id: string;
       advisor_id: string;
       process: string;
+      lead_number: string;
       received_at: string | Date;
     }>(
-      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at
+      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at
        from crm_leads ${clause}
        order by received_at desc, created_at desc
        limit $${params.length + 1} offset $${params.length + 2}`,
@@ -3444,7 +3447,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     const statuses = await sql.query<{ status: string }>(`select distinct status from crm_leads where status <> '' order by status limit 100`);
     const focused = data.focusId
       ? await sql.query<{ id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status: string; notes: string; notes_at: string | Date | null; perfex_id: string; advisor_id: string; process: string; received_at: string | Date }>(
-          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at from crm_leads where id = $1 limit 1`,
+          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at from crm_leads where id = $1 limit 1`,
           [data.focusId],
         )
       : [];
@@ -3460,7 +3463,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     };
   });
 
-function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; notes?: string; advisor_id?: string; process?: string; received_at: string | Date }): CrmLead {
+function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; notes?: string; advisor_id?: string; process?: string; lead_number?: string; received_at: string | Date }): CrmLead {
   return {
     id: row.id,
     name: row.name,
@@ -3475,6 +3478,7 @@ function mapCrmLead(row: { id: string; name: string; email: string; phone: strin
     notes: row.notes || "",
     advisorId: row.advisor_id || "",
     process: row.process === "portal" ? "portal" : "assisted",
+    leadNumber: row.lead_number || "",
     receivedAt: new Date(row.received_at).toISOString(),
   };
 }
@@ -3911,6 +3915,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
       source: clip(input.source),
       advisorId: input.advisorId == null ? null : (input.advisorId || "").trim().slice(0, 80),
       process: input.process === "portal" ? "portal" as const : "assisted" as const,
+      leadNumber: (input.leadNumber || "").trim().slice(0, 40),
       receivedAt: received.toISOString(),
     };
   })
@@ -3921,7 +3926,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
     await ensureCrmLeads(sql);
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, process, received_at)
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, process, lead_number, received_at)
       values (
         ${id},
         ${data.name},
@@ -3934,6 +3939,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         ${data.source},
         ${data.advisorId || ""},
         ${data.process},
+        ${data.leadNumber},
         ${data.receivedAt}
       )
       on conflict (id) do update set
@@ -3947,6 +3953,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         source = excluded.source,
         advisor_id = coalesce(${data.advisorId}, crm_leads.advisor_id),
         process = excluded.process,
+        lead_number = excluded.lead_number,
         received_at = excluded.received_at
     `;
     return { id };
@@ -3968,6 +3975,7 @@ export const importCrmLeads = createServerFn({ method: "POST" })
         liquidity: clip(row?.liquidity),
         source: clip(row?.source),
         status: clip(row?.status, 80),
+        leadNumber: clip(row?.leadNumber, 40),
         advisor: clip(row?.advisor, 120),
         process: clip(row?.process, 40).toLowerCase(),
         receivedAt: clip(row?.receivedAt, 40),
@@ -4014,14 +4022,102 @@ export const importCrmLeads = createServerFn({ method: "POST" })
       const receivedAt = Number.isNaN(received.getTime()) ? new Date().toISOString() : received.toISOString();
       const id = crypto.randomUUID();
       await sql`
-        insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, status, advisor_id, process, received_at)
-        values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, ${lead.liquidity}, ${lead.source}, ${lead.status}, ${advisorId}, ${process}, ${receivedAt})
+        insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, status, advisor_id, process, lead_number, received_at)
+        values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, ${lead.liquidity}, ${lead.source}, ${lead.status}, ${advisorId}, ${process}, ${lead.leadNumber}, ${receivedAt})
       `;
       if (lead.email) emails.add(lead.email);
       created += 1;
     }
     if (!created && !skipped) throw new Error(problems[0] || "No leads could be imported.");
     return { created, skipped, problems: problems.slice(0, 8), problemCount: problems.length };
+  });
+
+export const exportCrmLeads = createServerFn({ method: "POST" })
+  .validator((input: { query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean } | undefined) => {
+    const query = (input?.query || "").trim().replace(/[%_]/g, "").slice(0, 80);
+    const source = (input?.source || "").trim().slice(0, 80);
+    const status = (input?.status || "").trim().slice(0, 80);
+    const advisorId = (input?.advisorId || "").trim().slice(0, 80);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(input?.from || "") ? input?.from || "" : "";
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(input?.to || "") ? input?.to || "" : "";
+    return { query, source, status, advisorId, from, to, withEmail: Boolean(input?.withEmail) };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (data.query) {
+      params.push(`%${data.query}%`);
+      where.push(`(name ilike $${params.length} or email ilike $${params.length} or phone ilike $${params.length} or lead_number ilike $${params.length})`);
+    }
+    if (data.source) {
+      params.push(data.source);
+      where.push(`source = $${params.length}`);
+    }
+    if (data.status) {
+      params.push(data.status);
+      where.push(`status = $${params.length}`);
+    }
+    if (data.advisorId) {
+      params.push(data.advisorId);
+      where.push(`advisor_id = $${params.length}`);
+    }
+    if (data.from) {
+      params.push(`${data.from}T00:00:00.000Z`);
+      where.push(`received_at >= $${params.length}`);
+    }
+    if (data.to) {
+      const end = new Date(`${data.to}T00:00:00.000Z`);
+      end.setUTCDate(end.getUTCDate() + 1);
+      params.push(end.toISOString());
+      where.push(`received_at < $${params.length}`);
+    }
+    if (data.withEmail) where.push(`email <> ''`);
+    const clause = where.length ? `where ${where.join(" and ")}` : "";
+    const rows = await sql.query<{
+      lead_number: string;
+      name: string;
+      email: string;
+      phone: string;
+      amount: string;
+      term: string;
+      objective: string;
+      liquidity: string;
+      source: string;
+      status: string;
+      advisor_name: string;
+      process: string;
+      received_at: string | Date;
+    }>(
+      `select coalesce(l.lead_number, '') as lead_number, l.name, l.email, l.phone, l.amount, l.term, l.objective, l.liquidity, l.source, coalesce(l.status, '') as status,
+              coalesce(a.name, '') as advisor_name, case when l.process = 'portal' then 'portal' else 'assisted' end as process, l.received_at
+       from crm_leads l
+       left join advisors a on a.id = l.advisor_id
+       ${clause.replace(/\b(name|email|phone|lead_number|source|status|advisor_id|received_at|process)\b/g, "l.$1")}
+       order by l.received_at desc
+       limit 5000`,
+      params,
+    );
+    return {
+      rows: rows.map((row) => ({
+        leadNumber: row.lead_number,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        amount: row.amount,
+        term: row.term,
+        objective: row.objective,
+        liquidity: row.liquidity,
+        source: row.source,
+        status: row.status,
+        advisor: row.advisor_name,
+        process: row.process,
+        receivedAt: new Date(row.received_at).toISOString(),
+      })),
+    };
   });
 
 export const getPerfexSetup = createServerFn({ method: "GET" }).handler(async () => {

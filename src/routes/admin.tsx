@@ -21,6 +21,7 @@ import {
   listCrmLeads,
   importPerfexLeads,
   importCrmLeads,
+  exportCrmLeads,
   listIntroOpens,
   downloadOpensReport,
   listTrashOpens,
@@ -2562,6 +2563,7 @@ function emptyLead() {
     notes: "",
     advisorId: "",
     process: "assisted",
+    leadNumber: "",
     receivedAt: now.toISOString()
   };
 }
@@ -2581,6 +2583,7 @@ const LEAD_IMPORT_HEADERS = {
   last: ["last name", "lastname", "last", "surname"],
   email: ["email", "e-mail", "email address", "mail"],
   phone: ["phone", "telephone", "mobile", "cell", "phone number"],
+  leadNumber: ["lead #", "#", "number", "lead number", "lead no"],
   amount: ["amount", "deposit", "preferred amount", "preferred deposit", "investment", "deposit amount"],
   term: ["term", "cd term", "months", "term months"],
   objective: ["objective", "goal"],
@@ -2630,8 +2633,8 @@ async function readLeadWorkbook(file) {
 async function downloadLeadTemplate() {
   const XLSX = await import("xlsx");
   const sheet = XLSX.utils.aoa_to_sheet([
-    ["Name", "Email", "Phone", "Amount", "Term", "Objective", "Liquidity", "Source", "Advisor", "Process"],
-    ["Jane Hale", "jane@example.com", "555-0100", "250,000", "10 months", "Income", "At maturity", "Website", "Advisor name", "assisted"],
+    ["Lead #", "Name", "Email", "Phone", "Amount", "Term", "Objective", "Liquidity", "Source", "Advisor", "Process"],
+    ["1042", "Jane Hale", "jane@example.com", "555-0100", "250,000", "10 months", "Income", "At maturity", "Website", "Advisor name", "assisted"],
   ]);
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, sheet, "Leads");
@@ -2808,6 +2811,7 @@ function PipelineLeadsPanel() {
   const [sheetName, setSheetName] = useState("");
   const [importAdvisorId, setImportAdvisorId] = useState("");
   const [importProcess, setImportProcess] = useState("assisted");
+  const [exporting, setExporting] = useState(false);
   const [openId, setOpenId] = useState("");
   const [picked, setPicked] = useState([]);
   const [mailLeads, setMailLeads] = useState(null);
@@ -2966,6 +2970,40 @@ function PipelineLeadsPanel() {
     }
   }
 
+  async function exportSheet() {
+    setExporting(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await exportCrmLeads({ data: { query, source, status, advisorId, from, to, withEmail } });
+      if (!result.rows.length) throw new Error("No leads match these filters.");
+      const XLSX = await import("xlsx");
+      const sheet = XLSX.utils.json_to_sheet(result.rows.map((lead) => ({
+        "Lead #": lead.leadNumber,
+        Name: lead.name,
+        Email: lead.email,
+        Phone: lead.phone,
+        Amount: lead.amount,
+        Term: lead.term,
+        Objective: lead.objective,
+        Liquidity: lead.liquidity,
+        Source: lead.source,
+        Status: lead.status,
+        Advisor: lead.advisor,
+        Process: lead.process,
+        Received: lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : "",
+      })));
+      const book = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(book, sheet, "Leads");
+      XLSX.writeFile(book, "leads.xlsx");
+      setNotice(`Exported ${result.rows.length} ${result.rows.length === 1 ? "lead" : "leads"}.`);
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The leads could not be exported.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return <section>
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -2974,12 +3012,13 @@ function PipelineLeadsPanel() {
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setImportOpen((current) => !current)}>{importOpen ? "Close import" : "Import Excel"}</button>
+        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={exporting} onClick={() => void exportSheet()}>{exporting ? "Exporting…" : "Export"}</button>
         <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={syncing} onClick={() => void syncLeads()}>{syncing ? "Syncing…" : "Sync leads"}</button>
       </div>
     </div>
     {importOpen ? <div className="mt-4 rounded-lg border border-border bg-surface p-4">
       <h2 className="text-lg font-semibold text-primary">Add leads from Excel</h2>
-      <p className="mt-1 max-w-2xl text-sm text-fg">Use one row per lead. The first row must be the column names. Name is required. Email, phone, amount, term, objective, liquidity, source, advisor, and process are optional. A lead whose email is already here is skipped.</p>
+      <p className="mt-1 max-w-2xl text-sm text-fg">Use one row per lead. The first row must be the column names. Name is required. Lead #, email, phone, amount, term, objective, liquidity, source, advisor, and process are optional. A lead whose email is already here is skipped.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void downloadLeadTemplate()}>Download template</button>
         <label className="min-h-11 cursor-pointer rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary">
@@ -3072,7 +3111,7 @@ function PipelineLeadsPanel() {
                 <input type="checkbox" checked={picked.some((item) => item.id === lead.id)} disabled={!leadHasEmail(lead)} aria-label={`Select ${lead.name}`} onChange={() => toggleLead(lead)} />
               </td>
               <td className="px-4 py-3">
-                <span className="block font-semibold text-primary">{lead.name}</span>
+                <span className="block font-semibold text-primary">{lead.leadNumber ? <span className="mr-2 font-semibold text-fg">#{lead.leadNumber}</span> : null}{lead.name}</span>
                 <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
                 {lead.notes ? <span className="mt-1 block max-w-xs truncate text-xs text-[#8c8c8c]">{lead.notes.split("\n")[0]}</span> : null}
                 <div className="mt-1 flex gap-1" onClick={(event) => event.stopPropagation()}>
@@ -3098,7 +3137,7 @@ function PipelineLeadsPanel() {
             {openId === lead.id ? <tr className="border-b border-border bg-bg">
               <td className="px-4 py-4" colSpan={5}>
                 <dl className="grid gap-3 sm:grid-cols-3">
-                  {[["Amount", lead.amount], ["Term", lead.term], ["Objective", [lead.objective, lead.liquidity].filter(Boolean).join(" · ")], ["Source", lead.source], ["Received", lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : ""]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}
+                  {[["Lead #", lead.leadNumber], ["Amount", lead.amount], ["Term", lead.term], ["Objective", [lead.objective, lead.liquidity].filter(Boolean).join(" · ")], ["Source", lead.source], ["Received", lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : ""]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}
                 </dl>
               </td>
             </tr> : null}
@@ -3116,6 +3155,7 @@ function PipelineLeadsPanel() {
     </div> : null}
     <form id="lead-editor" className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={(event) => void save(event)}>
       <h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit lead" : "Add lead"}</h2>
+      <AdminField label="Lead #" value={draft.leadNumber} onChange={(leadNumber) => setDraft({ ...draft, leadNumber })} />
       <AdminField label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
       <AdminField label="Email" value={draft.email} onChange={(email) => setDraft({ ...draft, email })} />
       <AdminField label="Phone" value={draft.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
