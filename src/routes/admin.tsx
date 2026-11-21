@@ -2633,7 +2633,7 @@ async function readLeadWorkbook(file) {
 async function downloadLeadTemplate() {
   const XLSX = await import("xlsx");
   const sheet = XLSX.utils.aoa_to_sheet([
-    ["Lead #", "Name", "Email", "Phone", "Amount", "Term", "Objective", "Liquidity", "Source", "Advisor", "Process"],
+    ["#", "Name", "Email", "Phone", "Amount", "Term", "Objective", "Liquidity", "Source", "Advisor", "Process"],
     ["1042", "Jane Hale", "jane@example.com", "555-0100", "250,000", "10 months", "Income", "At maturity", "Website", "Advisor name", "assisted"],
   ]);
   const book = XLSX.utils.book_new();
@@ -2815,9 +2815,11 @@ function PipelineLeadsPanel() {
   const [openId, setOpenId] = useState("");
   const [picked, setPicked] = useState([]);
   const [mailLeads, setMailLeads] = useState(null);
+  const [sort, setSort] = useState("");
+  const [direction, setDirection] = useState("asc");
 
   function load(nextPage = pageNumber) {
-    return listCrmLeads({ data: { page: nextPage, query, source, status, advisorId, from, to, withEmail } }).then((result) => {
+    return listCrmLeads({ data: { page: nextPage, query, source, status, advisorId, from, to, withEmail, sort, direction } }).then((result) => {
       setPage(result);
       setPageNumber(result.page);
       return result;
@@ -2833,7 +2835,15 @@ function PipelineLeadsPanel() {
       void load(1).catch(() => setError("Leads could not be loaded."));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [query, source, status, advisorId, from, to, withEmail]);
+  }, [query, source, status, advisorId, from, to, withEmail, sort, direction]);
+
+  function chooseSort(next) {
+    if (sort === next) setDirection((current) => current === "asc" ? "desc" : "asc");
+    else {
+      setSort(next);
+      setDirection("asc");
+    }
+  }
 
   async function save(event) {
     event.preventDefault();
@@ -2958,8 +2968,9 @@ function PipelineLeadsPanel() {
       const result = await importCrmLeads({ data: { leads: sheetLeads, advisorId: importAdvisorId, process: importProcess } });
       await load(1);
       const skipped = result.skipped ? ` ${result.skipped} already had the same email and were left as they are.` : "";
+      const updated = result.updated ? ` Updated the # on ${result.updated} existing ${result.updated === 1 ? "lead" : "leads"}.` : "";
       const problems = result.problems?.length ? ` ${result.problems.join(" ")}` : "";
-      setNotice(`Added ${result.created} ${result.created === 1 ? "lead" : "leads"}.${skipped}${problems}`);
+      setNotice(`Added ${result.created} ${result.created === 1 ? "lead" : "leads"}.${updated}${skipped}${problems}`);
       setImportOpen(false);
       setSheetLeads([]);
       setSheetName("");
@@ -2975,11 +2986,11 @@ function PipelineLeadsPanel() {
     setError("");
     setNotice("");
     try {
-      const result = await exportCrmLeads({ data: { query, source, status, advisorId, from, to, withEmail } });
+      const result = await exportCrmLeads({ data: { query, source, status, advisorId, from, to, withEmail, sort, direction } });
       if (!result.rows.length) throw new Error("No leads match these filters.");
       const XLSX = await import("xlsx");
       const sheet = XLSX.utils.json_to_sheet(result.rows.map((lead) => ({
-        "Lead #": lead.leadNumber,
+        "#": lead.leadNumber,
         Name: lead.name,
         Email: lead.email,
         Phone: lead.phone,
@@ -3018,7 +3029,7 @@ function PipelineLeadsPanel() {
     </div>
     {importOpen ? <div className="mt-4 rounded-lg border border-border bg-surface p-4">
       <h2 className="text-lg font-semibold text-primary">Add leads from Excel</h2>
-      <p className="mt-1 max-w-2xl text-sm text-fg">Use one row per lead. The first row must be the column names. Name is required. Lead #, email, phone, amount, term, objective, liquidity, source, advisor, and process are optional. A lead whose email is already here is skipped.</p>
+      <p className="mt-1 max-w-2xl text-sm text-fg">Use one row per lead. The first row must be the column names. Name is required for a new lead. #, email, phone, amount, term, objective, liquidity, source, advisor, and process are optional. If the email is already here and the row has a #, that number is saved on the existing lead.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => void downloadLeadTemplate()}>Download template</button>
         <label className="min-h-11 cursor-pointer rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary">
@@ -3094,14 +3105,15 @@ function PipelineLeadsPanel() {
     </div> : null}
     {mailLeads ? <LeadQuickMail key={mailLeads.map((lead) => lead.id).join(",")} leads={mailLeads} advisors={advisors} onClose={() => setMailLeads(null)} onSent={(message, sentIds) => { setNotice(message); setMailLeads(null); setPicked((current) => current.filter((item) => !sentIds.includes(item.id))); }} /> : null}
     <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
-      <table className="w-full min-w-[760px] text-left text-sm">
+      <table className="w-full min-w-[860px] text-left text-sm">
         <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
           <tr>
             <th className="w-10 px-3 py-3"><input type="checkbox" checked={allPicked} disabled={!selectable.length} aria-label="Select leads on this page" onClick={(event) => event.stopPropagation()} onChange={(event) => togglePage(event.target.checked)} /></th>
-            <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold">Status</th>
-            <th className="px-4 py-3 font-semibold">Advisor</th>
-            <th className="px-4 py-3 font-semibold">Deal</th>
+            <LeadSortHeader label="#" column="number" sort={sort} direction={direction} onSort={chooseSort} />
+            <LeadSortHeader label="Lead" column="name" sort={sort} direction={direction} onSort={chooseSort} />
+            <LeadSortHeader label="Status" column="status" sort={sort} direction={direction} onSort={chooseSort} />
+            <LeadSortHeader label="Advisor" column="advisor" sort={sort} direction={direction} onSort={chooseSort} />
+            <LeadSortHeader label="Deal" column="deal" sort={sort} direction={direction} onSort={chooseSort} />
           </tr>
         </thead>
         <tbody>
@@ -3110,8 +3122,9 @@ function PipelineLeadsPanel() {
               <td className="px-3 py-3" onClick={(event) => event.stopPropagation()}>
                 <input type="checkbox" checked={picked.some((item) => item.id === lead.id)} disabled={!leadHasEmail(lead)} aria-label={`Select ${lead.name}`} onChange={() => toggleLead(lead)} />
               </td>
+              <td className="px-4 py-3 font-semibold text-primary">{lead.leadNumber || "—"}</td>
               <td className="px-4 py-3">
-                <span className="block font-semibold text-primary">{lead.leadNumber ? <span className="mr-2 font-semibold text-fg">#{lead.leadNumber}</span> : null}{lead.name}</span>
+                <span className="block font-semibold text-primary">{lead.name}</span>
                 <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
                 {lead.notes ? <span className="mt-1 block max-w-xs truncate text-xs text-[#8c8c8c]">{lead.notes.split("\n")[0]}</span> : null}
                 <div className="mt-1 flex gap-1" onClick={(event) => event.stopPropagation()}>
@@ -3135,9 +3148,9 @@ function PipelineLeadsPanel() {
               </td>
             </tr>
             {openId === lead.id ? <tr className="border-b border-border bg-bg">
-              <td className="px-4 py-4" colSpan={5}>
+              <td className="px-4 py-4" colSpan={6}>
                 <dl className="grid gap-3 sm:grid-cols-3">
-                  {[["Lead #", lead.leadNumber], ["Amount", lead.amount], ["Term", lead.term], ["Objective", [lead.objective, lead.liquidity].filter(Boolean).join(" · ")], ["Source", lead.source], ["Received", lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : ""]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}
+                  {[["#", lead.leadNumber], ["Amount", lead.amount], ["Term", lead.term], ["Objective", [lead.objective, lead.liquidity].filter(Boolean).join(" · ")], ["Source", lead.source], ["Received", lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : ""]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}
                 </dl>
               </td>
             </tr> : null}
@@ -3155,7 +3168,7 @@ function PipelineLeadsPanel() {
     </div> : null}
     <form id="lead-editor" className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={(event) => void save(event)}>
       <h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit lead" : "Add lead"}</h2>
-      <AdminField label="Lead #" value={draft.leadNumber} onChange={(leadNumber) => setDraft({ ...draft, leadNumber })} />
+      <AdminField label="#" value={draft.leadNumber} onChange={(leadNumber) => setDraft({ ...draft, leadNumber })} />
       <AdminField label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
       <AdminField label="Email" value={draft.email} onChange={(email) => setDraft({ ...draft, email })} />
       <AdminField label="Phone" value={draft.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
@@ -3191,6 +3204,16 @@ function PipelineLeadsPanel() {
       </div>
     </form>
   </section>;
+}
+
+function LeadSortHeader({ label, column, sort, direction, onSort }) {
+  const active = sort === column;
+  return <th className="px-4 py-3 font-semibold" aria-sort={active ? direction === "asc" ? "ascending" : "descending" : "none"}>
+    <button type="button" className="inline-flex min-h-11 items-center gap-1 uppercase" onClick={() => onSort(column)}>
+      {label}
+      <ChevronDown className={"size-3.5 " + (active ? "" : "opacity-30 ") + (active && direction === "asc" ? "rotate-180" : "")} />
+    </button>
+  </th>;
 }
 
 function ClientsPanel({

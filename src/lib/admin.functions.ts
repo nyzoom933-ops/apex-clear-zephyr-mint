@@ -3366,8 +3366,27 @@ export type LeadPage = {
 
 const LEAD_PAGE_SIZE = 25;
 
+function leadSortKey(input?: string) {
+  return input === "number" || input === "name" || input === "status" || input === "advisor" || input === "deal" ? input : "";
+}
+
+function leadOrderSql(sort: string, direction: "asc" | "desc", alias = "") {
+  const col = (name: string) => (alias ? `${alias}.${name}` : name);
+  const way = direction === "asc" ? "asc" : "desc";
+  const blank = (expr: string) => `case when coalesce(${expr}, '') = '' then 1 else 0 end`;
+  if (sort === "number") return `${blank(col("lead_number"))}, case when ${col("lead_number")} ~ '^[0-9]+$' then lpad(${col("lead_number")}, 12, '0') else lower(${col("lead_number")}) end ${way}, ${col("received_at")} desc`;
+  if (sort === "name") return `${blank(col("name"))}, lower(${col("name")}) ${way}, ${col("received_at")} desc`;
+  if (sort === "status") return `${blank(col("status"))}, lower(${col("status")}) ${way}, lower(${col("name")}) asc`;
+  if (sort === "deal") return `${col("process")} ${way}, lower(${col("name")}) asc`;
+  if (sort === "advisor") {
+    const advisorName = alias ? `lower(${alias === "l" ? "a" : alias}.name)` : `coalesce((select lower(name) from advisors where advisors.id = ${col("advisor_id")}), '')`;
+    return `${blank(col("advisor_id"))}, ${advisorName} ${way}, lower(${col("name")}) asc`;
+  }
+  return `${col("received_at")} desc, ${col("created_at")} desc`;
+}
+
 export const listCrmLeads = createServerFn({ method: "GET" })
-  .validator((input: { page?: number; query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean; focusId?: string } | undefined) => {
+  .validator((input: { page?: number; query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean; focusId?: string; sort?: string; direction?: string } | undefined) => {
     const page = Math.min(10000, Math.max(1, Math.floor(Number(input?.page) || 1)));
     const query = (input?.query || "").trim().replace(/[%_]/g, "").slice(0, 80);
     const source = (input?.source || "").trim().slice(0, 80);
@@ -3375,7 +3394,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     const advisorId = (input?.advisorId || "").trim().slice(0, 80);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(input?.from || "") ? input?.from || "" : "";
     const to = /^\d{4}-\d{2}-\d{2}$/.test(input?.to || "") ? input?.to || "" : "";
-    return { page, query, source, status, advisorId, from, to, withEmail: Boolean(input?.withEmail), focusId: (input?.focusId || "").slice(0, 80) };
+    return { page, query, source, status, advisorId, from, to, withEmail: Boolean(input?.withEmail), focusId: (input?.focusId || "").slice(0, 80), sort: leadSortKey(input?.sort), direction: input?.direction === "asc" ? "asc" as const : "desc" as const };
   })
   .handler(async ({ data }): Promise<LeadPage> => {
     await requireAdmin();
@@ -3438,7 +3457,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     }>(
       `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at
        from crm_leads ${clause}
-       order by received_at desc, created_at desc
+       order by ${leadOrderSql(data.sort, data.direction)}
        limit $${params.length + 1} offset $${params.length + 2}`,
       [...params, LEAD_PAGE_SIZE, offset],
     );
@@ -3990,24 +4009,28 @@ export const importCrmLeads = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ensureCrmLeads(sql);
     const advisors = await sql<{ id: string; name: string; email: string }>`select id, name, coalesce(email, '') as email from advisors`;
-    const existing = await sql<{ email: string }>`select lower(email) as email from crm_leads where email <> ''`;
+    const existing = await sql<{ id: string; email: string }>`select id, lower(email) as email from crm_leads where email <> ''`;
     const emails = new Set(existing.map((row) => row.email));
     let created = 0;
     let skipped = 0;
+    let updated = 0;
     const problems: string[] = [];
     for (const [index, lead] of data.leads.entries()) {
       const line = index + 2;
-      if (!lead.name && !lead.email) continue;
+      if (!lead.name && !lead.email && !lead.leadNumber) continue;
+      if (lead.email && emails.has(lead.email)) {
+        if (lead.leadNumber) {
+          await sql`update crm_leads set lead_number = ${lead.leadNumber} where lower(email) = ${lead.email}`;
+          updated += 1;
+        } else skipped += 1;
+        continue;
+      }
       if (lead.name.length < 2) {
         problems.push(`Row ${line}: enter a name.`);
         continue;
       }
       if (lead.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email)) {
         problems.push(`Row ${line}: ${lead.email} is not a valid email.`);
-        continue;
-      }
-      if (lead.email && emails.has(lead.email)) {
-        skipped += 1;
         continue;
       }
       let advisorId = data.advisorId;
@@ -4028,19 +4051,19 @@ export const importCrmLeads = createServerFn({ method: "POST" })
       if (lead.email) emails.add(lead.email);
       created += 1;
     }
-    if (!created && !skipped) throw new Error(problems[0] || "No leads could be imported.");
-    return { created, skipped, problems: problems.slice(0, 8), problemCount: problems.length };
+    if (!created && !skipped && !updated) throw new Error(problems[0] || "No leads could be imported.");
+    return { created, skipped, updated, problems: problems.slice(0, 8), problemCount: problems.length };
   });
 
 export const exportCrmLeads = createServerFn({ method: "POST" })
-  .validator((input: { query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean } | undefined) => {
+  .validator((input: { query?: string; source?: string; status?: string; advisorId?: string; from?: string; to?: string; withEmail?: boolean; sort?: string; direction?: string } | undefined) => {
     const query = (input?.query || "").trim().replace(/[%_]/g, "").slice(0, 80);
     const source = (input?.source || "").trim().slice(0, 80);
     const status = (input?.status || "").trim().slice(0, 80);
     const advisorId = (input?.advisorId || "").trim().slice(0, 80);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(input?.from || "") ? input?.from || "" : "";
     const to = /^\d{4}-\d{2}-\d{2}$/.test(input?.to || "") ? input?.to || "" : "";
-    return { query, source, status, advisorId, from, to, withEmail: Boolean(input?.withEmail) };
+    return { query, source, status, advisorId, from, to, withEmail: Boolean(input?.withEmail), sort: leadSortKey(input?.sort), direction: input?.direction === "asc" ? "asc" as const : "desc" as const };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -4097,7 +4120,7 @@ export const exportCrmLeads = createServerFn({ method: "POST" })
        from crm_leads l
        left join advisors a on a.id = l.advisor_id
        ${clause.replace(/\b(name|email|phone|lead_number|source|status|advisor_id|received_at|process)\b/g, "l.$1")}
-       order by l.received_at desc
+       order by ${leadOrderSql(data.sort, data.direction, "l")}
        limit 5000`,
       params,
     );
