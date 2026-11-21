@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
 import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, accountReadyLetter, cdarsIntroLetter, cdarsLetter, cdUpdateLetter, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
+import { wealthIntroLetter } from "@/lib/wealth-letter";
 import {
   adminLogin,
   adminLogout,
@@ -40,6 +41,7 @@ import {
   saveInvestmentType,
   savePromo,
   setApplicationStatus,
+  correctApplicationName,
   sendApplicationApproved,
   sendPortalAccess,
   deleteApplication,
@@ -74,6 +76,7 @@ import {
   sendLeadExclusive,
   sendLeadCdars,
   sendLeadCdarsIntro,
+  sendLeadWealth,
   sendLeadHtr,
   sendLeadFollowup,
   sendLeadPromoReminder,
@@ -251,17 +254,19 @@ function Cabinet({
     setNotice(already ? `Letter sent to ${email}.` : portal ? `Sign-in created for ${email}. ${mode === "advisor" ? "Sent from the advisor." : "Transactional email sent."}` : `Approved ${email}. No portal sign-in. Sent from the advisor.`);
     void refresh();
   }
-  async function updateStatus(id, status) {
+  async function updateStatus(id, status, silent = false) {
     setError("");
     setNotice("");
     try {
       const result = await setApplicationStatus({
         data: {
           id,
-          status
+          status,
+          silent
         }
       });
-      if (result.assisted) setNotice(status === "approved" ? "Approved. No portal sign-in. No email was sent." : "Status updated. No email was sent.");
+      if (silent && status === "approved") setNotice(result.assisted ? "Approved. No portal sign-in. No email was sent." : `Approved. Sign-in is active for ${result.loginEmail}. No email was sent.`);
+      else if (result.assisted) setNotice(status === "approved" ? "Approved. No portal sign-in. No email was sent." : "Status updated. No email was sent.");
       else if (result.loginEmail) setNotice(`Sign-in created for ${result.loginEmail}.`);
       else if (status !== "approved") setNotice("Investor sign-in removed.");
       await refresh();
@@ -276,13 +281,13 @@ function Cabinet({
             setSelectedId(id);
             const row = (rows ?? []).find(item => item.id === id);
             setTab(row?.status === "approved" ? "clients" : "applications");
-          }} /></section> : tab === "applications" ? <section><h1 className="text-3xl font-semibold">Submitted applications</h1><p className="mt-2 text-fg">Select a row to open the full application, including the identity and address documents.</p><div className="mt-4 flex flex-wrap gap-2">{["all", "pending", "approved", "hold"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (filter === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setFilter(key)}>{key === "all" ? "All" : key === "hold" ? "On hold" : key[0].toUpperCase() + key.slice(1)}</button>)}</div><ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />{selected ? <ApplicationDetail row={selected} onStatus={status => void updateStatus(selected.id, status)} onMailed={(email, mode, already) => noteApproval(email, mode, already)} onRemove={() => void removeApplication(selected.id)} /> : null}</section> : tab === "pipeline-leads" ? <PipelineLeadsPanel /> : tab === "pipeline-opens" ? <IntroOpensPanel onApplication={lead => {
+          }} /></section> : tab === "applications" ? <section><h1 className="text-3xl font-semibold">Submitted applications</h1><p className="mt-2 text-fg">Select a row to open the full application, including the identity and address documents.</p><div className="mt-4 flex flex-wrap gap-2">{["all", "pending", "approved", "hold"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (filter === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setFilter(key)}>{key === "all" ? "All" : key === "hold" ? "On hold" : key[0].toUpperCase() + key.slice(1)}</button>)}</div><ApplicationTable rows={visible} selectedId={selectedId} onSelect={setSelectedId} />{selected ? <ApplicationDetail row={selected} onSaved={() => void refresh()} onStatus={(status, silent) => void updateStatus(selected.id, status, silent)} onMailed={(email, mode, already) => noteApproval(email, mode, already)} onRemove={() => void removeApplication(selected.id)} /> : null}</section> : tab === "pipeline-leads" ? <PipelineLeadsPanel /> : tab === "pipeline-opens" ? <IntroOpensPanel onApplication={lead => {
             setEmailFocus({
               lead,
               kind: "promo"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status) => void updateStatus(id, status)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status, silent) => void updateStatus(id, status, silent)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
 }
 function LetterPreview({
   html,
@@ -1274,7 +1279,7 @@ function InvoiceCard({
           skipEmail
         }
       });
-      setNotice(row.status === "instructions_sent" ? "Billing saved." : skipEmail ? "Invoice generated. No email was sent." : "Invoice generated. The client was emailed.");
+      setNotice(row.status === "instructions_sent" ? "Billing saved." : skipEmail || row.origin === "desk" ? "Invoice generated. No payment invoice email was sent." : "Invoice generated. The client was emailed.");
       onApproved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The invoice could not be approved.");
@@ -1355,7 +1360,7 @@ function InvoiceCard({
       setPending("");
     }
   }
-  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />{row.origin === "desk" ? "Do not send the advisor email" : "Do not send transactional email"}</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4 overflow-hidden rounded-xl border border-border bg-[#e8e8e8]"><div className="border-b border-border bg-white px-5 py-4 text-sm"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><p className="mt-2 text-fg">To {letter.to}</p><p className="text-fg">From {letter.fromName} · {letter.fromEmail}</p><p className="mt-1 font-semibold text-primary">{letter.subject}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div><iframe title="Advisor invoice letter" sandbox="allow-same-origin" className="h-[720px] w-full bg-[#f2f5f8]" srcDoc={letter.html} /></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
+  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated && row.origin !== "desk" ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />Do not send transactional email</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4 overflow-hidden rounded-xl border border-border bg-[#e8e8e8]"><div className="border-b border-border bg-white px-5 py-4 text-sm"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><p className="mt-2 text-fg">To {letter.to}</p><p className="text-fg">From {letter.fromName} · {letter.fromEmail}</p><p className="mt-1 font-semibold text-primary">{letter.subject}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div><iframe title="Advisor invoice letter" sandbox="allow-same-origin" className="h-[720px] w-full bg-[#f2f5f8]" srcDoc={letter.html} /></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
 }
 function ActiveCdsDesk() {
   const [rows, setRows] = useState(null);
@@ -1666,13 +1671,13 @@ function CreateClientInvestment({ advisors, onCreated }) {
     try {
       const result = await createClientFunding({ data: { email, termId, amount, advisorId, skipEmail } });
       setAmount("");
-      onCreated(`${result.term} · ${result.amount} opened for ${result.email}. Signed with the application signature and ready for an invoice. ${result.emailed ? "The client was emailed." : "No email was sent."}`);
+      onCreated(`${result.term} · ${result.amount} opened for ${result.email}. Ready for an invoice. ${result.emailed ? "The client was emailed." : "No email was sent."}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The investment could not be created.");
     }
     setPending(false);
   }
-  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void create(); }}><h2 className="text-lg font-semibold text-primary">Create an investment</h2><p className="mt-1 text-sm text-fg">Opens a signed certificate, using the signature on the application. The client is emailed from the advisor, not the transactional mailbox. It is ready for an invoice.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Client</span><select className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)}><option value="">Choose a client</option>{clients.map(client => <option key={client.id} value={client.email}>{client.applicantName} · {client.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Term</span><select className={`${controlClass} mt-1`} value={termId} onChange={event => setTermId(event.target.value)}><option value="">Choose a term</option>{terms.map(term => <option key={term.id} value={term.id}>{term.months}-month · {term.apy}{promoSet.has(term.months) ? " · promotional" : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} inputMode="decimal" placeholder="100,000" value={amount} onChange={event => setAmount(event.target.value)} />{selected && promoSet.has(selected.months) ? <span className="mt-1 block text-xs text-fg">Promotional certificates start at $100,000. Enter 100000 or 100,000.</span> : <span className="mt-1 block text-xs text-fg">Enter 100000 or 100,000. A comma must separate thousands.</span>}</label><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label></div><label className="mt-3 flex items-start gap-2 text-sm text-fg"><input type="checkbox" className="mt-1" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} /><span>Do not send the advisor email</span></label>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Creating…" : "Create investment"}</button></form>;
+  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={event => { event.preventDefault(); void create(); }}><h2 className="text-lg font-semibold text-primary">Create an investment</h2><p className="mt-1 text-sm text-fg">Opens a certificate and marks it ready for an invoice. A signature on the application is used when one exists, and is not required. The client is emailed from the advisor, not the transactional mailbox.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Client</span><select className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)}><option value="">Choose a client</option>{clients.map(client => <option key={client.id} value={client.email}>{client.applicantName} · {client.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Term</span><select className={`${controlClass} mt-1`} value={termId} onChange={event => setTermId(event.target.value)}><option value="">Choose a term</option>{terms.map(term => <option key={term.id} value={term.id}>{term.months}-month · {term.apy}{promoSet.has(term.months) ? " · promotional" : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} inputMode="decimal" placeholder="100,000" value={amount} onChange={event => setAmount(event.target.value)} />{selected && promoSet.has(selected.months) ? <span className="mt-1 block text-xs text-fg">Promotional certificates start at $100,000. Enter 100000 or 100,000.</span> : <span className="mt-1 block text-xs text-fg">Enter 100000 or 100,000. A comma must separate thousands.</span>}</label><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Unassigned</option>{advisors.map(advisor => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}</select></label></div><label className="mt-3 flex items-start gap-2 text-sm text-fg"><input type="checkbox" className="mt-1" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} /><span>Do not send the advisor email</span></label>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}<button type="submit" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Creating…" : "Create investment"}</button></form>;
 }
 function FundingDesk() {
   const [rows, setRows] = useState(null);
@@ -1845,6 +1850,7 @@ function LeadsPanel({
   const [advisorId, setAdvisorId] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [cc, setCc] = useState("");
   const [leadQuery, setLeadQuery] = useState("");
   const [leadOptions, setLeadOptions] = useState([]);
   const [pickedLeads, setPickedLeads] = useState([]);
@@ -1941,7 +1947,7 @@ function LeadsPanel({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [email]);
-  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro";
+  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro" || kind === "wealth";
   const previewAt = pickedLeads.length ? Math.min(previewIndex, pickedLeads.length - 1) : 0;
   const previewLead = pickedLeads[previewAt] || null;
   const activeName = bulk ? previewLead?.name || "" : name;
@@ -1977,12 +1983,16 @@ function LeadsPanel({
       variant
     }),
     promoCode: kind === "promo" ? promoCode : "",
-    ...(dealProcess === "assisted"
-      ? {
-          instruction: "Use the button below before the link expires. Do not create a password. Your advisor completes the certificate.",
-          followUp: "Please finish within 48 hours. Your advisor handles the certificate after you submit. If the link expires, ask for a new one."
-        }
-      : {})
+    ...(kind === "promo"
+      ? dealProcess === "portal"
+        ? { instruction: "Please use the button below to access your application and create a password. Once submitted, you can continue in the investor portal." }
+        : {}
+      : dealProcess === "assisted"
+        ? {
+            instruction: "Use the button below before the link expires. Do not create a password. Your advisor completes the certificate.",
+            followUp: "Please finish within 48 hours. Your advisor handles the certificate after you submit. If the link expires, ask for a new one."
+          }
+        : {}),
   };
   const applicationCopy = appCopy ?? appStandard;
   const previewOrigin = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
@@ -2101,8 +2111,16 @@ function LeadsPanel({
     portalUrl: brand.publicDomain,
     companyPhone: brand.companyPhone
   });
-  const letter = kind === "cdars-intro" ? cdarsIntroMail : kind === "cdars" ? cdarsMail : kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "cdars" ? "lead_cdars" : kind === "cdars-intro" ? "lead_cdars_intro" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
+  const wealthMail = wealthIntroLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    advisor,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : ""
+  });
+  const letter = kind === "wealth" ? wealthMail : kind === "cdars-intro" ? cdarsIntroMail : kind === "cdars" ? cdarsMail : kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "cdars" ? "lead_cdars" : kind === "cdars-intro" ? "lead_cdars_intro" : kind === "wealth" ? "lead_wealth" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -2113,24 +2131,32 @@ function LeadsPanel({
     advisorStyle: emailStyles.advisor,
     emailColors: emailStyles.colors
   }) : null;
-  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : kind === "cdars" ? cdarsMail.subject : kind === "cdars-intro" ? cdarsIntroMail.subject : applicationCopy.subject;
+  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : kind === "cdars" ? cdarsMail.subject : kind === "cdars-intro" ? cdarsIntroMail.subject : kind === "wealth" ? wealthMail.subject : applicationCopy.subject;
   async function send(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     setPending(true);
     try {
-      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro") {
+      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro" || kind === "wealth") {
         if (!pickedLeads.length) throw new Error("Choose at least one lead.");
         let sent = 0;
         const failed = [];
         for (const lead of pickedLeads) {
           try {
-            if (kind === "cdars-intro") await sendLeadCdarsIntro({
+            if (kind === "wealth") await sendLeadWealth({
               data: {
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc
+              }
+            });else if (kind === "cdars-intro") await sendLeadCdarsIntro({
+              data: {
+                advisorId,
+                name: lead.name,
+                email: lead.email,
+                cc,
                 rates: cdarsRates
               }
             });else if (kind === "cdars") await sendLeadCdars({
@@ -2138,6 +2164,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 rates: cdarsRates
               }
             });else if (kind === "reminder") await sendLeadPromoReminder({
@@ -2145,6 +2172,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 copy: reminderCopy
               }
             });else if (kind === "followup") await sendLeadFollowup({
@@ -2152,6 +2180,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 copy: followText
               }
             });else if (kind === "htr") await sendLeadHtr({
@@ -2159,6 +2188,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 copy: htrCopy
               }
             });else if (kind === "exclusive") await sendLeadExclusive({
@@ -2166,6 +2196,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 copy: exclusiveCopy
               }
             });else if (kind === "extension") await sendLeadExtension({
@@ -2173,6 +2204,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 copy: extCopy
               }
             });else await sendLeadIntro({
@@ -2180,6 +2212,7 @@ function LeadsPanel({
                 advisorId,
                 name: lead.name,
                 email: lead.email,
+                cc,
                 copy
               }
             });
@@ -2199,6 +2232,7 @@ function LeadsPanel({
             advisorId,
             name,
             email,
+            cc,
             months: Number(exclusiveMonths),
             apy: exclusiveRate,
             process: dealProcess
@@ -2215,6 +2249,7 @@ function LeadsPanel({
             advisorId,
             name,
             email,
+            cc,
             months: kind === "promo" ? 0 : selectedTerm.months,
             kind,
             process: dealProcess,
@@ -2229,6 +2264,7 @@ function LeadsPanel({
             advisorId,
             name,
             email,
+            cc,
             copy: letterCopy
           }
         });
@@ -2244,7 +2280,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a featured brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Featured CDs"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -2257,7 +2293,7 @@ function LeadsPanel({
       }}>{label}</button>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<form className="mt-6 grid max-w-3xl gap-3" onSubmit={event => void send(event)}><label className="block text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => {
           setAdvisorId(event.target.value);
           setCopy(null);
-        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label>{kind === "followup" || kind === "reminder" ? <p className="text-sm text-fg">One application covers every promotional term. Each lead gets a single link and chooses 10-month or 22-month on the form. The link expires in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p> : null}{kind === "custom" || kind === "promo" || kind === "private" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
+        }}><option value="">Select an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">CC</span><input className={`${controlClass} mt-1`} value={cc} placeholder="Optional. Separate addresses with commas" onChange={event => setCc(event.target.value)} /></label>{kind === "followup" || kind === "reminder" ? <p className="text-sm text-fg">One application covers every promotional term. Each lead gets a single link and chooses 10-month or 22-month on the form. The link expires in 48 hours. The path, advisor-assisted or portal, comes from the lead.</p> : null}{kind === "custom" || kind === "promo" || kind === "private" ? <p className="text-sm text-fg">{dealProcess === "assisted" ? "This lead is advisor-assisted. Set that on the lead in Leads. The application will not ask for a password." : "This lead uses the portal. Set that on the lead in Leads. The application will ask for a password."}</p> : null}{bulk ? <label className="block text-sm"><span className="font-semibold text-primary">Leads</span><input className={`${controlClass} mt-1`} value={leadQuery} placeholder="Search name or email" onChange={event => setLeadQuery(event.target.value)} /><select className={`${controlClass} mt-2`} value="" onChange={event => {
           const next = leadOptions.find(item => item.id === event.target.value);
           if (!next || pickedLeads.some(item => item.id === next.id)) return;
           setPickedLeads(current => [...current, next]);
@@ -2281,11 +2317,11 @@ function LeadsPanel({
         }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes every promotional term. The client chooses the term on the form.</p> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
-        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{kind === "cdars" || kind === "cdars-intro" ? <div className="grid gap-3 sm:grid-cols-4"><p className="text-sm text-fg sm:col-span-4">{kind === "cdars-intro" ? "This introduction explains CDARS and does not include an application link. Filled rates appear in the letter. Blank rates are left out." : "CDARS places $500,000 to $50 million across FDIC-insured banks. Set the rate for each term. The client chooses 1, 3, 6, or 12 months on the application. The link expires in 48 hours."}</p>{cdarsRates.map(rate => <label key={rate.months} className="block text-sm"><span className="font-semibold text-primary">{rate.months}-month APY</span><input className={`${controlClass} mt-1`} value={rate.apy} placeholder="4.25%" onChange={event => setCdarsRates(current => current.map(item => item.months === rate.months ? { ...item, apy: event.target.value } : item))} /></label>)}</div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className={"min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" + (kind === "cdars" || kind === "cdars-intro" ? " hidden" : "")} onClick={() => {
-              if (kind === "cdars" || kind === "cdars-intro") return;
+        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{kind === "wealth" ? <p className="text-sm text-fg">Featured brokered CD rates. Each Apply now button opens this lead's application. The link expires in 48 hours. The application does not ask for a password.</p> : null}{kind === "cdars" || kind === "cdars-intro" ? <div className="grid gap-3 sm:grid-cols-4"><p className="text-sm text-fg sm:col-span-4">{kind === "cdars-intro" ? "This introduction explains CDARS and does not include an application link. Filled rates appear in the letter. Blank rates are left out." : "CDARS places $500,000 to $50 million across FDIC-insured banks. Set the rate for each term. The client chooses 1, 3, 6, or 12 months on the application. The link expires in 48 hours."}</p>{cdarsRates.map(rate => <label key={rate.months} className="block text-sm"><span className="font-semibold text-primary">{rate.months}-month APY</span><input className={`${controlClass} mt-1`} value={rate.apy} placeholder="4.25%" onChange={event => setCdarsRates(current => current.map(item => item.months === rate.months ? { ...item, apy: event.target.value } : item))} /></label>)}</div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className={"min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" + (kind === "cdars" || kind === "cdars-intro" || kind === "wealth" ? " hidden" : "")} onClick={() => {
+              if (kind === "cdars" || kind === "cdars-intro" || kind === "wealth") return;
               if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
-            }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
+            }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p>{cc.trim() ? <p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">CC</span>{cc.trim()}</p> : null}<p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
             ...letterCopy,
             subject: next
           })} /><LetterField label="Headline" value={letterCopy.headline} onChange={headline => setCopy({
@@ -2375,7 +2411,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} featured CD emails` : "Send featured CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2534,6 +2570,159 @@ function leadTimeInput(value) {
   const pad = part => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+function leadHasEmail(lead) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((lead.email || "").trim());
+}
+
+const QUICK_MAIL = [
+  ["rates", "Rates introduction", "lead_intro"],
+  ["exclusive", "Exclusive promo", "lead_exclusive"],
+  ["promo", "Promo application", "lead_promo"],
+  ["reminder", "Promo reminder", "lead_promo_reminder"],
+  ["followup", "Promo follow-up", "lead_followup"],
+  ["extension", "Rate extension", "lead_extension"],
+  ["htr", "HTR", "lead_htr"],
+  ["cdars-intro", "CDARS intro", "lead_cdars_intro"],
+  ["cdars", "CDARS application", "lead_cdars"],
+  ["wealth", "Featured CDs", "lead_wealth"],
+];
+
+function LeadQuickMail({ leads, advisors, onClose, onSent }) {
+  const brand = useBrand();
+  const sharedAdvisor = leads.every((lead) => lead.advisorId && lead.advisorId === leads[0].advisorId) ? leads[0].advisorId : "";
+  const [kind, setKind] = useState("rates");
+  const [advisorId, setAdvisorId] = useState(sharedAdvisor);
+  const [cc, setCc] = useState("");
+  const [previewAt, setPreviewAt] = useState(0);
+  const [terms, setTerms] = useState([]);
+  const [offer, setOffer] = useState(null);
+  const [cdarsRates, setCdarsRates] = useState([]);
+  const [emailStyles, setEmailStyles] = useState({ advisor: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
+  const [origin, setOrigin] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const advisor = advisors.find((item) => item.id === advisorId);
+  const lead = leads[Math.min(previewAt, leads.length - 1)];
+  const blankOffer = { intro: "", protection: "", finePrint: "", startsOn: "", endsOn: "", tiers: [] };
+  const promoSet = new Set(promoMonths(offer ?? blankOffer));
+  const promoTerms = terms.filter((term) => promoSet.has(Number(term.months)));
+  const previewOrigin = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
+  const previewLink = previewOrigin ? `${previewOrigin}/application?invite=preview` : "";
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    getEmailStyles().then(setEmailStyles).catch(() => undefined);
+    Promise.all([getCdTerms(), getPromo(), getCdarsRates()]).then(([nextTerms, promo, rates]) => {
+      setTerms(nextTerms);
+      setOffer(promo);
+      if (rates?.length) setCdarsRates(rates);
+    }).catch(() => setError("This email could not be prepared."));
+  }, []);
+
+  const letter = useMemo(() => {
+    if (!lead) return null;
+    const name = lead.name.trim() || "there";
+    const common = { leadName: name, company: brand.companyName, advisor, logo: brand.emailLogo, portalUrl: brand.publicDomain, companyPhone: brand.companyPhone };
+    if (kind === "rates") return offer ? leadLetter({ ...common, terms, offer }) : null;
+    if (kind === "exclusive") return exclusiveLetter({ ...common, terms, offer: offer ?? blankOffer, minimum: "$100,000" });
+    if (kind === "extension") return extensionLetter(common);
+    if (kind === "htr") return htrLetter(common);
+    if (kind === "followup") return followupLetter({ ...common, link: previewLink || "#", promoCode: "" });
+    if (kind === "reminder") return promoReminderLetter({ ...common, link: previewLink || "#", promoCode: "" });
+    if (kind === "cdars") return cdarsLetter({ ...common, terms: cdarsRates, link: previewLink || "#" });
+    if (kind === "cdars-intro") return cdarsIntroLetter({ ...common, terms: cdarsRates });
+    if (kind === "wealth") return wealthIntroLetter({ leadName: name, company: brand.companyName, advisor, portalUrl: brand.publicDomain, companyPhone: brand.companyPhone, link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : "" });
+    const copy = defaultApplicationCopy({ leadName: name, company: brand.companyName, months: 0, advisorName: advisor?.name, variant: "promo" });
+    if (lead.process === "portal") copy.instruction = "Please use the button below to access your application and create a password. Once submitted, you can continue in the investor portal.";
+    return applicationLetter({ ...common, months: 0, apy: "", terms: promoTerms, offer: offer ?? blankOffer, link: previewLink, variant: "promo", copy });
+  }, [lead, kind, advisor, brand, terms, offer, cdarsRates, previewLink, previewOrigin, promoTerms]);
+
+  const step = QUICK_MAIL.find((item) => item[0] === kind)?.[2] || "lead_intro";
+  const preview = letter ? renderStep(step, "client", {
+    name: lead?.name?.trim() || "there",
+    email: lead?.email?.trim() || "lead@example.com",
+    detail: letter.text,
+    companyName: brand.companyName,
+    emailLogo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    extraHtml: letter.html,
+    advisorStyle: emailStyles.advisor,
+    emailColors: emailStyles.colors,
+  }) : null;
+
+  async function send(event) {
+    event.preventDefault();
+    setError("");
+    if (!advisorId) {
+      setError("Select an advisor.");
+      return;
+    }
+    setPending(true);
+    let sent = 0;
+    const failed = [];
+    for (const item of leads) {
+      const data = { advisorId, name: item.name, email: item.email, cc };
+      try {
+        if (kind === "wealth") await sendLeadWealth({ data });
+        else if (kind === "cdars-intro") await sendLeadCdarsIntro({ data });
+        else if (kind === "cdars") await sendLeadCdars({ data });
+        else if (kind === "reminder") await sendLeadPromoReminder({ data });
+        else if (kind === "followup") await sendLeadFollowup({ data });
+        else if (kind === "htr") await sendLeadHtr({ data });
+        else if (kind === "exclusive") await sendLeadExclusive({ data });
+        else if (kind === "extension") await sendLeadExtension({ data });
+        else if (kind === "promo") {
+          const copy = defaultApplicationCopy({ leadName: item.name, company: brand.companyName, months: 0, advisorName: advisor?.name, variant: "promo" });
+          if (item.process === "portal") copy.instruction = "Please use the button below to access your application and create a password. Once submitted, you can continue in the investor portal.";
+          await sendLeadApplication({ data: { ...data, months: 0, kind: "promo", process: item.process === "portal" ? "portal" : "assisted", copy } });
+        } else await sendLeadIntro({ data });
+        sent += 1;
+      } catch (caught) {
+        failed.push(`${item.name}: ${caught instanceof Error && caught.message ? caught.message : "could not be sent"}`);
+      }
+    }
+    setPending(false);
+    if (failed.length) {
+      setError(sent ? `Sent ${sent}. ${failed.join(" ")}` : failed.join(" "));
+      return;
+    }
+    onSent(sent === 1 ? `Sent to ${leads[0]?.email || "the lead"}.` : `Sent to ${sent} leads.`, leads.map((item) => item.id));
+  }
+
+  return <form className="mt-4 rounded-lg border border-border bg-surface p-4" onSubmit={(event) => void send(event)}>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-semibold text-primary">{leads.length === 1 ? `Email ${leads[0].name}` : `Email ${leads.length} leads`}</h2>
+        <p className="mt-1 text-sm text-fg">Each person receives their own letter. Application links are created when you send.</p>
+      </div>
+      <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={onClose}>Close</button>
+    </div>
+    <div className="mt-3 grid gap-3 lg:grid-cols-3">
+      <label className="block text-sm">
+        <span className="font-semibold text-primary">Email</span>
+        <select className={`${controlClass} mt-1`} value={kind} onChange={(event) => setKind(event.target.value)}>
+          {QUICK_MAIL.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
+      <label className="block text-sm">
+        <span className="font-semibold text-primary">From</span>
+        <select className={`${controlClass} mt-1`} value={advisorId} onChange={(event) => setAdvisorId(event.target.value)}>
+          <option value="">Select an advisor</option>
+          {advisors.map((item) => <option key={item.id} value={item.id}>{item.name}{item.mailbox ? ` · ${item.mailbox}` : ""}</option>)}
+        </select>
+      </label>
+      <label className="block text-sm">
+        <span className="font-semibold text-primary">CC</span>
+        <input className={`${controlClass} mt-1`} value={cc} placeholder="Optional. Separate addresses with commas" onChange={(event) => setCc(event.target.value)} />
+      </label>
+    </div>
+    {leads.length > 1 ? <div className="mt-3 flex flex-wrap gap-2">{leads.map((item, index) => <button key={item.id} type="button" className={"min-h-9 rounded-full border px-3 text-sm " + (index === Math.min(previewAt, leads.length - 1) ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAt(index)}>{item.name}</button>)}</div> : null}
+    {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+    {preview ? <LetterPreview html={preview.html} title={letter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.mailbox ? `${advisor.name} <${advisor.mailbox}>` : advisor?.name || "Advisor"}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{`${lead.name} <${lead.email}>`}</p>{cc.trim() ? <p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">CC</span>{cc.trim()}</p> : null}<p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /> : <p className="mt-3 text-sm text-fg">Loading the letter…</p>}
+    <button type="submit" className="mt-4 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending || !preview}>{pending ? "Sending…" : leads.length > 1 ? `Send ${leads.length} emails` : "Send email"}</button>
+  </form>;
+}
+
 function PipelineLeadsPanel() {
   const [page, setPage] = useState(null);
   const [draft, setDraft] = useState(emptyLead);
@@ -2549,6 +2738,9 @@ function PipelineLeadsPanel() {
   const [withEmail, setWithEmail] = useState(false);
   const [pageNumber, setPageNumber] = useState(1);
   const [syncing, setSyncing] = useState(false);
+  const [openId, setOpenId] = useState("");
+  const [picked, setPicked] = useState([]);
+  const [mailLeads, setMailLeads] = useState(null);
 
   function load(nextPage = pageNumber) {
     return listCrmLeads({ data: { page: nextPage, query, source, status, advisorId, from, to, withEmail } }).then((result) => {
@@ -2595,6 +2787,18 @@ function PipelineLeadsPanel() {
     }
   }
 
+  async function setAdvisor(lead, nextAdvisorId) {
+    setError("");
+    setNotice("");
+    try {
+      await saveCrmLead({ data: { ...lead, advisorId: nextAdvisorId } });
+      if (draft.id === lead.id) setDraft({ ...draft, advisorId: nextAdvisorId });
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Could not update this lead.");
+    }
+  }
+
   async function remove(id) {
     setError("");
     try {
@@ -2622,6 +2826,39 @@ function PipelineLeadsPanel() {
   }
 
   const rows = page?.rows ?? [];
+  const selectable = rows.filter(leadHasEmail);
+  const allPicked = selectable.length > 0 && selectable.every((lead) => picked.some((item) => item.id === lead.id));
+
+  function toggleLead(lead) {
+    setPicked((current) => current.some((item) => item.id === lead.id) ? current.filter((item) => item.id !== lead.id) : [...current, lead]);
+  }
+
+  function togglePage(checked) {
+    setPicked((current) => {
+      const ids = new Set(selectable.map((lead) => lead.id));
+      const rest = current.filter((item) => !ids.has(item.id));
+      return checked ? [...rest, ...selectable] : rest;
+    });
+  }
+
+  function openMail(list) {
+    const ready = [];
+    let skipped = 0;
+    for (const lead of list) {
+      const fresh = rows.find((item) => item.id === lead.id) || lead;
+      if (leadHasEmail(fresh)) ready.push(fresh);
+      else skipped += 1;
+    }
+    if (!ready.length) {
+      setError("Choose a lead that has an email address.");
+      setMailLeads(null);
+      return;
+    }
+    setError("");
+    if (skipped) setNotice(`Skipped ${skipped} ${skipped === 1 ? "lead" : "leads"} without an email.`);
+    setMailLeads(ready);
+  }
+
   return <section>
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -2671,47 +2908,61 @@ function PipelineLeadsPanel() {
         Has an email
       </label>
     </div>
+    {picked.length ? <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+      <p className="font-semibold text-primary">{picked.length} selected</p>
+      <button type="button" className="min-h-11 px-3 font-semibold text-primary" onClick={() => openMail(picked)}>Email selected</button>
+      <button type="button" className="min-h-11 px-3 font-semibold text-primary" onClick={() => setPicked([])}>Clear</button>
+    </div> : null}
+    {mailLeads ? <LeadQuickMail key={mailLeads.map((lead) => lead.id).join(",")} leads={mailLeads} advisors={advisors} onClose={() => setMailLeads(null)} onSent={(message, sentIds) => { setNotice(message); setMailLeads(null); setPicked((current) => current.filter((item) => !sentIds.includes(item.id))); }} /> : null}
     <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
-      <table className="w-full min-w-[1180px] text-left text-sm">
+      <table className="w-full min-w-[760px] text-left text-sm">
         <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
           <tr>
+            <th className="w-10 px-3 py-3"><input type="checkbox" checked={allPicked} disabled={!selectable.length} aria-label="Select leads on this page" onClick={(event) => event.stopPropagation()} onChange={(event) => togglePage(event.target.checked)} /></th>
             <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold">Amount</th>
-            <th className="px-4 py-3 font-semibold">Term</th>
-            <th className="px-4 py-3 font-semibold">Objective</th>
-            <th className="px-4 py-3 font-semibold">Source</th>
             <th className="px-4 py-3 font-semibold">Status</th>
             <th className="px-4 py-3 font-semibold">Advisor</th>
             <th className="px-4 py-3 font-semibold">Deal</th>
-            <th className="px-4 py-3 font-semibold">Received</th>
-            <th className="px-4 py-3 font-semibold" />
           </tr>
         </thead>
         <tbody>
-          {rows.map((lead) => <tr key={lead.id} className="border-b border-border last:border-0">
-            <td className="px-4 py-3">
-              <span className="block font-semibold text-primary">{lead.name}</span>
-              <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
-              {lead.notes ? <span className="mt-1 block max-w-xs truncate text-xs text-[#8c8c8c]">{lead.notes.split("\n")[0]}</span> : null}
-            </td>
-            <td className="px-4 py-3">{lead.amount || "—"}</td>
-            <td className="px-4 py-3">{lead.term || "—"}</td>
-            <td className="px-4 py-3"><span className="block">{lead.objective || "—"}</span>{lead.liquidity ? <span className="text-fg">{lead.liquidity}</span> : null}</td>
-            <td className="px-4 py-3">{lead.source || "—"}</td>
-            <td className="px-4 py-3">{lead.status || "—"}</td>
-            <td className="px-4 py-3">{advisors.find((advisor) => advisor.id === lead.advisorId)?.name || "—"}</td>
-            <td className="px-4 py-3">
-              <select className={controlClass} aria-label={`Who completes the certificate for ${lead.name}`} value={lead.process === "portal" ? "portal" : "assisted"} onChange={(event) => void setProcess(lead, event.target.value)}>
-                <option value="assisted">Advisor processes</option>
-                <option value="portal">Client portal</option>
-              </select>
-            </td>
-            <td className="px-4 py-3 whitespace-nowrap">{new Date(lead.receivedAt).toLocaleString()}</td>
-            <td className="px-4 py-3 text-right">
-              <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setDraft(lead)}>Edit</button>
-              <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => void remove(lead.id)}>Remove</button>
-            </td>
-          </tr>)}
+          {rows.map((lead) => <Fragment key={lead.id}>
+            <tr className={"cursor-pointer border-b border-border last:border-0 " + (openId === lead.id ? "bg-step-idle" : "")} onClick={() => setOpenId((current) => current === lead.id ? "" : lead.id)}>
+              <td className="px-3 py-3" onClick={(event) => event.stopPropagation()}>
+                <input type="checkbox" checked={picked.some((item) => item.id === lead.id)} disabled={!leadHasEmail(lead)} aria-label={`Select ${lead.name}`} onChange={() => toggleLead(lead)} />
+              </td>
+              <td className="px-4 py-3">
+                <span className="block font-semibold text-primary">{lead.name}</span>
+                <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
+                {lead.notes ? <span className="mt-1 block max-w-xs truncate text-xs text-[#8c8c8c]">{lead.notes.split("\n")[0]}</span> : null}
+                <div className="mt-1 flex gap-1" onClick={(event) => event.stopPropagation()}>
+                  <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => openMail([lead])}>Email</button>
+                  <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => { setDraft(lead); document.getElementById("lead-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>Edit</button>
+                  <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => void remove(lead.id)}>Remove</button>
+                </div>
+              </td>
+              <td className="px-4 py-3">{lead.status || "—"}</td>
+              <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                <select className={controlClass} aria-label={`Advisor for ${lead.name}`} value={lead.advisorId || ""} onChange={(event) => void setAdvisor(lead, event.target.value)}>
+                  <option value="">Unassigned</option>
+                  {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}
+                </select>
+              </td>
+              <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                <select className={controlClass} aria-label={`Who completes the certificate for ${lead.name}`} value={lead.process === "portal" ? "portal" : "assisted"} onChange={(event) => void setProcess(lead, event.target.value)}>
+                  <option value="assisted">Advisor processes</option>
+                  <option value="portal">Client portal</option>
+                </select>
+              </td>
+            </tr>
+            {openId === lead.id ? <tr className="border-b border-border bg-bg">
+              <td className="px-4 py-4" colSpan={5}>
+                <dl className="grid gap-3 sm:grid-cols-3">
+                  {[["Amount", lead.amount], ["Term", lead.term], ["Objective", [lead.objective, lead.liquidity].filter(Boolean).join(" · ")], ["Source", lead.source], ["Received", lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : ""]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}
+                </dl>
+              </td>
+            </tr> : null}
+          </Fragment>)}
         </tbody>
       </table>
       {page && rows.length === 0 ? <p className="px-4 py-6 text-sm text-fg">No leads match these filters.</p> : null}
@@ -2798,7 +3049,7 @@ function ClientsPanel({
                 event.stopPropagation();
                 openAs(row.id);
               }}>{pendingId === row.id ? "Signing in…" : "Sign in as user"}</button></td></tr>)}</tbody></table></div>}
-    {selected ? <ApplicationDetail row={selected} onStatus={status => onStatus(selected.id, status)} onMailed={onMailed} onRemove={() => onRemove(selected.id)} /> : null}
+    {selected ? <ApplicationDetail row={selected} onSaved={onRefresh} onStatus={(status, silent) => onStatus(selected.id, status, silent)} onMailed={onMailed} onRemove={() => onRemove(selected.id)} /> : null}
   </section>;
 }
 function ManualCdClients({ onRefresh, onOpen, pendingId }) {
@@ -3894,6 +4145,7 @@ function openStoredFile(file, name, download) {
 function ApprovalMail({
   row,
   onSent,
+  onQuiet,
   actions
 }) {
   const brand = useBrand();
@@ -3910,6 +4162,9 @@ function ApprovalMail({
   const [origin, setOrigin] = useState("");
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
+  const [accountAmount, setAccountAmount] = useState(row.payload?.preferredAmount || "");
+  const [accountApy, setAccountApy] = useState("");
+  const [accountMonths, setAccountMonths] = useState(String(row.payload?.preferredTerm || ""));
   useEffect(() => {
     setOrigin(window.location.origin);
     listAdvisors().then(people => {
@@ -3918,6 +4173,14 @@ function ApprovalMail({
     }).catch(() => undefined);
     getEmailStyles().then(setStyles).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    void applicationAccountTerms({ data: { email: row.email } }).then((found) => {
+      setAccountAmount(found.amount || row.payload?.preferredAmount || "");
+      setAccountApy(found.apy || "");
+      setAccountMonths(String(found.months || row.payload?.preferredTerm || ""));
+    }).catch(() => undefined);
+  }, [open, row.id]);
   const advisor = advisors.find(item => item.id === advisorId) ?? advisors[0];
   const portal = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
   const detail = `${row.accountType || row.payload?.accountType || "Individual"} account\nSign-in email ${row.email}`;
@@ -3933,20 +4196,21 @@ function ApprovalMail({
     emailColors: styles.colors,
     copy: { subject, lead, next }
   });
-  const loginUrl = portal ? `${portal.replace(/\/$/, "")}/login` : "";
-  const advisorMessage = assisted ? [lead, next].filter(Boolean).join("\n\n") : [lead, next, `Sign-in email: ${row.email}`, loginUrl ? `Investor portal\n${loginUrl}` : ""].filter(Boolean).join("\n\n");
-  const advisorLetter = advisor ? applyEmailStyle(advisorNoteLetter({
+  const advisorLetter = advisor ? applyEmailStyle(accountReadyLetter({
+    leadName: row.applicantName,
     company: brand.companyName,
-    companyPhone: brand.companyPhone,
-    logo: brand.emailLogo,
-    pageUrl: portal,
+    amount: accountAmount || "0",
+    apy: accountApy || "0",
+    months: Number(accountMonths) || 0,
     advisor,
-    greeting: `Dear ${row.applicantName},`,
-    message: advisorMessage
+    logo: brand.emailLogo,
+    portalUrl: portal,
+    companyPhone: brand.companyPhone
   }).html, styles.advisor, styles.colors) : "";
-  const ready = Boolean(subject.trim() && lead.trim());
+  const statusSubject = "Status Update: Promotional CD Application";
+  const ready = previewAs === "advisor" ? Boolean(accountAmount.trim() && accountApy.trim() && Number(accountMonths) > 0) : Boolean(subject.trim() && lead.trim());
   const mailboxReady = Boolean(advisor?.mailbox?.trim());
-  const previewSubject = previewAs === "advisor" ? subject : transactional.subject;
+  const previewSubject = previewAs === "advisor" ? statusSubject : transactional.subject;
   async function send(mode) {
     setError("");
     setPending(mode);
@@ -3958,7 +4222,10 @@ function ApprovalMail({
           advisorId: advisor?.id || "",
           subject,
           lead,
-          next
+          next,
+          amount: accountAmount,
+          apy: accountApy,
+          months: Number(accountMonths)
         }
       });
       setOpen(false);
@@ -3977,26 +4244,31 @@ function ApprovalMail({
         <p className="mt-1 text-sm text-fg">{assisted ? "Advisor-assisted application. Approving does not open a portal sign-in." : row.status === "approved" ? "Sign-in is active. The investor portal opens with this email and the application password." : "Approving creates a sign-in and opens the investor portal with this email and the application password."}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        {open ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => setOpen(false)}>Close letter</button> : <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => setOpen(true)}>{row.status === "approved" ? "Email the client" : "Approve"}</button>}
+        {open ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => setOpen(false)}>Close letter</button> : <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary" onClick={() => setOpen(true)}>{row.status === "approved" ? "Email the client" : "Approve with letter"}</button>}
+        {row.status === "approved" ? null : <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onQuiet()}>Approve without email</button>}
         {actions}
       </div>
     </div>
     {open ? <div className="mt-4 rounded-lg border border-border p-4">
       <p className="font-semibold text-primary">Application approved</p>
-      <p className="mt-1 text-sm text-fg">{assisted ? "Nothing is sent until you send the advisor letter. Sending approves the application and does not create a portal password." : row.status === "approved" ? "The portal is already open. Edit the letter, preview it, then send another copy." : "Nothing is sent until you choose a letter. Sending approves the application and opens the portal."}</p>
-      <div className="mt-4 grid gap-3">
+      <p className="mt-1 text-sm text-fg">{previewAs === "advisor" ? "The status update is sent from the advisor. It confirms the application and photo identification are approved, and gives the amount, rate, and term. Sending also approves the application." : assisted ? "Nothing is sent until you send the status update." : row.status === "approved" ? "The portal is already open. Edit the letter, preview it, then send another copy." : "Nothing is sent until you choose a letter. Sending approves the application and opens the portal."}</p>
+      <div className="mt-4 flex flex-wrap gap-2">{(assisted ? [["advisor", "Status update"]] : [["transactional", "Transactional"], ["advisor", "Status update"]]).map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (previewAs === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAs(id)}>{label}</button>)}</div>
+      {previewAs === "advisor" ? <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <label className="block text-sm"><span className="font-semibold text-primary">Amount</span><input className={`${controlClass} mt-1`} value={accountAmount} placeholder="250,000" onChange={event => setAccountAmount(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">APY</span><input className={`${controlClass} mt-1`} value={accountApy} placeholder="5.525%" onChange={event => setAccountApy(event.target.value)} /></label>
+        <label className="block text-sm"><span className="font-semibold text-primary">Term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={accountMonths} onChange={event => setAccountMonths(event.target.value)} /></label>
+        <label className="block text-sm sm:col-span-3"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisor?.id ?? ""} onChange={event => setAdvisorId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>
+      </div> : <div className="mt-4 grid gap-3">
         <label className="block text-sm"><span className="font-semibold text-primary">Subject</span><input className={`${controlClass} mt-1`} value={subject} onChange={event => setSubject(event.target.value)} /></label>
         <label className="block text-sm"><span className="font-semibold text-primary">Message</span><textarea className={`${controlClass} mt-1 min-h-24`} value={lead} onChange={event => setLead(event.target.value)} /></label>
         <label className="block text-sm"><span className="font-semibold text-primary">What happens next</span><textarea className={`${controlClass} mt-1 min-h-20`} value={next} onChange={event => setNext(event.target.value)} /></label>
         <label className="block max-w-md text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisor?.id ?? ""} onChange={event => setAdvisorId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">{(assisted ? [["advisor", "Advisor letter"]] : [["transactional", "Transactional"], ["advisor", "Advisor letter"]]).map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (previewAs === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAs(id)}>{label}</button>)}</div>
+      </div>}
       <div className="mt-3">{previewAs === "advisor" && !advisorLetter ? <p className="text-sm text-fg">Add an advisor to preview this letter.</p> : <LetterPreview html={previewAs === "advisor" ? advisorLetter : transactional.html} title={previewSubject} height="h-[640px]" meta={<p className="mt-3 text-sm text-fg"><span className="font-semibold text-primary">Subject.</span> {previewSubject}</p>} />}</div>
       {previewAs === "advisor" && advisor && !mailboxReady ? <p className="mt-3 text-sm text-fg">{advisor.name} has no mailbox. Choose another advisor, or send the transactional letter.</p> : null}
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        {assisted ? null : <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !ready} onClick={() => void send("transactional")}>{pending === "transactional" ? "Sending…" : "Send transactional"}</button>}
-        <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={Boolean(pending) || !ready || !mailboxReady} onClick={() => void send("advisor")}>{pending === "advisor" ? "Sending…" : "Send from advisor"}</button>
+        {previewAs === "advisor" ? <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !ready || !mailboxReady} onClick={() => void send("advisor")}>{pending === "advisor" ? "Sending…" : "Send status update"}</button> : <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={Boolean(pending) || !ready} onClick={() => void send("transactional")}>{pending === "transactional" ? "Sending…" : "Send transactional"}</button>}
       </div>
     </div> : null}
   </>;
@@ -4031,15 +4303,65 @@ function PortalAccess({ row }) {
   }
   return <div className="mt-6 rounded-md border border-border p-4"><p className="font-semibold text-primary">Portal access</p><p className="mt-1 text-sm text-fg">Use this only if the client later asks to sign in. The advisor emails a temporary password. It replaces any earlier password.</p><label className="mt-3 block max-w-md text-sm"><span className="font-semibold text-primary">Advisor</span><select className={`${controlClass} mt-1`} value={advisorId} onChange={event => setAdvisorId(event.target.value)}><option value="">Choose an advisor</option>{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.mailbox ? "" : " · no mailbox"}</option>)}</select></label>{error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-2 text-sm text-fg">{notice}</p> : null}<button type="button" className="mt-3 min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending || !advisorId} onClick={() => void send()}>{pending ? "Sending…" : "Send temporary password"}</button></div>;
 }
+function NameCorrection({ row, onSaved }) {
+  const form = row.payload || {};
+  const split = !(form.firstName || form.surname) ? String(row.applicantName || "").trim().split(/\s+/).filter(Boolean) : [];
+  const [firstName, setFirstName] = useState(form.firstName || split[0] || "");
+  const [middleName, setMiddleName] = useState(form.middleName || "");
+  const [surname, setSurname] = useState(form.surname || split.slice(1).join(" "));
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    const nextForm = row.payload || {};
+    const nextSplit = !(nextForm.firstName || nextForm.surname) ? String(row.applicantName || "").trim().split(/\s+/).filter(Boolean) : [];
+    setFirstName(nextForm.firstName || nextSplit[0] || "");
+    setMiddleName(nextForm.middleName || "");
+    setSurname(nextForm.surname || nextSplit.slice(1).join(" "));
+    setOpen(false);
+    setError("");
+  }, [row.id, row.applicantName]);
+  async function save(event) {
+    event.preventDefault();
+    setError("");
+    setPending(true);
+    try {
+      await correctApplicationName({ data: { id: row.id, firstName, middleName, surname } });
+      setOpen(false);
+      onSaved();
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "The name could not be saved.");
+    } finally {
+      setPending(false);
+    }
+  }
+  if (!open) return <button type="button" className="mt-3 text-sm font-semibold text-action" onClick={() => setOpen(true)}>Correct name</button>;
+  return <form className="mt-3 grid gap-2 sm:grid-cols-3" onSubmit={event => void save(event)}>
+    <label className="block text-sm"><span className="font-semibold text-primary">First name</span><input className={`${controlClass} mt-1`} value={firstName} onChange={event => setFirstName(event.target.value)} /></label>
+    <label className="block text-sm"><span className="font-semibold text-primary">Middle name</span><input className={`${controlClass} mt-1`} value={middleName} onChange={event => setMiddleName(event.target.value)} /></label>
+    <label className="block text-sm"><span className="font-semibold text-primary">Last name</span><input className={`${controlClass} mt-1`} value={surname} onChange={event => setSurname(event.target.value)} /></label>
+    {error ? <p className="text-sm text-danger sm:col-span-3">{error}</p> : null}
+    <div className="flex flex-wrap gap-2 sm:col-span-3">
+      <button type="submit" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Saving…" : "Save name"}</button>
+      <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setOpen(false)}>Cancel</button>
+    </div>
+  </form>;
+}
 function ApplicationDetail({
   row,
   onStatus,
   onMailed,
-  onRemove
+  onRemove,
+  onSaved
 }) {
   const form = row.payload;
   const fields = [["Account", form.accountType], ["Phone", `${form.phoneCountry} ${form.phone}`], ["Date of birth", [form.dobDay, form.dobMonth, form.dobYear].filter(Boolean).join(" ")], ["Nationality", form.nationality], ["Residence", form.residence], ["Occupation", form.occupation], ["Address", [form.street, form.apt, form.city, form.region, form.postal, form.country].filter(Boolean).join(", ")], ["Tax residence", form.taxResidence], ["Tax ID", form.taxId], ["Source of wealth", form.sourceOfWealth], ["Source of funds", form.sourceOfFunds], ["Purpose", form.investmentPurpose], ["Net worth", form.netWorth], ["Preferred amount", form.preferredAmount], ["Preferred term", form.preferredTerm ? `${form.preferredTerm}-month` : ""], ["Promotional code", form.promoCode], ["Identity document", `${form.idType}${form.idFileName ? ` · ${form.idFileName}` : ""}`], ["Address document", `${form.addressDocType}${form.addressFileName ? ` · ${form.addressFileName}` : ""}`], ["Bank", form.bankName], ["Account holder", form.accountHolder], ["Bank address", [form.bankStreet, form.bankLine2, form.bankCity, form.bankState, form.bankZip].filter(Boolean).join(", ")], ["Routing number", form.routingNumber], ["Account number", form.accountNumber]];
-  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onSent={(email, mode, portal) => onMailed(email, mode, row.status === "approved", portal)} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}<DocumentRequest row={row} /><PortalAccess row={row} /></article>;
+  if (form.selectedOffer) fields.unshift(["Selected CD", form.selectedOffer]);
+  if (form.title) fields.splice(1, 0, ["Title", form.title]);
+  if (form.idNumber) fields.push(["ID number", form.idNumber]);
+  if (form.jointName) fields.push(["Joint account holder", form.jointName]);
+  if (form.pep) fields.push(["PEP disclosure", form.pep]);
+  return <article className="mt-4 rounded-lg border border-border bg-surface p-5"><ApprovalMail key={row.id} row={row} onQuiet={() => onStatus("approved", true)} onSent={(email, mode, portal) => onMailed(email, mode, row.status === "approved", portal)} actions={<><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("hold")}>Hold</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary" onClick={() => onStatus("pending")}>Pending</button><button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></>} /><NameCorrection row={row} onSaved={onSaved} /><dl className="mt-4 grid gap-3 sm:grid-cols-2">{fields.map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="text-sm text-fg">{value || "—"}</dd></div>)}</dl><div className="mt-6 grid gap-4 sm:grid-cols-2"><StoredDocument label="Identity document" name={form.idFileName} file={form.idFile} /><StoredDocument label="Address document" name={form.addressFileName} file={form.addressFile} /></div>{form.signature?.startsWith("data:image/") ? <div className="mt-4"><p className="text-xs font-semibold tracking-wide text-primary uppercase">Signature</p><img src={form.signature} alt="Applicant signature" className="mt-2 h-24 rounded-md border border-border bg-white object-contain" /></div> : null}<DocumentRequest row={row} /><PortalAccess row={row} /></article>;
 }
 function documentRequestCopy() {
   return {

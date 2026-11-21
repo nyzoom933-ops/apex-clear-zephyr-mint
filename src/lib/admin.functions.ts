@@ -236,7 +236,7 @@ export const submitApplication = createServerFn({ method: "POST" })
         mailbox: invited?.advisorMailbox,
         advisorName: invited?.advisorName,
         subject: "We received your application",
-        message: `We received your ${stored.accountType} application.\n\nYour advisor will review it and complete the certificate. You do not need a portal password.`,
+        message: `We received your ${stored.accountType} application.\n\nThank you for completing and submitting your application. It has been received and is now under review.\n\nWe will examine the information you provided and confirm that your application is in order. Please wait for our approval email, which will follow once the review is complete. No further action is required from you until that email arrives.`,
         step: "application_submitted",
         relatedId: id,
       });
@@ -251,6 +251,156 @@ export const submitApplication = createServerFn({ method: "POST" })
         relatedId: id,
       });
     }
+    return { id };
+  });
+
+export const submitWealthApplication = createServerFn({ method: "POST" })
+  .validator((input: {
+    invite?: string;
+    offer?: string;
+    title?: string;
+    firstName?: string;
+    surname?: string;
+    dob?: string;
+    citizenship?: string;
+    taxId?: string;
+    jointTitle?: string;
+    jointFirstName?: string;
+    jointSurname?: string;
+    jointDob?: string;
+    jointCitizenship?: string;
+    jointTaxId?: string;
+    email?: string;
+    phone?: string;
+    street?: string;
+    city?: string;
+    region?: string;
+    postal?: string;
+    country?: string;
+    employment?: string;
+    occupation?: string;
+    income?: string;
+    netWorth?: string;
+    funds?: string;
+    objective?: string;
+    deposit?: string;
+    idType?: string;
+    idNumber?: string;
+    idFileName?: string;
+    idFile?: string;
+    addressFileName?: string;
+    addressFile?: string;
+    accuracy?: boolean;
+    identity?: boolean;
+    beneficial?: boolean;
+    privacy?: boolean;
+    pep?: boolean;
+  }) => input)
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { EMPTY_FORM } = await import("@/lib/application-data");
+    const { readLeadInvite } = await import("@/lib/lead-invites.server");
+    const { wealthOfferById } = await import("@/lib/wealth-letter");
+    const sql = await getSql();
+    const invite = await readLeadInvite(sql, (data.invite || "").trim());
+    if (invite.status !== "open" || invite.kind !== "wealth") throw new Error("This application link has expired.");
+    const email = invite.email.trim().toLowerCase();
+    const clean = (value: string | undefined, max: number) => (value || "").trim().slice(0, max);
+    const firstName = clean(data.firstName, 80);
+    const surname = clean(data.surname, 80);
+    if (firstName.length < 1 || surname.length < 1) throw new Error("Enter your first and last name.");
+    if (!data.dob || !/^\d{4}-\d{2}-\d{2}$/.test(data.dob)) throw new Error("Enter your date of birth.");
+    if (clean(data.taxId, 40).length < 4) throw new Error("Enter your Social Security Number or tax ID.");
+    if (clean(data.phone, 40).replace(/\D/g, "").length < 7) throw new Error("Enter a mobile number.");
+    if (!clean(data.street, 120) || !clean(data.city, 80) || !clean(data.region, 80) || !clean(data.postal, 20)) throw new Error("Enter your residential address.");
+    if (!data.employment || !data.income || !data.netWorth || !data.funds || !data.objective) throw new Error("Complete the financial profile.");
+    if (!data.idType || clean(data.idNumber, 40).length < 3) throw new Error("Enter the identity document details.");
+    if (!data.idFile?.startsWith("data:") || !data.addressFile?.startsWith("data:")) throw new Error("Upload your identification and proof of address.");
+    if (!data.accuracy || !data.identity || !data.beneficial || !data.privacy) throw new Error("Confirm the required declarations.");
+    const joint = Boolean(clean(data.jointFirstName, 80) || clean(data.jointSurname, 80));
+    if (joint && (clean(data.jointFirstName, 80).length < 1 || clean(data.jointSurname, 80).length < 1 || !data.jointDob || clean(data.jointTaxId, 40).length < 4)) {
+      throw new Error("Complete the joint accountholder details.");
+    }
+    const [dobYear, dobMonth, dobDay] = data.dob.split("-");
+    const offer = wealthOfferById(clean(data.offer, 40));
+    const months = offer?.term.match(/\d+/)?.[0] || "";
+    const selectedOffer = offer ? `${offer.bank} · ${offer.term} · ${offer.apy} APY` : "";
+    const jointName = joint ? [clean(data.jointTitle, 20), clean(data.jointFirstName, 80), clean(data.jointSurname, 80)].filter(Boolean).join(" ") : "";
+    const stored = {
+      ...EMPTY_FORM,
+      accountType: joint ? "Joint" : "Individual",
+      firstName,
+      surname,
+      email,
+      phone: clean(data.phone, 40),
+      phoneCountry: "",
+      dobYear,
+      dobMonth,
+      dobDay,
+      nationality: clean(data.citizenship, 80),
+      residence: clean(data.country, 80),
+      occupation: [clean(data.employment, 40), clean(data.occupation, 80)].filter(Boolean).join(" · "),
+      street: clean(data.street, 120),
+      city: clean(data.city, 80),
+      region: clean(data.region, 80),
+      postal: clean(data.postal, 20),
+      country: clean(data.country, 80),
+      taxResidence: clean(data.citizenship, 80),
+      taxId: clean(data.taxId, 40),
+      sourceOfWealth: clean(data.income, 80),
+      sourceOfFunds: clean(data.funds, 80),
+      investmentPurpose: clean(data.objective, 80),
+      netWorth: clean(data.netWorth, 80),
+      preferredAmount: clean(data.deposit, 40),
+      preferredTerm: months,
+      idType: clean(data.idType, 80),
+      idFileName: clean(data.idFileName, 180),
+      idFile: data.idFile,
+      addressDocType: "Proof of address",
+      addressFileName: clean(data.addressFileName, 180),
+      addressFile: data.addressFile,
+      d1: true,
+      d2: Boolean(data.beneficial),
+      d3: Boolean(data.identity),
+      d4: Boolean(data.privacy),
+      title: clean(data.title, 20),
+      idNumber: clean(data.idNumber, 40),
+      jointName,
+      incomeRange: clean(data.income, 80),
+      pep: data.pep ? "Yes" : "No",
+      selectedOffer,
+    };
+    const { password: _password, confirmPassword: _confirm, inviteToken: _token, ...payload } = stored;
+    void _password;
+    void _confirm;
+    void _token;
+    const id = crypto.randomUUID();
+    const name = [firstName, surname].filter(Boolean).join(" ");
+    await sql`
+      insert into applications (id, applicant_name, email, account_type, currency, payload, password_hash)
+      values (${id}, ${name}, ${email}, ${payload.accountType}, 'USD', ${JSON.stringify(payload)}::jsonb, ${null})
+    `;
+    await sql`update lead_invites set used_at = now() where token = ${invite.token} and used_at is null`;
+    const deskDetail = applicationDeskDetail(payload);
+    const deskFiles = applicationFiles(payload);
+    const { sendTelegramNotice } = await import("@/lib/mail.server");
+    await sendTelegramNotice(
+      sql,
+      `New application from ${name}`,
+      `${name} (${email}) submitted a wealth application.${selectedOffer ? `\n${selectedOffer}` : ""}${invite.advisorName ? `\nAdvisor: ${invite.advisorName}` : ""}`,
+      deskDetail,
+      deskFiles,
+    ).catch(() => undefined);
+    await sendAdvisorClientLetter(sql, {
+      to: email,
+      name,
+      mailbox: invite.advisorMailbox,
+      advisorName: invite.advisorName,
+      subject: "We received your application",
+      message: `We received your application.\n\nWe will review it and contact you about the next step.`,
+      step: "application_submitted",
+      relatedId: id,
+    });
     return { id };
   });
 
@@ -309,9 +459,9 @@ export const listApplications = createServerFn({ method: "GET" }).handler(async 
 });
 
 export const setApplicationStatus = createServerFn({ method: "POST" })
-  .validator((input: { id: string; status: ApplicationRow["status"] }) => {
+  .validator((input: { id: string; status: ApplicationRow["status"]; silent?: boolean }) => {
     if (!["pending", "approved", "hold"].includes(input.status)) throw new Error("Unknown status.");
-    return input;
+    return { id: (input.id || "").trim(), status: input.status, silent: Boolean(input.silent) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -322,7 +472,7 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
     `;
     if (!rows[0]) throw new Error("Application not found.");
     const assisted = !rows[0].password_hash;
-    if (rows[0].status === data.status) {
+    if (rows[0].status === data.status && !data.silent) {
       return { ok: true as const, loginEmail: data.status === "approved" && !assisted ? String(rows[0].email).trim().toLowerCase() : null, assisted };
     }
     if (assisted) {
@@ -332,7 +482,30 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
     }
     await sql`update applications set status = ${data.status} where id = ${data.id}`;
     const email = String(rows[0].email).trim().toLowerCase();
-    const step: MailStep = data.status === "approved" ? "application_approved" : data.status === "hold" ? "application_hold" : "application_pending";
+    if (data.silent || data.status !== "approved") {
+      if (data.status === "approved") {
+        await sql`
+          insert into investor_users (email, password_hash, application_id)
+          values (${email}, ${rows[0].password_hash}, ${data.id})
+          on conflict (email) do update
+          set password_hash = excluded.password_hash, application_id = excluded.application_id
+        `;
+        return { ok: true as const, loginEmail: email, assisted: false as const };
+      }
+      if (!data.silent) {
+        const step: MailStep = data.status === "hold" ? "application_hold" : "application_pending";
+        await sendStep(sql, {
+          step,
+          clientEmail: email,
+          clientName: rows[0].applicant_name,
+          detail: [`${rows[0].account_type} account`, `Sign-in email ${email}`].join("\n"),
+          relatedId: data.id,
+        });
+      }
+      await sql`delete from investor_users where application_id = ${data.id}`;
+      return { ok: true as const, loginEmail: null, assisted: false as const };
+    }
+    const step: MailStep = "application_approved";
     await sendStep(sql, {
       step,
       clientEmail: email,
@@ -340,29 +513,36 @@ export const setApplicationStatus = createServerFn({ method: "POST" })
       detail: [`${rows[0].account_type} account`, `Sign-in email ${email}`].join("\n"),
       relatedId: data.id,
     });
-    if (data.status === "approved") {
-      await sql`
-        insert into investor_users (email, password_hash, application_id)
-        values (${email}, ${rows[0].password_hash}, ${data.id})
-        on conflict (email) do update
-        set password_hash = excluded.password_hash, application_id = excluded.application_id
-      `;
-      return { ok: true as const, loginEmail: email };
-    }
-    await sql`delete from investor_users where application_id = ${data.id}`;
-    return { ok: true as const, loginEmail: null };
+    await sql`
+      insert into investor_users (email, password_hash, application_id)
+      values (${email}, ${rows[0].password_hash}, ${data.id})
+      on conflict (email) do update
+      set password_hash = excluded.password_hash, application_id = excluded.application_id
+    `;
+    return { ok: true as const, loginEmail: email };
   });
 
 export const sendApplicationApproved = createServerFn({ method: "POST" })
-  .validator((input: { id: string; mode?: string; advisorId?: string; subject?: string; lead?: string; next?: string }) => {
+  .validator((input: { id: string; mode?: string; advisorId?: string; subject?: string; lead?: string; next?: string; amount?: string; apy?: string; months?: number }) => {
+    const mode = input.mode === "advisor" ? "advisor" as const : "transactional" as const;
     const subject = (input.subject || "").trim().slice(0, 200);
     const lead = (input.lead || "").trim().slice(0, 4000);
     const next = (input.next || "").trim().slice(0, 2000);
-    if (!subject || !lead) throw new Error("Add a subject and a message.");
-    const mode = input.mode === "advisor" ? "advisor" as const : "transactional" as const;
+    if (mode === "transactional" && (!subject || !lead)) throw new Error("Add a subject and a message.");
     const advisorId = (input.advisorId || "").trim();
     if (mode === "advisor" && !advisorId) throw new Error("Choose an advisor.");
-    return { id: (input.id || "").trim(), mode, advisorId, subject, lead, next };
+    const amount = (input.amount || "").trim();
+    const apy = (input.apy || "").trim().replace(/\s*APY/i, "");
+    const months = Math.round(Number(input.months));
+    if (mode === "advisor") {
+      const cleaned = amount.replace(/[$\s]/g, "");
+      const grouped = cleaned.includes(",") ? /^\d{1,3}(,\d{3})+(\.\d{1,2})?$/ : /^\d+(\.\d{1,2})?$/;
+      const dollars = grouped.test(cleaned) ? Number(cleaned.replace(/,/g, "")) : NaN;
+      if (!Number.isFinite(dollars) || dollars <= 0) throw new Error("Enter the account amount, such as 250,000.");
+      if (!/^\d+(\.\d{1,3})?%?$/.test(apy)) throw new Error("Enter the rate, such as 5.525%.");
+      if (!Number.isFinite(months) || months < 1 || months > 120) throw new Error("Enter a term between 1 and 120 months.");
+    }
+    return { id: (input.id || "").trim(), mode, advisorId, subject, lead, next, amount, apy: apy.endsWith("%") || !apy ? apy : `${apy}%`, months };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -411,47 +591,42 @@ export const sendApplicationApproved = createServerFn({ method: "POST" })
       return { ok: true as const, loginEmail: email, mode: data.mode, portal: true as const };
     }
     if (!advisor) throw new Error("Choose an advisor.");
-    const { advisorNoteLetter, applyEmailStyle } = await import("@/lib/email-templates");
-    const { readEmailStyles, sendFromMailbox, emailLogoFile, sendTelegramNotice, ensureMailColumn, readPortalOrigin } = await import("@/lib/mail.server");
+    const { accountReadyLetter, applyEmailStyle } = await import("@/lib/email-templates");
+    const { readEmailStyles, sendFromMailbox, sendTelegramNotice, ensureMailColumn } = await import("@/lib/mail.server");
     const { DEFAULT_COMPANY_NAME } = await import("@/lib/company");
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo', 'public_domain')`;
     const company = settings.find((row) => row.key === "company_name")?.value?.trim() || DEFAULT_COMPANY_NAME;
     const companyPhone = settings.find((row) => row.key === "company_phone")?.value?.trim() || "";
     const logo = settings.find((row) => row.key === "email_logo")?.value || null;
-    const origin = (await readPortalOrigin(sql)).replace(/\/$/, "");
-    const portal = origin ? `${origin}/login` : "";
-    const message = assisted
-      ? [data.lead, data.next].filter(Boolean).join("\n\n")
-      : [data.lead, data.next, `Sign-in email: ${email}`, portal ? `Investor portal\n${portal}` : ""].filter(Boolean).join("\n\n");
-    const logoFile = emailLogoFile(logo);
-    const letter = advisorNoteLetter({
+    const origin = (settings.find((row) => row.key === "public_domain")?.value || "").trim();
+    const letter = accountReadyLetter({
+      leadName: rows[0].applicant_name,
       company,
-      companyPhone,
-      logo,
-      pageUrl: origin,
-      logoCid: logoFile?.filename || "",
+      amount: data.amount,
+      apy: data.apy,
+      months: data.months,
       advisor: { name: advisor.name, phone: advisor.phone, email: advisor.email, mailbox: advisor.mailbox, role: advisor.role, personalPhone: advisor.personal_phone },
-      greeting: `Dear ${rows[0].applicant_name},`,
-      message,
+      logo,
+      portalUrl: origin,
+      companyPhone,
     });
     const styles = await readEmailStyles(sql);
     const html = applyEmailStyle(letter.html, styles.advisor, styles.colors);
     const replyTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox;
     const sent = await sendFromMailbox(sql, {
       to: email,
-      subject: data.subject,
+      subject: letter.subject,
       text: letter.text,
       html,
       fromAddress: advisor.mailbox,
       replyTo,
       replyName: advisor.name,
-      attachments: logoFile ? [logoFile] : [],
     });
     if (sent.delivery !== "sent") throw new Error(sent.error || "The advisor letter was not sent.");
     await ensureMailColumn(sql);
     await sql`
       insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
-      values (${crypto.randomUUID()}, 'client', ${email}, 'application_approved', ${data.subject}, ${letter.text}, ${html}, ${data.id}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${data.advisorId})
+      values (${crypto.randomUUID()}, 'client', ${email}, 'application_approved', ${letter.subject}, ${letter.text}, ${html}, ${data.id}, 'sent', ${sent.messageId}, 'sent', ${sent.provider}, ${data.advisorId})
     `;
     await sendTelegramNotice(sql, `Application approved for ${rows[0].applicant_name}`, `${rows[0].applicant_name} (${email}) was approved. ${advisor.name} sent the letter.${assisted ? " No portal sign-in was created." : ""}`).catch(() => undefined);
     return { ok: true as const, loginEmail: email, mode: data.mode, portal: !assisted as boolean };
@@ -499,6 +674,39 @@ export const requestApplicationDocuments = createServerFn({ method: "POST" })
     const { sendTelegramNotice } = await import("@/lib/mail.server");
     await sendTelegramNotice(sql, `Documents requested from ${name}`, `${name} (${email}) was asked to send identification and proof of address before approval.\n\n${data.message}`).catch(() => undefined);
     return { ok: true as const, email };
+  });
+
+export const correctApplicationName = createServerFn({ method: "POST" })
+  .validator((input: { id: string; firstName?: string; middleName?: string; surname?: string }) => {
+    const clean = (value: string | undefined, max: number) => (value || "").trim().replace(/\s+/g, " ").slice(0, max);
+    const firstName = clean(input.firstName, 80);
+    const middleName = clean(input.middleName, 80);
+    const surname = clean(input.surname, 80);
+    if (firstName.length < 1 || surname.length < 1) throw new Error("Enter the first and last name.");
+    if (!input.id?.trim()) throw new Error("Application not found.");
+    return { id: input.id.trim(), firstName, middleName, surname };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ email: string; applicant_name: string; payload: ApplicationPayload | string }>`
+      select email, applicant_name, payload from applications where id = ${data.id}
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("Application not found.");
+    const current = typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload;
+    const name = [data.firstName, data.middleName, data.surname].filter(Boolean).join(" ");
+    const payload = { ...current, firstName: data.firstName, middleName: data.middleName, surname: data.surname };
+    const previous = (row.applicant_name || "").trim();
+    const email = String(row.email || "").trim().toLowerCase();
+    await sql`update applications set applicant_name = ${name}, payload = ${JSON.stringify(payload)}::jsonb where id = ${data.id}`;
+    if (email && previous && previous !== name) {
+      await sql`update fundings set signer_name = ${name} where lower(email) = ${email} and signer_name = ${previous}`;
+      await ensureCrmLeads(sql);
+      await sql`update crm_leads set name = ${name} where lower(email) = ${email} and name = ${previous}`;
+    }
+    return { ok: true as const, name };
   });
 
 export const deleteApplication = createServerFn({ method: "POST" })
@@ -1646,8 +1854,8 @@ export const createClientFunding = createServerFn({ method: "POST" })
     const client = clients[0];
     if (!client) throw new Error("That client is not approved.");
     const payload = typeof client.payload === "string" ? (JSON.parse(client.payload) as ApplicationPayload) : client.payload;
-    const signature = payload?.signature || "";
-    if (!signature.startsWith("data:image/png;base64,")) throw new Error("This client has no signature on the application.");
+    const storedSignature = payload?.signature || "";
+    const signature = storedSignature.startsWith("data:image/png;base64,") ? storedSignature : "";
     const signerName = client.applicant_name?.trim() || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || client.email;
     const contactPhone = [payload?.phoneCountry, payload?.phone].filter(Boolean).join(" ").trim();
     if (!data.skipEmail && !data.advisorId) throw new Error("Choose an advisor, or select do not send.");
@@ -1685,7 +1893,7 @@ export const createClientFunding = createServerFn({ method: "POST" })
         name: signerName,
         advisorId: data.advisorId,
         subject: "Your certificate is ready",
-        message: [`Your certificate is signed and ready for an invoice.`, "", label, `Amount ${formatted}`, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`, "", "Do not send a wire until the invoice arrives from your advisor."].join("\n"),
+        message: [`Your certificate is ready for an invoice.`, "", label, `Amount ${formatted}`, `Promo APY ${rates.promo}`, `Final APY ${rates.final}`, `Reference ${codes.referenceNumber}`, `Deposit code ${codes.depositCode}`, `Account ${codes.accountNumber}`, "", "Do not send a wire until the invoice arrives from your advisor."].join("\n"),
         step: "approved_phone",
         relatedId: id,
       });
@@ -1990,6 +2198,15 @@ export type Advisor = { id: string; name: string; phone: string; email: string; 
 
 export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling; contactPhone: string; contactBy: string };
 
+function leadCc(input: { cc?: string }) {
+  const unique = [...new Set(String(input.cc || "").split(/[,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))];
+  if (unique.length > 5) throw new Error("Use no more than 5 CC addresses.");
+  for (const email of unique) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 160) throw new Error("Enter a valid CC email, or leave CC blank.");
+  }
+  return unique;
+}
+
 export const sendLeadIntro = createServerFn({ method: "POST" })
   .validator((input: { advisorId: string; name: string; email: string; copy?: LeadCopy | null }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
@@ -2010,7 +2227,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
           thanks: clip(input.copy.thanks, 400),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2046,6 +2263,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_intro",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       extraHtml: letter.html,
@@ -2080,7 +2298,7 @@ export const sendLeadExtension = createServerFn({ method: "POST" })
           closing: clip(input.copy.closing, 240),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2107,6 +2325,7 @@ export const sendLeadExtension = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_extension",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       extraHtml: letter.html,
@@ -2148,7 +2367,7 @@ export const sendLeadExclusive = createServerFn({ method: "POST" })
           disclosures: clip(input.copy.disclosures, 2500),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2184,6 +2403,7 @@ export const sendLeadExclusive = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_exclusive",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       extraHtml: letter.html,
@@ -2275,7 +2495,7 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
           closing: clip(input.copy.closing, 400),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2302,6 +2522,7 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_htr",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       extraHtml: letter.html,
@@ -2342,7 +2563,7 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
           promoCode: clip(input.copy.promoCode, 40),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2390,6 +2611,7 @@ export const sendLeadFollowup = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_followup",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: [promoCode ? `Promo code ${promoCode}` : "", link ? `Application ${link}` : ""].filter(Boolean).join("\n"),
@@ -2432,7 +2654,7 @@ export const sendLeadPromoReminder = createServerFn({ method: "POST" })
           promoCode: clip(input.copy.promoCode, 40),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2480,6 +2702,7 @@ export const sendLeadPromoReminder = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_promo_reminder",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: [promoCode ? `Promo code ${promoCode}` : "", link ? `Application ${link}` : ""].filter(Boolean).join("\n"),
@@ -2511,7 +2734,7 @@ export const sendLeadAccountReady = createServerFn({ method: "POST" })
     if (!Number.isFinite(dollars) || dollars <= 0) throw new Error("Enter the account amount, such as 500,000.");
     if (!/^\d+(\.\d{1,3})?%?$/.test(apy)) throw new Error("Enter the rate, such as 5.5%.");
     if (!Number.isFinite(months) || months < 1 || months > 120) throw new Error("Enter a term between 1 and 120 months.");
-    return { advisorId: input.advisorId, name, email, amount, apy: apy.endsWith("%") ? apy : `${apy}%`, months };
+    return { advisorId: input.advisorId, name, email, amount, apy: apy.endsWith("%") ? apy : `${apy}%`, months, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2543,6 +2766,7 @@ export const sendLeadAccountReady = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_account_ready",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: `${data.amount} · ${data.apy} · ${data.months}-month`,
@@ -2624,7 +2848,7 @@ export const sendLeadCdars = createServerFn({ method: "POST" })
     if (!input.advisorId) throw new Error("Select an advisor.");
     const rates = input.rates ? normalizeCdarsRates(input.rates) : null;
     if (rates && !cdarsRatesReady(rates)) throw new Error("Enter an APY for the 1-, 3-, 6-, and 12-month CDARS terms.");
-    return { advisorId: input.advisorId, name, email, rates };
+    return { advisorId: input.advisorId, name, email, rates, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2665,6 +2889,7 @@ export const sendLeadCdars = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_cdars",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: ["CDARS application", ...rates.map((rate) => `${rate.months}-month ${rate.apy}`), link].join("\n"),
@@ -2687,7 +2912,7 @@ export const sendLeadCdarsIntro = createServerFn({ method: "POST" })
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
     if (!input.advisorId) throw new Error("Select an advisor.");
-    return { advisorId: input.advisorId, name, email, rates: input.rates ? normalizeCdarsRates(input.rates) : null };
+    return { advisorId: input.advisorId, name, email, rates: input.rates ? normalizeCdarsRates(input.rates) : null, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2716,6 +2941,7 @@ export const sendLeadCdarsIntro = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_cdars_intro",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: ["CDARS introduction", ...rates.map((rate) => `${rate.months}-month ${rate.apy}`)].join("\n"),
@@ -2725,6 +2951,60 @@ export const sendLeadCdarsIntro = createServerFn({ method: "POST" })
       replyName: advisor.name,
       fromAddress: advisor.mailbox,
       relatedId: data.advisorId,
+      advisorId: data.advisorId,
+    });
+    await releaseOpen(sql, data.email);
+    return { ok: true as const };
+  });
+
+export const sendLeadWealth = createServerFn({ method: "POST" })
+  .validator((input: { advisorId: string; name: string; email: string; cc?: string }) => {
+    const name = input.name.trim().replace(/\s+/g, " ");
+    const email = input.email.trim().toLowerCase();
+    if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
+    if (!input.advisorId) throw new Error("Select an advisor.");
+    return { advisorId: input.advisorId, name, email, cc: leadCc(input) };
+  })
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { wealthIntroLetter } = await import("@/lib/wealth-letter");
+    const sql = await getSql();
+    await sql`alter table advisors add column if not exists role text not null default ''`;
+    await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone from advisors where id = ${data.advisorId}`;
+    const found = advisors[0];
+    if (!found) throw new Error("Select an advisor.");
+    const advisor = { ...found, personalPhone: found.personal_phone };
+    if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
+    const origin = settings.find((row) => row.key === "public_domain")?.value || "";
+    if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    const { createLeadInvite, inviteOnboardingUrl } = await import("@/lib/lead-invites.server");
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: 0, promoCode: "", kind: "wealth", process: "assisted", advisor });
+    const link = inviteOnboardingUrl(origin, token);
+    const letter = wealthIntroLetter({
+      leadName: data.name,
+      company: await readCompanyName(sql),
+      advisor,
+      portalUrl: origin,
+      companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
+      link,
+    });
+    await sendStep(sql, {
+      step: "lead_wealth",
+      clientEmail: data.email,
+      cc: data.cc,
+      clientName: data.name,
+      detail: letter.text,
+      adminDetail: ["Featured brokered CD introduction", link].filter(Boolean).join("\n"),
+      extraHtml: letter.html,
+      subject: letter.subject,
+      replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,
+      replyName: advisor.name,
+      fromAddress: advisor.mailbox,
+      relatedId: token,
       advisorId: data.advisorId,
     });
     await releaseOpen(sql, data.email);
@@ -2742,7 +3022,7 @@ export const sendLeadExclusiveApplication = createServerFn({ method: "POST" })
     if (!input.advisorId) throw new Error("Select an advisor.");
     if (!Number.isFinite(months) || months < 1 || months > 120) throw new Error("Enter a term between 1 and 120 months.");
     if (!/^\d+(\.\d{1,3})?%?$/.test(apy)) throw new Error("Enter the exclusive rate, such as 5.25%.");
-    return { advisorId: input.advisorId, name, email, months, apy: apy.endsWith("%") ? apy : `${apy}%`, process: input.process === "portal" ? "portal" as const : "assisted" as const };
+    return { advisorId: input.advisorId, name, email, months, apy: apy.endsWith("%") ? apy : `${apy}%`, process: input.process === "portal" ? "portal" as const : "assisted" as const, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2789,6 +3069,7 @@ export const sendLeadExclusiveApplication = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: "lead_application",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: [`Exclusive ${data.months}-month at ${data.apy}`, "This term and rate are only on this client's application.", link].filter(Boolean).join("\n"),
@@ -2828,7 +3109,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
           promoCode: clip(input.copy.promoCode, 40),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, months, kind, process: input.process === "portal" ? "portal" as const : "assisted" as const, copy };
+    return { advisorId: input.advisorId, name, email, months, kind, process: input.process === "portal" ? "portal" as const : "assisted" as const, copy, cc: leadCc(input) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2887,6 +3168,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     await sendStep(sql, {
       step: kind === "promo" ? "lead_promo" : "lead_application",
       clientEmail: data.email,
+      cc: data.cc,
       clientName: data.name,
       detail: letter.text,
       adminDetail: [kind === "promo" ? "Promotional application — client chooses the term" : `${data.months}-month certificate`, promoCode ? `Promo code ${promoCode}` : "", "Application", link].filter(Boolean).join("\n"),
@@ -3217,7 +3499,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
   .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
     const from = (input.from || "").slice(0, 10);
     const to = (input.to || "").slice(0, 10);
-    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro"];
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "lead_wealth"];
     const step = allowed.includes(input.step || "") ? input.step || "" : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
     return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
@@ -3262,7 +3544,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join lead_invites i on i.token = n.related_id
       where n.audience = 'client'
-        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro')
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth')
         and n.created_at >= ${start}
         and n.created_at < ${endDate.toISOString()}
       order by n.created_at desc
@@ -3392,7 +3674,7 @@ export const removeIntroOpen = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureOpenTrash(sql);
-    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro') and lower(recipient) = ${data.email}`;
+    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth') and lower(recipient) = ${data.email}`;
     await sql`delete from open_trash where lower(email) = ${data.email}`;
     return { ok: true as const };
   });
@@ -3453,7 +3735,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           from notifications intro
           where intro.audience = 'client'
             and lower(intro.recipient) = lower(n.recipient)
-            and intro.step in ('lead_intro', 'lead_exclusive')
+            and intro.step in ('lead_intro', 'lead_exclusive', 'lead_wealth')
             and intro.delivery = 'sent'
           order by intro.created_at desc
           limit 1
@@ -3563,7 +3845,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
-      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro') and n.delivery = 'sent'
+      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth') and n.delivery = 'sent'
         and (${trash}::boolean = (
           exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient))
           and not exists (
@@ -3571,7 +3853,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
             where newer.audience = 'client'
               and lower(newer.recipient) = lower(n.recipient)
               and newer.delivery = 'sent'
-              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro')
+              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth')
               and newer.created_at > (select t.created_at from open_trash t where lower(t.email) = lower(n.recipient))
           )
         ))
@@ -3758,24 +4040,108 @@ export const importPerfexLeads = createServerFn({ method: "POST" }).handler(asyn
 });
 
 async function readPerfexLeads(base: string, token: string) {
-  const headers = { Authtoken: token, Authorization: `Bearer ${token}`, accept: "application/json" };
-  const first = await fetch(`${base}/api/leads`, { headers, signal: AbortSignal.timeout(20000) });
-  const payload = await first.json().catch(() => null);
-  if (!first.ok || payload == null) {
-    const message = payload && typeof payload === "object" && "message" in payload ? String((payload as { message?: unknown }).message || "") : "";
-    throw new Error(message || `Perfex could not be reached (${first.status}). Check the address and that the token can read leads.`);
+  const pageSize = 100;
+  const seen = new Set<string>();
+  const rows: Record<string, unknown>[] = [];
+  for (let page = 1; page <= 300; page += 1) {
+    const payload = await fetchPerfexPage(base, token, page, pageSize);
+    if (isPerfexFailure(payload)) {
+      const message = perfexFailureMessage(payload);
+      if (page > 1 || /no data/i.test(message)) break;
+      throw new Error(message || "Perfex refused the request.");
+    }
+    const records = perfexRecords(payload);
+    if (!records.length) break;
+    const firstId = perfexText(records[0], "id");
+    if (firstId && seen.has(firstId)) break;
+    let added = 0;
+    for (const row of records) {
+      const id = perfexText(row, "id");
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      rows.push(row);
+      added += 1;
+    }
+    if (!added) break;
+    const lastPage = perfexLastPage(payload);
+    if (lastPage) {
+      if (page >= lastPage) break;
+      continue;
+    }
+    if (records.length > pageSize || records.length < pageSize) break;
   }
-  const leads = perfexRecords(payload);
-  return leads.map(perfexLead).filter((lead): lead is NonNullable<typeof lead> => Boolean(lead));
+  return rows.map(perfexLead).filter((lead): lead is NonNullable<typeof lead> => Boolean(lead));
+}
+
+async function fetchPerfexPage(base: string, token: string, page: number, pageSize: number) {
+  const headers = { Authtoken: token, Authorization: `Bearer ${token}`, Accept: "application/json" };
+  const paged = `${base}/api/leads?page=${page}&per_page=${pageSize}`;
+  const plain = `${base}/api/leads`;
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    const url = attempt === 2 && page === 1 ? plain : paged;
+    try {
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(40000) });
+      lastStatus = response.status;
+      const payload = parsePerfexBody(await response.text());
+      if ((response.ok || response.status === 404) && payload != null) return payload;
+      if (response.status === 401 || response.status === 403) throw new Error("Perfex refused the token. Check the API token in Settings → Misc.");
+      if (response.status === 429 || response.status >= 500 || payload == null) continue;
+      const message = payload && typeof payload === "object" && "message" in payload ? String((payload as { message?: unknown }).message || "") : "";
+      throw new Error(message || `Perfex could not be reached (${response.status}).`);
+    } catch (error) {
+      if (error instanceof Error && /refused the token|could not be reached \(/.test(error.message)) throw error;
+      if (attempt === 2) {
+        if (error instanceof Error && /abort|timeout/i.test(error.message)) throw new Error("Perfex took too long to answer. Try the sync again.");
+        if (lastStatus === 200) throw new Error("Perfex answered, but the lead list was incomplete. Try the sync again.");
+        throw new Error(lastStatus ? `Perfex could not be reached (${lastStatus}). Try the sync again.` : "Perfex could not be reached. Try the sync again.");
+      }
+    }
+  }
+  if (lastStatus === 200) throw new Error("Perfex answered, but the lead list was incomplete. Try the sync again.");
+  throw new Error(lastStatus ? `Perfex could not be reached (${lastStatus}). Try the sync again.` : "Perfex could not be reached. Try the sync again.");
+}
+
+function parsePerfexBody(text: string) {
+  const trimmed = text.replace(/^\uFEFF/, "").trim();
+  if (!trimmed) return null;
+  const start = trimmed.search(/[\[{]/);
+  const candidates = start > 0 ? [trimmed, trimmed.slice(start)] : [trimmed];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // Perfex sometimes prints a PHP warning before the JSON.
+    }
+  }
+  return null;
+}
+
+function isPerfexFailure(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const record = payload as Record<string, unknown>;
+  return record.status === false || record.success === false;
+}
+
+function perfexFailureMessage(payload: unknown) {
+  if (!payload || typeof payload !== "object") return "";
+  const message = (payload as { message?: unknown }).message;
+  return typeof message === "string" ? message : "";
+}
+
+function perfexLastPage(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return 0;
+  const record = payload as Record<string, unknown>;
+  const meta = record.meta && typeof record.meta === "object" ? (record.meta as Record<string, unknown>) : null;
+  const value = Number(record.last_page ?? record.lastPage ?? meta?.last_page ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function perfexRecords(payload: unknown) {
   if (Array.isArray(payload)) return payload.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
-  if (!payload || typeof payload !== "object") return [];
+  if (!payload || typeof payload !== "object" || isPerfexFailure(payload)) return [];
   const record = payload as Record<string, unknown>;
-  if (record.status === false || record.success === false) {
-    throw new Error(typeof record.message === "string" && record.message ? record.message : "Perfex refused the request.");
-  }
   const lists = [record.data, record.leads, record.records];
   for (const list of lists) {
     if (Array.isArray(list)) return list.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
@@ -3785,6 +4151,7 @@ function perfexRecords(payload: unknown) {
       if (Array.isArray(nested.leads)) return nested.leads.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
     }
   }
+  if (perfexText(record, "id") && (perfexText(record, "name") || perfexText(record, "email") || perfexText(record, "first_name"))) return [record];
   return [];
 }
 
@@ -3899,7 +4266,14 @@ async function updatePerfexDetails(sql: Sql, rows: { perfexId: string; status: s
            amount = case when incoming.amount <> '' then incoming.amount else lead.amount end,
            term = case when incoming.term <> '' then incoming.term else lead.term end,
            objective = case when incoming.objective <> '' then incoming.objective else lead.objective end,
-           notes_at = null
+           notes_at = case
+             when lead.status is distinct from incoming.status
+               or (incoming.amount <> '' and lead.amount is distinct from incoming.amount)
+               or (incoming.term <> '' and lead.term is distinct from incoming.term)
+               or (incoming.objective <> '' and lead.objective is distinct from incoming.objective)
+             then null
+             else lead.notes_at
+           end
        from (values ${tuples.join(", ")}) as incoming(perfex_id, status, amount, term, objective)
        where lead.perfex_id = incoming.perfex_id`,
       values,
@@ -4896,47 +5270,6 @@ export const saveInvoiceBilling = createServerFn({ method: "POST" })
     return { billing: data.billing };
   });
 
-async function invoicePdfBase64(sql: Sql, id: string) {
-  await ensureInvoiceBillingColumn(sql);
-  const rows = await sql<{
-    email: string;
-    amount: string;
-    reference_number: string;
-    applicant_name: string | null;
-    payload: ApplicationPayload | string | null;
-    invoice_billing: unknown;
-  }>`
-    select f.email, f.amount, f.reference_number, f.invoice_billing, app.applicant_name, app.payload
-    from fundings f
-    left join lateral (
-      select applicant_name, payload from applications
-      where lower(email) = lower(f.email)
-      order by submitted_at desc nulls last
-      limit 1
-    ) app on true
-    where f.id = ${id}
-  `;
-  const row = rows[0];
-  if (!row) return "";
-  const payload = row.payload ? (typeof row.payload === "string" ? (JSON.parse(row.payload) as ApplicationPayload) : row.payload) : null;
-  const clientName = row.applicant_name || [payload?.firstName, payload?.surname].filter(Boolean).join(" ") || row.email;
-  const address = [
-    [payload?.street, payload?.apt].filter(Boolean).join(" "),
-    [payload?.city, payload?.region, payload?.postal].filter(Boolean).join(", "),
-    payload?.country ?? "",
-  ].filter(Boolean);
-  const { buildInvoicePdf } = await import("@/lib/investment-pdf.server");
-  const brand = await readPdfBrand(sql);
-  return buildInvoicePdf({
-    clientName,
-    address,
-    amount: row.amount,
-    billing: resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number),
-    logo: brand.logo,
-    companyAddress: brand.companyAddress,
-  });
-}
-
 export const approveInvoice = createServerFn({ method: "POST" })
   .validator((input: { id: string; billing: InvoiceBilling; skipEmail?: boolean }) => {
     const billing = { ...input.billing };
@@ -4961,22 +5294,8 @@ export const approveInvoice = createServerFn({ method: "POST" })
     if (current.status === "approved_phone") {
       const meta = await sql<{ origin: string; advisor_id: string }>`select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id from fundings where id = ${data.id}`;
       const manual = meta[0]?.origin === "desk";
-      if (manual && !data.skipEmail && !meta[0]?.advisor_id) throw new Error("Assign an advisor before sending the invoice letter.");
       await sql`update fundings set status = 'instructions_sent' where id = ${data.id}`;
-      if (!data.skipEmail && manual) {
-        const pdf = await invoicePdfBase64(sql, data.id);
-        const name = await investorName(sql, current.email);
-        await sendAdvisorClientLetter(sql, {
-          to: current.email,
-          name,
-          advisorId: meta[0]?.advisor_id,
-          subject: "Your payment invoice",
-          message: [`Your payment invoice is attached.`, "", current.term_label, `Amount ${current.amount}`, `Reference ${current.reference_number || ""}`, "", "Send the wire using the invoice, then send the bank confirmation to your advisor. Do not use the portal for this certificate."].join("\n"),
-          step: "instructions_sent",
-          relatedId: data.id,
-          attachments: pdf ? [{ filename: "invoice.pdf", content: pdf, contentType: "application/pdf" }] : [],
-        });
-      } else if (!data.skipEmail) {
+      if (!data.skipEmail && !manual) {
         await sendStep(sql, {
           step: "instructions_sent",
           clientEmail: current.email,
@@ -5678,6 +5997,8 @@ function applicationDeskDetail(payload: ApplicationPayload) {
   return [
     line("Account", payload.accountType),
     line("Name", [payload.firstName, payload.middleName, payload.surname].filter(Boolean).join(" ")),
+    ...((payload as ApplicationPayload & { title?: string }).title ? [line("Title", (payload as ApplicationPayload & { title?: string }).title || "")] : []),
+    ...((payload as ApplicationPayload & { selectedOffer?: string }).selectedOffer ? [line("Selected CD", (payload as ApplicationPayload & { selectedOffer?: string }).selectedOffer || "")] : []),
     line("Email", payload.email),
     line("Phone", `${payload.phoneCountry} ${payload.phone}`),
     line("Date of birth", [payload.dobDay, payload.dobMonth, payload.dobYear].filter(Boolean).join(" ")),
@@ -5697,7 +6018,7 @@ function applicationDeskDetail(payload: ApplicationPayload) {
     ...(payload.cdarsApy ? [line("CDARS rate", payload.cdarsApy)] : []),
     ...(payload.cdarsExclusions ? [line("Banks to exclude", payload.cdarsExclusions)] : []),
     line("Promotional code", payload.promoCode || "—"),
-    line("Identity document", `${payload.idType}${payload.idFileName ? ` · ${payload.idFileName}` : " · not attached"}`),
+    line("Identity document", `${payload.idType}${(payload as ApplicationPayload & { idNumber?: string }).idNumber ? ` ${ (payload as ApplicationPayload & { idNumber?: string }).idNumber }` : ""}${payload.idFileName ? ` · ${payload.idFileName}` : " · not attached"}`),
     line("Address document", `${payload.addressDocType}${payload.addressFileName ? ` · ${payload.addressFileName}` : " · not attached"}`),
     line("Bank", payload.bankName),
     line("Account holder", payload.accountHolder),
@@ -5708,6 +6029,8 @@ function applicationDeskDetail(payload: ApplicationPayload) {
     line("Beneficial owner", payload.d2 ? "Yes" : "No"),
     line("Portfolio stays unavailable until approval", payload.d3 ? "Yes" : "No"),
     line("Agrees to account terms", payload.d4 ? "Yes" : "No"),
+    ...((payload as ApplicationPayload & { jointName?: string }).jointName ? [line("Joint account holder", (payload as ApplicationPayload & { jointName?: string }).jointName || "")] : []),
+    ...((payload as ApplicationPayload & { pep?: string }).pep ? [line("PEP disclosure", (payload as ApplicationPayload & { pep?: string }).pep || "")] : []),
     line("Signature", payload.signature.startsWith("data:image/") ? "Attached" : "Not attached"),
   ].join("\n");
 }
@@ -5729,7 +6052,7 @@ function dataFile(name: string, value: string) {
   return { filename, content, contentType: match[1] };
 }
 
-async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string; copy?: { subject?: string; lead?: string; next?: string } }) {
+async function sendStep(sql: Sql, input: { step: MailStep; clientEmail: string; clientName: string; detail: string; adminDetail?: string; attachments?: { filename: string; content: string }[]; clientAttachments?: { filename: string; content: string }[]; relatedId?: string; skipAdmin?: boolean; extraHtml?: string; replyTo?: string; replyName?: string; fromAddress?: string; subject?: string; advisorId?: string; cc?: string[]; copy?: { subject?: string; lead?: string; next?: string } }) {
   const { notifyStep } = await import("@/lib/mail.server");
   const result = await notifyStep(sql, input);
   if (result.delivery !== "sent") throw new Error(result.error || "The email was not sent. Save the SMTP2GO API key and from address in Settings.");

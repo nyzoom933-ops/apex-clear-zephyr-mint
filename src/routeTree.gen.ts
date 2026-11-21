@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ApplicationRouteImport } from './routes/application'
 import { Route as EmailLogoRouteImport } from './routes/email-logo'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as InvoiceTokenRouteImport } from './routes/invoice/$token'
@@ -45,6 +46,11 @@ const EmailLogoRoute = EmailLogoRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PortalRoute = PortalRouteImport.update({
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/application': typeof ApplicationRoute
   '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
+  '/onboarding': typeof OnboardingRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
   '/invoice/$token': typeof InvoiceTokenRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByTo {
   '/application': typeof ApplicationRoute
   '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
+  '/onboarding': typeof OnboardingRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
   '/invoice/$token': typeof InvoiceTokenRoute
@@ -118,6 +126,7 @@ export interface FileRoutesById {
   '/application': typeof ApplicationRoute
   '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
+  '/onboarding': typeof OnboardingRoute
   '/portal': typeof PortalRoute
   '/reset-password': typeof ResetPasswordRoute
   '/invoice/$token': typeof InvoiceTokenRoute
@@ -134,6 +143,7 @@ export interface FileRouteTypes {
     | '/application'
     | '/email-logo'
     | '/login'
+    | '/onboarding'
     | '/portal'
     | '/reset-password'
     | '/invoice/$token'
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/application'
     | '/email-logo'
     | '/login'
+    | '/onboarding'
     | '/portal'
     | '/reset-password'
     | '/invoice/$token'
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/application'
     | '/email-logo'
     | '/login'
+    | '/onboarding'
     | '/portal'
     | '/reset-password'
     | '/invoice/$token'
@@ -177,6 +189,7 @@ export interface RootRouteChildren {
   ApplicationRoute: typeof ApplicationRoute
   EmailLogoRoute: typeof EmailLogoRoute
   LoginRoute: typeof LoginRoute
+  OnboardingRoute: typeof OnboardingRoute
   PortalRoute: typeof PortalRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   InvoiceTokenRoute: typeof InvoiceTokenRoute
@@ -221,6 +234,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/portal': {
@@ -281,6 +301,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApplicationRoute: ApplicationRoute,
   EmailLogoRoute: EmailLogoRoute,
   LoginRoute: LoginRoute,
+  OnboardingRoute: OnboardingRoute,
   PortalRoute: PortalRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   InvoiceTokenRoute: InvoiceTokenRoute,

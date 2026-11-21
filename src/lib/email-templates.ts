@@ -1,5 +1,6 @@
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
 import { amountRange, formatBonus, formatOfferDate, parseApy, type PromoOffer } from "@/lib/promo";
+import { sampleWealthIntroLetter } from "@/lib/wealth-letter";
 
 export type MailStep =
   | "application_submitted"
@@ -26,6 +27,7 @@ export type MailStep =
   | "lead_exclusive"
   | "lead_cdars"
   | "lead_cdars_intro"
+  | "lead_wealth"
   | "lead_account_ready"
   | "invoice_advisor";
 
@@ -33,7 +35,7 @@ export function mailStepLabel(step: string) {
   return STEPS[step as MailStep]?.label || step;
 }
 
-export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "lead_account_ready", "invoice_advisor"]);
+export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "lead_wealth", "lead_account_ready", "invoice_advisor"]);
 
 export type MailAudience = "client" | "admin";
 
@@ -59,8 +61,8 @@ const STEPS: Record<MailStep, StepCopy> = {
   application_submitted: {
     label: "Application received",
     clientSubject: "We received your application",
-    clientLead: "We received your {{company}} application. The desk will review it before the investor portal opens.",
-    clientNext: "Keep the password you created. Sign-in stays closed until this application is approved. We will email you when it opens.",
+    clientLead: "We received your {{company}} application.",
+    clientNext: "We will review it and email you when there is an update.",
     adminSubject: "New application from {{name}}",
     adminLead: "{{name}} ({{email}}) submitted an application.",
   },
@@ -247,6 +249,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     clientNext: "",
     adminSubject: "CDARS introduction sent to {{name}}",
     adminLead: "A CDARS introduction was sent to {{name}} ({{email}}).",
+  },
+  lead_wealth: {
+    label: "Featured CD introduction",
+    clientSubject: "Featured brokered CD rates",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Featured CD introduction sent to {{name}}",
+    adminLead: "A featured brokered CD introduction was sent to {{name}} ({{email}}).",
   },
   lead_account_ready: {
     label: "Application and ID received",
@@ -441,7 +451,7 @@ export function renderStep(
   const subject = fill(input.copy?.subject ?? (audience === "client" ? item.clientSubject : item.adminSubject), name, input.email, company);
   const nextRaw = input.copy?.next ?? item.clientNext;
   const next = audience === "client" && nextRaw ? fill(nextRaw, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "lead_account_ready" || step === "invoice_advisor";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "lead_wealth" || step === "lead_account_ready" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -456,7 +466,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_account_ready" ? sampleAccountReadyLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_account_ready" ? sampleAccountReadyLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_wealth" ? sampleWealthIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   const chosenStyle = isFullLetter ? input.advisorStyle : input.transactionalStyle;
   return {
     step,
@@ -950,16 +960,26 @@ export function defaultApplicationCopy(input: { leadName: string; company: strin
   return {
     subject: exclusive ? `Exclusive CD application — ${term}` : promo ? (months ? `Promotional CD application — ${term}` : "Promotional CD application") : months ? `CD application form — ${term}` : "CD application form",
     headline: exclusive ? `Your exclusive ${term} CD application is ready.` : promo ? (months ? `Your promotional ${term} CD application is ready.` : "Your promotional CD application is ready.") : months ? `Your ${term} CD application is ready.` : "Your CD application is ready.",
-    hope: "I hope you're doing well.",
-    ready: exclusive
-      ? "This certificate term and rate were prepared for you alone. They do not appear on any other application. This personal link expires 48 hours after this email is sent."
+    hope: exclusive
+      ? "This certificate term and rate were prepared for you alone. They do not appear on any other application."
       : promo
-      ? "Your promotional certificate application is ready. This personal link expires 48 hours after this email is sent."
+      ? "Your promotional Certificate of Deposit application is ready for completion."
+      : "I hope you're doing well.",
+    ready: exclusive
+      ? "This personal link expires 48 hours after this email is sent."
+      : promo
+      ? "Your personalized application link is valid for **48 hours from the time this email is sent.**"
       : "Your certificate application is ready. This personal link expires 48 hours after this email is sent.",
-    instruction: "Use the button below before the link expires.",
-    codeNote: "Enter this code on the application to apply the promotional rate.",
-    followUp: "Please finish within 48 hours. If the link expires, ask your advisor for a new one.",
-    thanks: "Thank you for your prompt attention. We look forward to receiving your application.",
+    instruction: promo
+      ? "Please use the button below to access your application. **There is no need to create a password.** Once submitted, your advisor will coordinate the remaining account-opening process."
+      : "Use the button below before the link expires.",
+    codeNote: "Enter this code on your application to apply the promotional rate.",
+    followUp: promo
+      ? "Please complete your application within the 48-hour validity period. If your link expires before you have an opportunity to complete the application, please contact us to request a new one."
+      : "Please finish within 48 hours. If the link expires, ask your advisor for a new one.",
+    thanks: promo
+      ? "Thank you for your interest. We appreciate the opportunity to assist you with your Certificate of Deposit needs and look forward to receiving your application."
+      : "Thank you for your prompt attention. We look forward to receiving your application.",
     promoCode: "",
   };
 }
@@ -996,7 +1016,6 @@ export function applicationLetter(input: {
   const thanks = copy?.thanks.trim() || fallback.thanks;
   const promoCode = (copy?.promoCode ?? fallback.promoCode).trim();
   const minimum = input.minimum?.trim() || "$100,000";
-  const window = input.offer.startsOn && input.offer.endsOn ? `${formatOfferDate(input.offer.startsOn)}–${formatOfferDate(input.offer.endsOn)}` : "";
   const rateTerms = months
     ? [{ months, apy: input.apy }]
     : (input.terms || []).filter((term) => term.months > 0);
@@ -1021,7 +1040,7 @@ export function applicationLetter(input: {
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
   const sign = advisorSignature(advisor, company);
   const help = companyHelp(input.companyPhone);
-  const buttonLabel = months ? `${months}-Month CD Application` : "Click here for application";
+  const buttonLabel = input.variant === "promo" || !months ? "Click here for application" : `${months}-Month CD Application`;
   const buttonHref = link || "#";
   const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(buttonHref)}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">${escapeHtml(buttonLabel)}</a></td></tr></table>`;
   const codeBox = promoCode
@@ -1031,9 +1050,11 @@ export function applicationLetter(input: {
         <p style="margin:8px 0 0 0; font-size:14px; line-height:21px; color:#333333;">${escapeHtml(codeNote)}</p>
       </td></tr></table>`
     : "";
-  const badge = input.variant === "promo" ? "Promotional offer<br>24-hour link" : "Certificate<br>application";
+  const badge = input.variant === "promo" ? "Promotional offer<br>48-hour application link" : "Certificate<br>application";
+  const promo = input.variant === "promo";
   const bonusBlock = rows
-    ? `<p style="margin:16px 0 8px 0; font-size:13px; font-weight:700; color:#12315c;">Relationship bonus for the full term</p>
+    ? `<p style="margin:18px 0 4px 0; font-size:16px; font-weight:700; color:#12315c;">${promo ? "Promotional Bonus Structure" : "Relationship bonus for the full term"}</p>
+          ${promo ? `<p style="margin:0 0 8px 0; font-size:14px; line-height:21px; color:#333;">Additional bonus applies for the full CD term based on qualifying deposit amount.</p>` : ""}
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
             <tr>
               <td style="background:#12315c; color:#fff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Qualifying Deposit</td>
@@ -1054,13 +1075,32 @@ export function applicationLetter(input: {
       </td></tr></table>
     </td>`;
   }).join("");
+  const termNames = rateTerms.map((term) => `${term.months}-month`).join(" and ");
   const rateBlock = rateTerms.length
-    ? `<p style="margin:0 0 8px 0; font-size:13px; font-weight:700; color:#12315c;">${rateTerms.length > 1 ? "Choose either promotional term on the application" : "New-client rate on this application"}</p>
+    ? `<p style="margin:18px 0 4px 0; font-size:16px; font-weight:700; color:#12315c;">${promo ? "Choose Your Promotional CD Term" : rateTerms.length > 1 ? "Choose either promotional term on the application" : "New-client rate on this application"}</p>
+       ${promo ? `<p style="margin:0 0 8px 0; font-size:14px; line-height:21px; color:#333;">Select either promotional term when completing your application.</p>` : ""}
        <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>${rateCards}</tr></table>`
     : "";
-  const fine = input.variant === "promo"
-    ? `This personal application link expires 48 hours after it is sent. The promotional APY is for new clients, requires ${minimum} in new money${window ? `, and is available ${window}` : ""}. A penalty may be imposed for early withdrawal.`
+  const fine = promo
+    ? "Promotional rates are subject to eligibility requirements, qualifying deposit amounts, and applicable account terms. Rates are subject to change. Please refer to the applicable account disclosures for complete details."
     : `This personal application link expires 48 hours after it is sent. Minimum to open: ${minimum}. A penalty may be imposed for early withdrawal.`;
+  const trust = promo
+    ? [
+        ["FDIC insured", "Eligible deposits are protected subject to applicable FDIC coverage limits and requirements."],
+        ["Competitive CD rates", "Take advantage of promotional rates designed to help maximize your savings."],
+        ["Promotional terms", termNames ? `Choose between ${termNames} CD options.` : "Choose between 10-month and 22-month CD options."],
+      ]
+    : [
+        ["Security you can trust", "Deposits are protected with FDIC coverage on the terms in this letter."],
+        ["Competitive CD rates", "Choose the term that fits your goals and earn a rate that works for you."],
+        ["Terms that fit your plans", months ? `A ${months}-month term to save on your schedule.` : "A term that fits your schedule."],
+      ];
+  const trustRow = trust.map(([title, body], index) => `<td class="stack" width="33%" valign="top" style="padding:8px;${index === 1 ? "" : " background:#f7fbfe;"}"><p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#006fcf;">${escapeHtml(title)}</p><p style="margin:0; font-size:12px; line-height:18px; color:#333;">${escapeHtml(body)}</p></td>`).join("");
+  const letterClose = `${codeBox}
+          ${promo ? `${rateBlock}${bonusBlock}` : ""}
+          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${inlineMarkdown(followUp)}</p>
+          <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${inlineMarkdown(thanks)}</p>
+          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>`;
   const text = [`Dear ${name},`, hope, ready, instruction, promoCode ? `Promotional code: ${promoCode}` : "", rateTerms.map((term) => `${term.months}-month CD ${(term.apy || "—").replace(/\s*APY/i, "")} APY`).join("\n"), followUp, thanks, link ? `${buttonLabel}: ${link}` : "", sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1096,26 +1136,21 @@ export function applicationLetter(input: {
           <p style="margin:0 0 4px 0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Certificate of Deposit</p>
           <h1 style="margin:0 0 8px 0; font-family:Arial, Helvetica, sans-serif; font-size:26px; line-height:32px; color:#12315c;">${escapeHtml(headline)}</h1>
           <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
-          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(hope)}</p>
-          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(ready)}</p>
-          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(instruction)}</p>
+          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${inlineMarkdown(hope)}</p>
+          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${inlineMarkdown(ready)}</p>
+          <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${inlineMarkdown(instruction)}</p>
         </td></tr>
         <tr><td style="padding:8px 36px 6px 36px;" align="center">${button}</td></tr>
         <tr><td style="padding:18px 36px 8px 36px;">
-          ${codeBox}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${escapeHtml(followUp)}</p>
-          <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${escapeHtml(thanks)}</p>
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+          ${letterClose}
         </td></tr>
-        <tr><td style="padding:10px 36px 6px 36px;">
+        ${promo ? "" : `<tr><td style="padding:10px 36px 6px 36px;">
           ${rateBlock}
           ${bonusBlock}
-        </td></tr>
+        </td></tr>`}
         <tr><td style="padding:12px 28px 20px 28px;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
-            <td class="stack" width="33%" valign="top" style="padding:8px; background:#f7fbfe;"><p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#006fcf;">Security you can trust</p><p style="margin:0; font-size:12px; line-height:18px; color:#333;">Deposits are protected with FDIC coverage on the terms in this letter.</p></td>
-            <td class="stack" width="33%" valign="top" style="padding:8px;"><p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#006fcf;">Competitive CD rates</p><p style="margin:0; font-size:12px; line-height:18px; color:#333;">Choose the term that fits your goals and earn a rate that works for you.</p></td>
-            <td class="stack" width="33%" valign="top" style="padding:8px; background:#f7fbfe;"><p style="margin:0 0 4px 0; font-size:13px; font-weight:700; color:#006fcf;">Terms that fit your plans</p><p style="margin:0; font-size:12px; line-height:18px; color:#333;">${escapeHtml(months ? `A ${months}-month term to save on your schedule.` : "A term that fits your schedule.")}</p></td>
+            ${trustRow}
           </tr></table>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
@@ -1730,7 +1765,7 @@ export function accountReadyLetter(input: {
 }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.leadName.trim() || "Client";
-  const subject = "Your Promotional CD account is ready for funding";
+  const subject = "Status Update: Promotional CD Application";
   const amount = formatAccountAmount(input.amount);
   const apy = formatAccountApy(input.apy);
   const term = `${input.months}-Month CD`;
@@ -1743,7 +1778,7 @@ export function accountReadyLetter(input: {
   const help = companyHelp(input.companyPhone);
   const text = [
     `Dear ${name},`,
-    "This email is to confirm that your application for the Promotional CD account, along with the photo identification, have been received and approved.",
+    "This email is to confirm that your application for the Promotional CD account, along with the photo identification have been received and approved.",
     established,
     "Once you confirm that you are ready to proceed, we will provide the funding instructions and one of our Senior Advisors will assist you through the process.",
     sign.text,
@@ -1759,10 +1794,10 @@ export function accountReadyLetter(input: {
       <tr><td style="background:#12315c; height:4px; font-size:0; line-height:0;">&nbsp;</td></tr>
       <tr><td style="padding:28px 36px 24px 36px;">
         <p style="margin:0; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Promotional CD</p>
-        <h1 style="margin:8px 0 0 0; font-size:26px; line-height:32px; color:#12315c;">Application and identification received</h1>
+        <h1 style="margin:8px 0 0 0; font-size:26px; line-height:32px; color:#12315c;">Application and identification completed</h1>
         <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
-        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">This email is to confirm that your application for the Promotional CD account, along with the photo identification, have been received and approved.</p>
-        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Your Promotional CD account for the amount of <strong>${escapeHtml(amount)}</strong>, with a <strong>${escapeHtml(apy)} APY</strong> — <strong>${escapeHtml(term)}</strong>, has now been successfully established and is ready for funding.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">This email is to confirm that your application for the Promotional CD account, along with the photo identification have been received and approved.</p>
+        <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Your Promotional CD account for the amount of <strong>${escapeHtml(amount)}</strong>, with a <strong>${escapeHtml(apy)} APY</strong> - <strong>${escapeHtml(term)}</strong>, has now been successfully established and is ready for funding.</p>
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Once you confirm that you are ready to proceed, we will provide the funding instructions and one of our Senior Advisors will assist you through the process.</p>
         <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
       </td></tr>

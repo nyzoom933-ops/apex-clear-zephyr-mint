@@ -24,7 +24,7 @@ type InviteRow = {
 
 export async function createLeadInvite(
   sql: Sql,
-  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo" | "exclusive" | "cdars"; process?: "assisted" | "portal"; exclusiveApy?: string; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
+  input: { email: string; name: string; months: number; promoCode: string; kind: "custom" | "promo" | "exclusive" | "cdars" | "wealth"; process?: "assisted" | "portal"; exclusiveApy?: string; advisor: { name: string; phone: string; email: string; mailbox: string; role?: string; personalPhone?: string } },
 ) {
   const token = randomBytes(24).toString("hex");
   const expiresAt = new Date(Date.now() + 48 * HOUR).toISOString();
@@ -68,6 +68,12 @@ export function inviteApplicationUrl(origin: string, token: string) {
   return `${base}/application?invite=${token}`;
 }
 
+export function inviteOnboardingUrl(origin: string, token: string) {
+  const base = origin.trim().replace(/\/$/, "");
+  if (!/^https?:\/\//i.test(base)) return "";
+  return `${base}/onboarding?invite=${token}`;
+}
+
 export async function readLeadInvite(sql: Sql, token: string) {
   await ensureInviteColumns(sql);
   const rows = await sql<InviteRow & { used_at: string | Date | null; renew_requested_at: string | Date | null; is_open: boolean | string }>`
@@ -87,7 +93,9 @@ export async function readLeadInvite(sql: Sql, token: string) {
   const expiresAt = row.expires_at instanceof Date ? row.expires_at : new Date(row.expires_at);
   return {
     status: "open" as const,
+    token: row.token,
     name: row.name,
+    email: row.email,
     months: Number(row.months),
     promoCode: row.promo_code,
     kind: row.kind,

@@ -33,6 +33,7 @@ export async function notifyStep(
     fromAddress?: string;
     subject?: string;
     advisorId?: string;
+    cc?: string[];
     copy?: { subject?: string; lead?: string; next?: string };
   },
 ) {
@@ -75,9 +76,10 @@ export async function notifyStep(
   for (const message of messages) {
     const subject = message.audience === "client" && input.subject?.trim() ? input.subject.trim() : message.mail.subject;
     const advisorMail = message.audience === "client" && Boolean(input.replyTo);
+    const cc = (input.cc || []).map((item) => item.trim().toLowerCase()).filter((item) => item && item !== input.clientEmail.trim().toLowerCase());
     const result = message.audience === "admin"
       ? await deliverTelegram(sql, subject, message.mail.text, message.attachments)
-      : await deliver(message.recipient, subject, message.mail.text, message.mail.html, companyName, sql, message.attachments, advisorMail ? input.replyTo || "" : "", advisorMail ? input.replyName || "" : "", advisorMail ? input.fromAddress || "" : "");
+      : await deliver(message.recipient, subject, message.mail.text, message.mail.html, companyName, sql, message.attachments, advisorMail ? input.replyTo || "" : "", advisorMail ? input.replyName || "" : "", advisorMail ? input.fromAddress || "" : "", cc);
     await sql`
       insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
       values (
@@ -386,15 +388,15 @@ function senderAddress(from: string, name: string) {
   return safeName ? `${safeName} <${email}>` : from;
 }
 
-async function deliver(to: string, subject: string, text: string, html: string, companyName: string, sql: Sql, attachments: MailFile[] = [], replyTo = "", replyName = "", fromAddress = "") {
+async function deliver(to: string, subject: string, text: string, html: string, companyName: string, sql: Sql, attachments: MailFile[] = [], replyTo = "", replyName = "", fromAddress = "", cc: string[] = []) {
   const mail = await readMailConfig(sql);
   const from = fromAddress || mail.from;
   if (!mail.smtpKey) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Add the SMTP2GO API key in Settings." };
   if (!from) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Add the SMTP2GO from address in Settings." };
-  return deliverSmtp2go(to, subject, text, html, mail.smtpKey, from, replyTo, replyName, attachments);
+  return deliverSmtp2go(to, subject, text, html, mail.smtpKey, from, replyTo, replyName, attachments, cc);
 }
 
-async function deliverSmtp2go(to: string, subject: string, text: string, html: string, apiKey: string, from: string, replyTo: string, replyName: string, attachments: MailFile[]) {
+async function deliverSmtp2go(to: string, subject: string, text: string, html: string, apiKey: string, from: string, replyTo: string, replyName: string, attachments: MailFile[], cc: string[] = []) {
   if (!apiKey) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Save the SMTP2GO API key in Misc settings." };
   if (!from) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "This advisor has no verified mailbox." };
   let last = "SMTP2GO did not respond.";
@@ -410,6 +412,7 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
           subject,
           html_body: html,
           text_body: text,
+          ...(cc.length ? { cc } : {}),
           ...(replyTo ? { custom_headers: [{ header: "Reply-To", value: replyTo }] } : {}),
           ...smtpFiles(attachments),
         }),
