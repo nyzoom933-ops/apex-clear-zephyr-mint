@@ -1452,7 +1452,7 @@ export function defaultHtrCopy(): HtrCopy {
   };
 }
 
-export function htrLetter(input: { leadName: string; company: string; advisor?: MailAdvisor; logo?: string | null; portalUrl?: string; companyPhone?: string; copy?: HtrCopy | null }) {
+export function htrLetter(input: { leadName: string; company: string; advisor?: MailAdvisor; logo?: string | null; portalUrl?: string; companyPhone?: string; copy?: HtrCopy | null; link?: string }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.leadName.trim() || "Client";
   const fallback = defaultHtrCopy();
@@ -1462,6 +1462,8 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
   const offer = copy?.offer.trim() || fallback.offer;
   const decline = copy?.decline.trim() || fallback.decline;
   const closing = copy?.closing.trim() || fallback.closing;
+  const link = input.link?.trim() || "";
+  const ask = "Use the button below to ask for a call. Include the best day, time, time zone, and phone number, and an advisor will call you.";
   const logo = emailLogoSrc(input.logo, input.portalUrl);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
@@ -1469,7 +1471,10 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
   const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
   const help = companyHelp(input.companyPhone);
   const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(value)}</p>`;
-  const text = [`Dear ${name},`, stripMarks(opening), stripMarks(offer), stripMarks(decline), stripMarks(closing), sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
+  const button = link
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:16px;"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(link)}" style="display:inline-block; padding:14px 22px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Request an advisor call</a></td></tr></table>`
+    : "";
+  const text = [`Dear ${name},`, stripMarks(opening), stripMarks(offer), ask, link ? `Request an advisor call: ${link}` : "", stripMarks(decline), stripMarks(closing), sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1491,6 +1496,8 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
           <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
           ${paragraph(opening)}
           ${paragraph(offer)}
+          ${paragraph(ask)}
+          ${button}
           ${paragraph(decline)}
           ${paragraph(closing)}
           <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
@@ -1510,7 +1517,7 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
 }
 
 function sampleHtrLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
-  return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone }).html;
+  return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone, link: portalUrl ? `${portalUrl.replace(/\/$/, "")}/call?token=preview` : "" }).html;
 }
 
 export type FollowupCopy = {

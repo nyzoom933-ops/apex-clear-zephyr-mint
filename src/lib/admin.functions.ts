@@ -2518,6 +2518,7 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
       portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       copy: data.copy,
+      link: await callScheduleLink(sql, data.email, data.name, advisor.name),
     });
     await sendStep(sql, {
       step: "lead_htr",
@@ -2533,7 +2534,146 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
       relatedId: data.advisorId,
       advisorId: data.advisorId,
     });
+    await ensureCrmLeads(sql);
+    await sql`update crm_leads set status = 'HTR' where lower(email) = ${data.email}`;
     return { ok: true as const };
+  });
+
+const CALL_TIMES = Array.from({ length: 21 }, (_, index) => {
+  const hour = 8 + Math.floor(index / 2);
+  const minute = index % 2 ? "30" : "00";
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const shown = hour % 12 || 12;
+  return `${shown}:${minute} ${suffix}`;
+});
+
+const CALL_ZONES = [
+  ["America/New_York", "Eastern Time"],
+  ["America/Chicago", "Central Time"],
+  ["America/Denver", "Mountain Time"],
+  ["America/Phoenix", "Arizona Time"],
+  ["America/Los_Angeles", "Pacific Time"],
+  ["America/Anchorage", "Alaska Time"],
+  ["Pacific/Honolulu", "Hawaii Time"],
+] as const;
+
+function callZoneLabel(zone: string) {
+  return CALL_ZONES.find((item) => item[0] === zone)?.[1] || zone;
+}
+
+async function ensureCallRequests(sql: Sql) {
+  await sql`
+    create table if not exists call_requests (
+      token text primary key,
+      email text not null,
+      name text not null default '',
+      phone text not null default '',
+      call_on text not null default '',
+      call_time text not null default '',
+      note text not null default '',
+      advisor_name text not null default '',
+      created_at timestamptz not null default now(),
+      submitted_at timestamptz
+    )
+  `;
+  await sql`alter table call_requests add column if not exists time_zone text not null default ''`;
+}
+
+async function callScheduleLink(sql: Sql, email: string, name: string, advisorName: string) {
+  await ensureCrmLeads(sql);
+  await ensureCallRequests(sql);
+  const token = randomBytes(24).toString("hex");
+  const phones = await sql<{ phone: string }>`select phone from crm_leads where lower(email) = ${email} and phone <> '' order by received_at desc limit 1`;
+  await sql`
+    insert into call_requests (token, email, name, phone, advisor_name)
+    values (${token}, ${email}, ${name}, ${phones[0]?.phone || ""}, ${advisorName})
+  `;
+  const { readPortalOrigin } = await import("@/lib/mail.server");
+  const origin = (await readPortalOrigin(sql)).replace(/\/$/, "");
+  if (!origin) throw new Error("Set the public site address before sending this email.");
+  return `${origin}/call?token=${token}`;
+}
+
+export const getCallSchedule = createServerFn({ method: "GET" })
+  .validator((input: { token?: string }) => ({ token: (input.token || "").trim() }))
+  .handler(async ({ data }) => {
+    if (data.token === "preview") return { name: "Client", phone: "", advisorName: "", callOn: "", callTime: "", timeZone: "", note: "", times: CALL_TIMES, zones: CALL_ZONES.map(([id, label]) => ({ id, label })), preview: true };
+    if (!/^[a-f0-9]{48}$/.test(data.token)) throw new Error("This call link is not valid.");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCallRequests(sql);
+    const rows = await sql<{ name: string; phone: string; advisor_name: string; call_on: string; call_time: string; time_zone: string; note: string }>`
+      select name, phone, advisor_name, call_on, call_time, coalesce(time_zone, '') as time_zone, note from call_requests where token = ${data.token} limit 1
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("This call link is not valid.");
+    return { name: row.name, phone: row.phone, advisorName: row.advisor_name, callOn: row.call_on, callTime: row.call_time, timeZone: row.time_zone, note: row.note, times: CALL_TIMES, zones: CALL_ZONES.map(([id, label]) => ({ id, label })), preview: false };
+  });
+
+export const submitCallSchedule = createServerFn({ method: "POST" })
+  .validator((input: { token?: string; phone?: string; callOn?: string; callTime?: string; timeZone?: string; note?: string }) => {
+    const token = (input.token || "").trim();
+    const phone = (input.phone || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    const callOn = (input.callOn || "").trim();
+    const callTime = (input.callTime || "").trim();
+    const timeZone = (input.timeZone || "").trim();
+    const note = (input.note || "").trim().slice(0, 500);
+    if (token !== "preview" && !/^[a-f0-9]{48}$/.test(token)) throw new Error("This call link is not valid.");
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 7 || digits.length > 15) throw new Error("Enter the phone number for the call.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(callOn)) throw new Error("Choose the day for the call.");
+    const earliest = new Date();
+    earliest.setUTCDate(earliest.getUTCDate() - 1);
+    if (callOn < earliest.toISOString().slice(0, 10)) throw new Error("Choose a current or future day.");
+    if (!CALL_TIMES.includes(callTime)) throw new Error("Choose a time for the call.");
+    if (!CALL_ZONES.some((zone) => zone[0] === timeZone)) throw new Error("Choose a time zone.");
+    return { token, phone, callOn, callTime, timeZone, note };
+  })
+  .handler(async ({ data }) => {
+    if (data.token === "preview") return { ok: true as const, preview: true };
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCallRequests(sql);
+    const rows = await sql<{ email: string; name: string; advisor_name: string }>`
+      select email, name, advisor_name from call_requests where token = ${data.token} limit 1
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("This call link is not valid.");
+    await sql`
+      update call_requests
+      set phone = ${data.phone}, call_on = ${data.callOn}, call_time = ${data.callTime}, time_zone = ${data.timeZone}, note = ${data.note}, submitted_at = now()
+      where token = ${data.token}
+    `;
+    const { sendTelegramNotice } = await import("@/lib/mail.server");
+    const when = new Date(`${data.callOn}T12:00:00.000Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+    await sendTelegramNotice(sql, `Call requested by ${row.name}`, [`${row.name} (${row.email})`, `${when} at ${data.callTime} ${callZoneLabel(data.timeZone)}`, data.phone, row.advisor_name, data.note].filter(Boolean).join("\n")).catch(() => undefined);
+    return { ok: true as const, preview: false };
+  });
+
+export const listCallRequests = createServerFn({ method: "GET" })
+  .handler(async () => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCallRequests(sql);
+    const rows = await sql<{ email: string; name: string; phone: string; call_on: string; call_time: string; time_zone: string; note: string; advisor_name: string; submitted_at: string | Date }>`
+      select email, name, phone, call_on, call_time, coalesce(time_zone, '') as time_zone, note, advisor_name, submitted_at
+      from call_requests
+      where submitted_at is not null
+      order by submitted_at desc
+      limit 40
+    `;
+    return rows.map((row) => ({
+      email: row.email,
+      name: row.name,
+      phone: row.phone,
+      callOn: row.call_on,
+      callTime: row.call_time,
+      timeZone: callZoneLabel(row.time_zone),
+      note: row.note,
+      advisorName: row.advisor_name,
+      submittedAt: new Date(row.submitted_at).toISOString(),
+    }));
   });
 
 export const sendLeadFollowup = createServerFn({ method: "POST" })
@@ -3334,6 +3474,16 @@ async function ensureCrmLeads(sql: Sql) {
   await sql`alter table crm_leads add column if not exists advisor_id text not null default ''`;
   await sql`alter table crm_leads add column if not exists process text not null default 'assisted'`;
   await sql`alter table crm_leads add column if not exists lead_number text not null default ''`;
+  const mail = await sql<{ ok: string | null }>`select to_regclass('notifications')::text as ok`;
+  if (mail[0]?.ok) {
+    await sql`
+      update crm_leads
+      set status = 'HTR'
+      where status is distinct from 'HTR'
+        and email <> ''
+        and lower(email) in (select lower(recipient) from notifications where step = 'lead_htr' and delivery = 'sent')
+    `;
+  }
 }
 
 export type CrmLead = {
@@ -4453,12 +4603,12 @@ async function updatePerfexDetails(sql: Sql, rows: { perfexId: string; status: s
     });
     await sql.query(
       `update crm_leads as lead
-       set status = incoming.status,
+       set status = case when lead.status = 'HTR' then lead.status else incoming.status end,
            amount = case when incoming.amount <> '' then incoming.amount else lead.amount end,
            term = case when incoming.term <> '' then incoming.term else lead.term end,
            objective = case when incoming.objective <> '' then incoming.objective else lead.objective end,
            notes_at = case
-             when lead.status is distinct from incoming.status
+             when lead.status <> 'HTR' and lead.status is distinct from incoming.status
                or (incoming.amount <> '' and lead.amount is distinct from incoming.amount)
                or (incoming.term <> '' and lead.term is distinct from incoming.term)
                or (incoming.objective <> '' and lead.objective is distinct from incoming.objective)

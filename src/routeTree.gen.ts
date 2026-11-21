@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ApplicationRouteImport } from './routes/application'
+import { Route as CallRouteImport } from './routes/call'
 import { Route as EmailLogoRouteImport } from './routes/email-logo'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
@@ -36,6 +37,11 @@ const AdminRoute = AdminRouteImport.update({
 const ApplicationRoute = ApplicationRouteImport.update({
   id: '/application',
   path: '/application',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CallRoute = CallRouteImport.update({
+  id: '/call',
+  path: '/call',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmailLogoRoute = EmailLogoRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/application': typeof ApplicationRoute
+  '/call': typeof CallRoute
   '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/application': typeof ApplicationRoute
+  '/call': typeof CallRoute
   '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRoute
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/application': typeof ApplicationRoute
+  '/call': typeof CallRoute
   '/email-logo': typeof EmailLogoRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/application'
+    | '/call'
     | '/email-logo'
     | '/login'
     | '/onboarding'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/application'
+    | '/call'
     | '/email-logo'
     | '/login'
     | '/onboarding'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/application'
+    | '/call'
     | '/email-logo'
     | '/login'
     | '/onboarding'
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   ApplicationRoute: typeof ApplicationRoute
+  CallRoute: typeof CallRoute
   EmailLogoRoute: typeof EmailLogoRoute
   LoginRoute: typeof LoginRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -220,6 +233,13 @@ declare module '@tanstack/react-router' {
       path: '/application'
       fullPath: '/application'
       preLoaderRoute: typeof ApplicationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/call': {
+      id: '/call'
+      path: '/call'
+      fullPath: '/call'
+      preLoaderRoute: typeof CallRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/email-logo': {
@@ -299,6 +319,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   ApplicationRoute: ApplicationRoute,
+  CallRoute: CallRoute,
   EmailLogoRoute: EmailLogoRoute,
   LoginRoute: LoginRoute,
   OnboardingRoute: OnboardingRoute,

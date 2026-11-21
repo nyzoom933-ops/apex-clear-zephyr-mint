@@ -22,6 +22,7 @@ import {
   importPerfexLeads,
   importCrmLeads,
   exportCrmLeads,
+  listCallRequests,
   listIntroOpens,
   downloadOpensReport,
   listTrashOpens,
@@ -2066,7 +2067,8 @@ function LeadsPanel({
     logo: brand.emailLogo,
     portalUrl: brand.publicDomain,
     companyPhone: brand.companyPhone,
-    copy: htrText
+    copy: htrText,
+    link: previewOrigin ? `${previewOrigin}/call?token=preview` : ""
   });
   const followStandard = { ...defaultFollowupCopy(), promoCode };
   const followText = followCopy ?? followStandard;
@@ -2693,7 +2695,7 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
     if (kind === "rates") return offer ? leadLetter({ ...common, terms, offer }) : null;
     if (kind === "exclusive") return exclusiveLetter({ ...common, terms, offer: offer ?? blankOffer, minimum: "$100,000" });
     if (kind === "extension") return extensionLetter(common);
-    if (kind === "htr") return htrLetter(common);
+    if (kind === "htr") return htrLetter({ ...common, link: previewOrigin ? `${previewOrigin}/call?token=preview` : "" });
     if (kind === "followup") return followupLetter({ ...common, link: previewLink || "#", promoCode: "" });
     if (kind === "reminder") return promoReminderLetter({ ...common, link: previewLink || "#", promoCode: "" });
     if (kind === "cdars") return cdarsLetter({ ...common, terms: cdarsRates, link: previewLink || "#" });
@@ -2817,11 +2819,13 @@ function PipelineLeadsPanel() {
   const [mailLeads, setMailLeads] = useState(null);
   const [sort, setSort] = useState("");
   const [direction, setDirection] = useState("asc");
+  const [calls, setCalls] = useState([]);
 
   function load(nextPage = pageNumber) {
     return listCrmLeads({ data: { page: nextPage, query, source, status, advisorId, from, to, withEmail, sort, direction } }).then((result) => {
       setPage(result);
       setPageNumber(result.page);
+      void listCallRequests().then(setCalls).catch(() => setCalls([]));
       return result;
     });
   }
@@ -3103,7 +3107,11 @@ function PipelineLeadsPanel() {
       <button type="button" className="min-h-11 px-3 font-semibold text-primary" onClick={() => openMail(picked)}>Email selected</button>
       <button type="button" className="min-h-11 px-3 font-semibold text-primary" onClick={() => setPicked([])}>Clear</button>
     </div> : null}
-    {mailLeads ? <LeadQuickMail key={mailLeads.map((lead) => lead.id).join(",")} leads={mailLeads} advisors={advisors} onClose={() => setMailLeads(null)} onSent={(message, sentIds) => { setNotice(message); setMailLeads(null); setPicked((current) => current.filter((item) => !sentIds.includes(item.id))); }} /> : null}
+    {mailLeads ? <LeadQuickMail key={mailLeads.map((lead) => lead.id).join(",")} leads={mailLeads} advisors={advisors} onClose={() => setMailLeads(null)} onSent={(message, sentIds) => { setNotice(message); setMailLeads(null); setPicked((current) => current.filter((item) => !sentIds.includes(item.id))); void load().catch(() => undefined); }} /> : null}
+    {calls.length ? <div className="mt-4 rounded-lg border border-border bg-surface p-4">
+      <h2 className="text-lg font-semibold text-primary">Call requests</h2>
+      <ul className="mt-2 grid gap-2 text-sm">{calls.map((call) => <li key={`${call.email}-${call.submittedAt}`} className="text-fg"><span className="font-semibold text-primary">{call.name}</span> · {callDay(call.callOn)} · {call.callTime}{call.timeZone ? ` ${call.timeZone}` : ""} · {call.phone}{call.note ? ` · ${call.note}` : ""}{call.advisorName ? ` · ${call.advisorName}` : ""}</li>)}</ul>
+    </div> : null}
     <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface">
       <table className="w-full min-w-[860px] text-left text-sm">
         <thead className="border-b border-border text-xs tracking-wide text-primary uppercase">
@@ -3126,6 +3134,7 @@ function PipelineLeadsPanel() {
               <td className="px-4 py-3">
                 <span className="block font-semibold text-primary">{lead.name}</span>
                 <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
+                {calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()) ? <span className="mt-1 block text-sm font-semibold text-primary">Call {callDay(calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).callOn)} · {calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).callTime}{calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).timeZone ? ` ${calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).timeZone}` : ""}</span> : null}
                 {lead.notes ? <span className="mt-1 block max-w-xs truncate text-xs text-[#8c8c8c]">{lead.notes.split("\n")[0]}</span> : null}
                 <div className="mt-1 flex gap-1" onClick={(event) => event.stopPropagation()}>
                   <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => openMail([lead])}>Email</button>
@@ -3204,6 +3213,12 @@ function PipelineLeadsPanel() {
       </div>
     </form>
   </section>;
+}
+
+function callDay(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function LeadSortHeader({ label, column, sort, direction, onSort }) {
