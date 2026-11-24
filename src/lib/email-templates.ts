@@ -909,8 +909,8 @@ export function leadLetter(input: {
               <p style="margin:0 0 4px 0; font-family:Arial, Helvetica, sans-serif; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:#006fcf; font-weight:700;">Online CD (Certificate of Deposit)</p>
               <h1 style="margin:0 0 8px 0; font-family:Arial, Helvetica, sans-serif; font-size:26px; line-height:32px; color:#12315c;">${escapeHtml(headline)}</h1>
               <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
-              <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(welcome)}</p>
-              <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;"><strong>Certificates of Deposit (CDs):</strong> ${escapeHtml(certificate)}</p>
+              <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(welcome)}</p>
+              <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;"><strong>Certificates of Deposit (CDs):</strong> ${richText(certificate)}</p>
             </td>
           </tr>
           <tr>
@@ -923,7 +923,7 @@ export function leadLetter(input: {
           <tr>
             <td style="padding:18px 36px 8px 36px;">
               <p style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#12315c;">Promotional new-client offer</p>
-              <p style="margin:0 0 12px 0; font-size:14px; line-height:21px;">${escapeHtml(offerText)}</p>
+              <p style="margin:0 0 12px 0; font-size:14px; line-height:21px;">${richText(offerText)}</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
                 <tr>
                   <td style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700; letter-spacing:0.3px;">Qualifying Deposit</td>
@@ -939,14 +939,14 @@ export function leadLetter(input: {
           <tr>
             <td style="padding:16px 36px 4px 36px;">
               <p style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#12315c;">FDIC coverage</p>
-              <p style="margin:0; font-size:14px; line-height:21px;">${escapeHtml(protectionText)}</p>
+              <p style="margin:0; font-size:14px; line-height:21px;">${richText(protectionText)}</p>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 36px 8px 36px;">
               <p style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#12315c;">Ready to get started?</p>
-              <p style="margin:0; font-size:14px; line-height:21px;">${escapeHtml(ready)}</p>
-              <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${escapeHtml(thanks)}</p>
+              <p style="margin:0; font-size:14px; line-height:21px;">${richText(ready)}</p>
+              <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${richText(thanks)}</p>
               <div style="margin:12px 0 0 0;">${sign.html}</div>
             </td>
           </tr>
@@ -2579,9 +2579,11 @@ function sampleInvoiceAdvisorLetter(portalUrl?: string, advisor?: MailAdvisor, c
 
 function richText(value: string) {
   return value
+    .replace(/\r\n/g, "\n")
     .split(/(\*\*[^*]+\*\*)/g)
     .map((part) => (part.startsWith("**") && part.endsWith("**") ? `<strong>${escapeHtml(part.slice(2, -2))}</strong>` : escapeHtml(part)))
-    .join("");
+    .join("")
+    .replace(/\n/g, "<br>");
 }
 
 function stripMarks(value: string) {
