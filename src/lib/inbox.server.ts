@@ -4,7 +4,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import type { Sql } from "@/lib/db";
 import { advisorNoteLetter, applyEmailStyle } from "@/lib/email-templates";
-import { emailLogoFile, sendFromMailbox, type MailFile, readEmailStyles } from "@/lib/mail.server";
+import { emailLogoFile, ensureMailColumn, sendFromMailbox, type MailFile, readEmailStyles } from "@/lib/mail.server";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -706,12 +706,33 @@ export async function sendInboxMail(
     attachments: logoFile ? [logoFile] : [],
   });
   if (sent.delivery !== "sent") throw new Error(sent.error || "The message was not accepted. Check the advisor mailbox in SMTP2GO.");
+  const html = applyEmailStyle(letter.html, styles.advisor, styles.colors);
+  const messageId = crypto.randomUUID();
+  await ensureMailColumn(sql);
+  await sql`
+    insert into notifications (id, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
+    values (
+      ${crypto.randomUUID()},
+      'client',
+      ${to},
+      'inbox_note',
+      ${subject},
+      ${letter.text},
+      ${html},
+      ${messageId},
+      'sent',
+      ${sent.messageId},
+      'sent',
+      ${sent.provider || "smtp2go"},
+      ${advisor.id}
+    )
+  `;
   await ensureInbox(sql);
   await sql`
     insert into inbox_messages (
       id, advisor_id, direction, uid, from_name, from_email, to_name, to_email, subject, body_text, lead_id, received_at, seen
     ) values (
-      ${crypto.randomUUID()},
+      ${messageId},
       ${advisor.id},
       'out',
       0,

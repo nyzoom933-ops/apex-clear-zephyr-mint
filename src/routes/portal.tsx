@@ -1587,7 +1587,7 @@ function InvoiceDownload({ position }: { position: FundingPosition }) {
 
   return (
     <div className="mt-4 rounded-md border border-border bg-white px-4 py-3">
-      <p className="text-[11px] font-semibold tracking-wide text-heading uppercase">Payment invoice</p>
+      <p className="text-[11px] font-semibold tracking-wide text-heading uppercase">Certificate of Deposit – funding instructions</p>
       {ready ? (
         <>
           <p className="mt-1 text-sm text-fg">Use this invoice for the wire. Include the customer reference on the payment.</p>
@@ -1610,9 +1610,9 @@ function InvoiceDownload({ position }: { position: FundingPosition }) {
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       {viewing && bytes ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onClick={() => setViewing(false)}>
-          <div role="dialog" aria-modal="true" aria-label="Payment invoice" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="Certificate of Deposit funding instructions" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <h2 className="text-lg font-semibold text-primary">Payment invoice</h2>
+              <h2 className="text-lg font-semibold text-primary">Certificate of Deposit – funding instructions</h2>
               <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => setViewing(false)}>
                 Close
               </button>

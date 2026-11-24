@@ -353,7 +353,10 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   drawBarcode(page, brandMark.x, y - 28, 220, 22, bill.accountNumber || bill.crn);
 
   y = 560;
-  page.drawText("Payment Invoice", { x: left, y, size: 22, font: bold, color: ink });
+  const title = "PAYMENT INVOICE";
+  let titleSize = 14;
+  while (titleSize > 9 && bold.widthOfTextAtSize(title, titleSize) > width) titleSize -= 0.5;
+  page.drawText(title, { x: left, y, size: titleSize, font: bold, color: ink });
   y -= 22;
   page.drawText("Billing information", { x: left, y, size: 11, font: bold, color: ink });
   y -= 14;
@@ -407,7 +410,7 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   page.drawLine({ start: { x: left, y }, end: { x: left + width, y }, thickness: 1.2, color: ink });
 
   const boxTop = y - 18;
-  const boxH = 108;
+  const boxH = 126;
   const gap = 12;
   const leftBox = (width - gap) * 0.58;
   const rightBox = width - gap - leftBox;
@@ -434,7 +437,7 @@ export async function buildInvoicePdf(input: InvoicePdfInput) {
   const assistX = left + leftBox + gap + 12;
   page.drawText("Payment assistance", { x: assistX, y: boxTop - 16, size: 9, font: bold, color: ink });
   let py = boxTop - 32;
-  for (const row of linesOf("Questions go to your introducing agent advisor.", font, 8, rightBox - 24)) {
+  for (const row of linesOf("For assistance with your wire transfer, please contact your dedicated account representative.", font, 8, rightBox - 24)) {
     page.drawText(row, { x: assistX, y: py, size: 8, font, color: muted });
     py -= 11;
   }

@@ -108,6 +108,7 @@ export function ApplicationForm() {
   const [inviteProcess, setInviteProcess] = useState("");
   const [inviteToken, setInviteToken] = useState("");
   const [inviteMonths, setInviteMonths] = useState(0);
+  const [invitePromoTerms, setInvitePromoTerms] = useState<number[]>([]);
   const [inviteExclusive, setInviteExclusive] = useState(null);
   const [cdarsTerms, setCdarsTerms] = useState([]);
   const [inviteRequested, setInviteRequested] = useState(false);
@@ -163,6 +164,7 @@ export function ApplicationForm() {
         }
         const first = result.name.split(" ")[0] || "";
         setInviteMonths(Number(result.months) || 0);
+        setInvitePromoTerms(Array.isArray(result.promoTerms) ? result.promoTerms : []);
         setForm({
           ...draft,
           preferredTerm: Number(result.months) > 0 ? String(result.months) : "",
@@ -220,6 +222,7 @@ export function ApplicationForm() {
   async function onContinue() {
     const nextErrors = validateStep(step, form, promoMonths(offer).includes(Number(form.preferredTerm)), inviteProcess === "assisted", inviteKind === "cdars");
     if (step === 3 && inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !promoMonths(offer).includes(Number(form.preferredTerm))) nextErrors.push("Choose a promotional term.");
+    if (step === 3 && inviteGate === "open" && inviteKind === "promo" && invitePromoTerms.length && !invitePromoTerms.includes(Number(form.preferredTerm))) nextErrors.push("Choose one of the promotional terms from your email.");
     if (nextErrors.length) {
       setErrors(nextErrors);
       cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -415,7 +418,7 @@ export function ApplicationForm() {
             {step === 2 ? <Address form={form} patch={patch} /> : null}
             {step === 3 ? (
               <div className="grid min-w-0 gap-10">
-                <Preference form={form} patch={patch} terms={terms} offer={offer} exclusive={inviteExclusive} cdarsTerms={inviteKind === "cdars" ? cdarsTerms : null} locked={inviteGate === "open" && (inviteMonths > 0 || Boolean(inviteExclusive)) && inviteKind !== "cdars"} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !inviteExclusive} showPromo={inviteGate === "open" && inviteKind === "promo" && !inviteExclusive} codeLocked={inviteGate === "open" && inviteKind !== "cdars"} />
+                <Preference form={form} patch={patch} terms={terms} offer={offer} exclusive={inviteExclusive} cdarsTerms={inviteKind === "cdars" ? cdarsTerms : null} locked={inviteGate === "open" && (inviteMonths > 0 || Boolean(inviteExclusive)) && inviteKind !== "cdars"} promoOnly={inviteGate === "open" && inviteKind === "promo" && inviteMonths <= 0 && !inviteExclusive} allowedMonths={invitePromoTerms} showPromo={inviteGate === "open" && inviteKind === "promo" && !inviteExclusive} codeLocked={inviteGate === "open" && inviteKind !== "cdars"} />
                 <Financial form={form} patch={patch} />
                 <Funding form={form} patch={patch} />
               </div>
@@ -624,6 +627,7 @@ function Preference({
   offer,
   locked = false,
   promoOnly = false,
+  allowedMonths = [],
   showPromo = false,
   codeLocked = false,
   exclusive = null,
@@ -635,6 +639,7 @@ function Preference({
   offer: PromoOffer;
   locked?: boolean;
   promoOnly?: boolean;
+  allowedMonths?: number[];
   showPromo?: boolean;
   codeLocked?: boolean;
   exclusive?: { months: number; apy: string } | null;
@@ -652,7 +657,7 @@ function Preference({
     : locked
     ? terms.filter((term) => String(term.months) === form.preferredTerm)
     : [...terms]
-        .filter((term) => !promoOnly || promo.has(term.months))
+        .filter((term) => !promoOnly || (promo.has(term.months) && (!allowedMonths.length || allowedMonths.includes(term.months))))
         .sort((a, b) => Number(promo.has(b.months)) - Number(promo.has(a.months)) || Number(b.featured) - Number(a.featured) || a.months - b.months);
   const months = Number(form.preferredTerm);
   const shown = ordered.length > 0 || !locked || !months ? ordered : [{ id: "invite", months, apy: "—", featured: false } as CdTerm];

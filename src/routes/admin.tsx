@@ -21,6 +21,7 @@ import {
   listCrmLeads,
   importPerfexLeads,
   importCrmLeads,
+  previewCrmLeadImport,
   exportCrmLeads,
   listCallRequests,
   listIntroOpens,
@@ -1363,7 +1364,7 @@ function InvoiceCard({
       setPending("");
     }
   }
-  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated && row.origin !== "desk" ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />Do not send transactional email</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4 overflow-hidden rounded-xl border border-border bg-[#e8e8e8]"><div className="border-b border-border bg-white px-5 py-4 text-sm"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><p className="mt-2 text-fg">To {letter.to}</p><p className="text-fg">From {letter.fromName} · {letter.fromEmail}</p><p className="mt-1 font-semibold text-primary">{letter.subject}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div><iframe title="Advisor invoice letter" sandbox="allow-same-origin" className="h-[720px] w-full bg-[#f2f5f8]" srcDoc={letter.html} /></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
+  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated && row.origin !== "desk" ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />Do not send transactional email</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4"><LetterPreview html={letter.html} title={letter.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-16 text-[#8c8c8c]">From</span>{letter.fromName}{letter.fromEmail ? ` <${letter.fromEmail}>` : ""}</p><p className="mt-1"><span className="inline-block w-16 text-[#8c8c8c]">To</span>{letter.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-16 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
 }
 function ActiveCdsDesk() {
   const [rows, setRows] = useState(null);
@@ -1842,6 +1843,11 @@ function PaymentReview({
   }
   return <div className="mt-3 border-t border-border pt-3 text-sm"><p className="text-fg">Wire confirmation: {name}</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 font-semibold text-primary" onClick={() => void open()}>View confirmation</button>{canReview ? <Fragment><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Approving…" : "Approve payment"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={() => void reject()}>{pending === "reject" ? "Rejecting…" : "Reject file"}</button></Fragment> : null}</div>{error ? <p className="mt-2 text-danger">{error}</p> : null}</div>;
 }
+function PromoRateChecks({ terms, selected, onToggle }) {
+  if (!terms.length) return <p className="text-sm text-fg">No promotional terms are set.</p>;
+  return <fieldset className="grid gap-2"><legend className="text-sm font-semibold text-primary">Promotional terms in this email</legend><div className="flex flex-wrap gap-x-4 gap-y-1">{terms.map((term) => <label key={term.months} className="flex min-h-11 items-center gap-2 text-sm text-fg"><input type="checkbox" checked={selected.includes(term.months)} onChange={() => onToggle(term.months)} />{term.months}-month · {term.apy}</label>)}</div></fieldset>;
+}
+
 function LeadsPanel({
   focus,
   onFocusUsed
@@ -1866,6 +1872,7 @@ function LeadsPanel({
   const [pending, setPending] = useState(false);
   const [editing, setEditing] = useState(false);
   const [copy, setCopy] = useState(null);
+  const [ratePick, setRatePick] = useState(null);
   const [kind, setKind] = useState("rates");
   const [dealProcess, setDealProcess] = useState("assisted");
   const [termMonths, setTermMonths] = useState("");
@@ -1950,7 +1957,7 @@ function LeadsPanel({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [email]);
-  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro" || kind === "wealth";
+  const bulk = kind === "rates" || kind === "extension" || kind === "exclusive" || kind === "exclusive-fdic" || kind === "htr" || kind === "htr-call" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro" || kind === "wealth";
   const previewAt = pickedLeads.length ? Math.min(previewIndex, pickedLeads.length - 1) : 0;
   const previewLead = pickedLeads[previewAt] || null;
   const activeName = bulk ? previewLead?.name || "" : name;
@@ -1974,6 +1981,14 @@ function LeadsPanel({
     tiers: []
   }));
   const termChoices = terms.filter(term => kind === "promo" ? promoSet.has(term.months) : kind === "custom" ? !promoSet.has(term.months) : false);
+  const promoTermList = terms.filter(term => promoSet.has(term.months)).sort((a, b) => a.months - b.months);
+  const selectedRates = (ratePick ?? promoTermList.map(term => term.months)).filter(month => promoSet.has(month));
+  function toggleRate(month) {
+    setRatePick(current => {
+      const base = current ?? promoTermList.map(term => term.months);
+      return base.includes(month) ? base.filter(item => item !== month) : [...base, month].sort((a, b) => a - b);
+    });
+  }
   const selectedTerm = termChoices.find(term => String(term.months) === termMonths) ?? termChoices[0];
   const variant = kind === "private" ? "exclusive" : kind === "promo" ? "promo" : "custom";
   const privateMonths = Math.round(Number(exclusiveMonths));
@@ -2009,14 +2024,15 @@ function LeadsPanel({
     logo: brand.emailLogo,
     portalUrl: brand.publicDomain,
     companyPhone: brand.companyPhone,
-    copy: letterCopy
+    copy: letterCopy,
+    months: selectedRates
   }) : null;
   const formLetter = kind === "private" || (offer && (kind === "promo" || selectedTerm)) ? applicationLetter({
     leadName: name.trim() || "there",
     company: brand.companyName,
     months: kind === "private" ? privateMonths || 0 : kind === "promo" ? 0 : selectedTerm.months,
     apy: kind === "private" ? exclusiveRate : kind === "promo" ? "" : selectedTerm.apy,
-    terms: kind === "promo" ? termChoices : undefined,
+    terms: kind === "promo" ? termChoices.filter(term => selectedRates.includes(term.months)) : undefined,
     offer: offer || {
       intro: "",
       protection: "",
@@ -2056,7 +2072,22 @@ function LeadsPanel({
     portalUrl: brand.publicDomain,
     companyPhone: brand.companyPhone,
     minimum: "$100,000",
-    copy: exclusiveText
+    copy: exclusiveText,
+    months: selectedRates
+  });
+  const exclusiveFdicMail = exclusiveLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    terms,
+    offer: offer ?? { intro: "", protection: "", finePrint: "", startsOn: "", endsOn: "", tiers: [] },
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
+    minimum: "$100,000",
+    copy: exclusiveText,
+    months: selectedRates,
+    fdicStyle: "standard"
   });
   const htrStandard = defaultHtrCopy();
   const htrText = htrCopy ?? htrStandard;
@@ -2067,8 +2098,18 @@ function LeadsPanel({
     logo: brand.emailLogo,
     portalUrl: brand.publicDomain,
     companyPhone: brand.companyPhone,
+    copy: htrText
+  });
+  const htrCallMail = htrLetter({
+    leadName: activeName.trim() || "there",
+    company: brand.companyName,
+    advisor,
+    logo: brand.emailLogo,
+    portalUrl: brand.publicDomain,
+    companyPhone: brand.companyPhone,
     copy: htrText,
-    link: previewOrigin ? `${previewOrigin}/call?token=preview` : ""
+    schedule: true,
+    link: `${previewOrigin || "https://preview.local"}/call?token=preview`
   });
   const followStandard = { ...defaultFollowupCopy(), promoCode };
   const followText = followCopy ?? followStandard;
@@ -2123,8 +2164,8 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : ""
   });
-  const letter = kind === "wealth" ? wealthMail : kind === "cdars-intro" ? cdarsIntroMail : kind === "cdars" ? cdarsMail : kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive" ? exclusiveMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
-  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "cdars" ? "lead_cdars" : kind === "cdars-intro" ? "lead_cdars_intro" : kind === "wealth" ? "lead_wealth" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
+  const letter = kind === "wealth" ? wealthMail : kind === "cdars-intro" ? cdarsIntroMail : kind === "cdars" ? cdarsMail : kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive-fdic" ? exclusiveFdicMail : kind === "exclusive" ? exclusiveMail : kind === "htr-call" ? htrCallMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
+  const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr-call" ? "lead_htr_call" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "cdars" ? "lead_cdars" : kind === "cdars-intro" ? "lead_cdars_intro" : kind === "wealth" ? "lead_wealth" : kind === "exclusive-fdic" ? "lead_exclusive_fdic" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
     name: activeName.trim() || "there",
     email: activeEmail.trim() || "lead@example.com",
     detail: letter.text,
@@ -2135,14 +2176,15 @@ function LeadsPanel({
     advisorStyle: emailStyles.advisor,
     emailColors: emailStyles.colors
   }) : null;
-  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : kind === "cdars" ? cdarsMail.subject : kind === "cdars-intro" ? cdarsIntroMail.subject : kind === "wealth" ? wealthMail.subject : applicationCopy.subject;
+  const subject = kind === "rates" ? letterCopy.subject : kind === "extension" ? extensionCopy.subject : kind === "exclusive-fdic" ? exclusiveFdicMail.subject : kind === "exclusive" ? exclusiveMail.subject : kind === "htr" || kind === "htr-call" ? htrText.subject : kind === "followup" ? followText.subject : kind === "reminder" ? reminderMail.subject : kind === "cdars" ? cdarsMail.subject : kind === "cdars-intro" ? cdarsIntroMail.subject : kind === "wealth" ? wealthMail.subject : applicationCopy.subject;
   async function send(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     setPending(true);
     try {
-      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "htr" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro" || kind === "wealth") {
+      if ((kind === "rates" || kind === "exclusive" || kind === "exclusive-fdic" || kind === "promo") && !selectedRates.length) throw new Error("Select at least one promotional term.");
+      if (kind === "extension" || kind === "rates" || kind === "exclusive" || kind === "exclusive-fdic" || kind === "htr" || kind === "htr-call" || kind === "followup" || kind === "reminder" || kind === "cdars" || kind === "cdars-intro" || kind === "wealth") {
         if (!pickedLeads.length) throw new Error("Choose at least one lead.");
         let sent = 0;
         const failed = [];
@@ -2187,21 +2229,24 @@ function LeadsPanel({
                 cc,
                 copy: followText
               }
-            });else if (kind === "htr") await sendLeadHtr({
+            });else if (kind === "htr" || kind === "htr-call") await sendLeadHtr({
               data: {
                 advisorId,
                 name: lead.name,
                 email: lead.email,
                 cc,
-                copy: htrCopy
+                copy: htrCopy,
+                schedule: kind === "htr-call"
               }
-            });else if (kind === "exclusive") await sendLeadExclusive({
+            });else if (kind === "exclusive" || kind === "exclusive-fdic") await sendLeadExclusive({
               data: {
                 advisorId,
                 name: lead.name,
                 email: lead.email,
                 cc,
-                copy: exclusiveCopy
+                copy: exclusiveCopy,
+                rateMonths: selectedRates,
+                fdicStyle: kind === "exclusive-fdic" ? "standard" : "added"
               }
             });else if (kind === "extension") await sendLeadExtension({
               data: {
@@ -2217,7 +2262,8 @@ function LeadsPanel({
                 name: lead.name,
                 email: lead.email,
                 cc,
-                copy
+                copy,
+                rateMonths: selectedRates
               }
             });
             sent += 1;
@@ -2229,7 +2275,7 @@ function LeadsPanel({
         setNotice(sent === 1 ? `Sent to ${pickedLeads[0]?.email || "the lead"}.` : `Sent to ${sent} leads.`);
         setPickedLeads([]);
         setPreviewIndex(0);
-        if (kind === "reminder") setReminderCopy(null);else if (kind === "followup") setFollowCopy(null);else if (kind === "exclusive") setExclusiveCopy(null);else if (kind === "htr") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
+        if (kind === "reminder") setReminderCopy(null);else if (kind === "followup") setFollowCopy(null);else if (kind === "exclusive" || kind === "exclusive-fdic") setExclusiveCopy(null);else if (kind === "htr" || kind === "htr-call") setHtrCopy(null);else if (kind === "extension") setExtCopy(null);else setCopy(null);
       } else if (kind === "private") {
         await sendLeadExclusiveApplication({
           data: {
@@ -2247,7 +2293,7 @@ function LeadsPanel({
         setExclusiveRate("");
       } else if (kind !== "rates") {
         if (kind === "custom" && !selectedTerm) throw new Error("Choose a term that is not on promotion.");
-        if (kind === "promo" && !termChoices.length) throw new Error("Add a promotional term before sending this email.");
+        if (kind === "promo" && !selectedRates.length) throw new Error("Select at least one promotional term.");
         await sendLeadApplication({
           data: {
             advisorId,
@@ -2257,7 +2303,8 @@ function LeadsPanel({
             months: kind === "promo" ? 0 : selectedTerm.months,
             kind,
             process: dealProcess,
-            copy: applicationCopy
+            copy: applicationCopy,
+            rateMonths: kind === "promo" ? selectedRates : []
           }
         });
         setNotice(`${kind === "promo" ? "Promotional" : "Custom term"} email sent to ${email.trim()}. The link expires in 48 hours.`);
@@ -2269,7 +2316,8 @@ function LeadsPanel({
             name,
             email,
             cc,
-            copy: letterCopy
+            copy: letterCopy,
+            rateMonths: selectedRates
           }
         });
         setNotice(`Intro sent to ${email.trim()}.`);
@@ -2284,7 +2332,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a featured brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Featured CDs"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a featured brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["exclusive-fdic", "Exclusive promo FDIC"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["htr-call", "HTR with form"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Featured CDs"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -2318,12 +2366,12 @@ function LeadsPanel({
           setAppCopy(null);
           setLeadQuery("");
           setLeadOptions([]);
-        }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes every promotional term. The client chooses the term on the form.</p> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
+        }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes the promotional terms you check. The client chooses one of those terms on the form.</p> : null}{(kind === "rates" || kind === "exclusive" || kind === "exclusive-fdic" || kind === "promo") ? <PromoRateChecks terms={promoTermList} selected={selectedRates} onToggle={toggleRate} /> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
         }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{kind === "wealth" ? <p className="text-sm text-fg">Featured brokered CD rates. Each Apply now button opens this lead's application. The link expires in 48 hours. The application does not ask for a password.</p> : null}{kind === "cdars" || kind === "cdars-intro" ? <div className="grid gap-3 sm:grid-cols-4"><p className="text-sm text-fg sm:col-span-4">{kind === "cdars-intro" ? "This introduction explains CDARS and does not include an application link. Filled rates appear in the letter. Blank rates are left out." : "CDARS places $500,000 to $50 million across FDIC-insured banks. Set the rate for each term. The client chooses 1, 3, 6, or 12 months on the application. The link expires in 48 hours."}</p>{cdarsRates.map(rate => <label key={rate.months} className="block text-sm"><span className="font-semibold text-primary">{rate.months}-month APY</span><input className={`${controlClass} mt-1`} value={rate.apy} placeholder="4.25%" onChange={event => setCdarsRates(current => current.map(item => item.months === rate.months ? { ...item, apy: event.target.value } : item))} /></label>)}</div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className={"min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" + (kind === "cdars" || kind === "cdars-intro" || kind === "wealth" ? " hidden" : "")} onClick={() => {
               if (kind === "cdars" || kind === "cdars-intro" || kind === "wealth") return;
-              if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
+              if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive" || kind === "exclusive-fdic") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr" || kind === "htr-call") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
             }}>{editing ? "Hide editor" : "Edit text"}</button></div></div><div ref={mailHead}><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.name || brand.companyName}{advisor?.email ? ` <${advisor.email}>` : ""}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{activeName.trim() || "Lead"}{activeEmail.trim() ? ` <${activeEmail.trim()}>` : ""}</p>{cc.trim() ? <p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">CC</span>{cc.trim()}</p> : null}<p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{subject}</p></div></div>{editing && kind === "rates" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={letterCopy.subject} onChange={next => setCopy({
             ...letterCopy,
@@ -2373,7 +2421,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Closing" value={extensionCopy.closing} onChange={closing => setExtCopy({
             ...extensionCopy,
             closing
-          })} rows={2} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExtCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "exclusive" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={exclusiveText.subject} onChange={subject => setExclusiveCopy({ ...exclusiveText, subject })} /><LetterField label="Title" value={exclusiveText.title} onChange={title => setExclusiveCopy({ ...exclusiveText, title })} /><LetterField label="Yield line" value={exclusiveText.yieldLine} onChange={yieldLine => setExclusiveCopy({ ...exclusiveText, yieldLine })} /><LetterField label="Opening" value={exclusiveText.intro} onChange={intro => setExclusiveCopy({ ...exclusiveText, intro })} rows={4} /><LetterField label="Terms" value={exclusiveText.both} onChange={both => setExclusiveCopy({ ...exclusiveText, both })} rows={3} /><LetterField label="Rate enhancements" value={exclusiveText.enhance} onChange={enhance => setExclusiveCopy({ ...exclusiveText, enhance })} rows={3} /><LetterField label="Offer window" value={exclusiveText.windowNote} onChange={windowNote => setExclusiveCopy({ ...exclusiveText, windowNote })} rows={3} /><LetterField label="FDIC" value={exclusiveText.fdic} onChange={fdic => setExclusiveCopy({ ...exclusiveText, fdic })} rows={3} /><LetterField label="Ready heading" value={exclusiveText.readyTitle} onChange={readyTitle => setExclusiveCopy({ ...exclusiveText, readyTitle })} /><LetterField label="Ready" value={exclusiveText.ready} onChange={ready => setExclusiveCopy({ ...exclusiveText, ready })} rows={3} /><LetterField label="How to start" value={exclusiveText.start} onChange={start => setExclusiveCopy({ ...exclusiveText, start })} rows={4} /><LetterField label="Availability" value={exclusiveText.urge} onChange={urge => setExclusiveCopy({ ...exclusiveText, urge })} rows={3} /><LetterField label="Closing" value={exclusiveText.closing} onChange={closing => setExclusiveCopy({ ...exclusiveText, closing })} rows={2} /><LetterField label="Disclosures" value={exclusiveText.disclosures} onChange={disclosures => setExclusiveCopy({ ...exclusiveText, disclosures })} rows={8} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold. {{company}}, {{apy}}, {{terms}}, {{window}}, and {{minimum}} fill in from the account.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExclusiveCopy(null)}>Restore the standard text</button></div> : null}{editing && kind === "htr" ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={htrText.subject} onChange={next => setHtrCopy({
+          })} rows={2} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExtCopy(null)}>Restore the standard text</button></div> : null}{editing && (kind === "exclusive" || kind === "exclusive-fdic") ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={exclusiveText.subject} onChange={subject => setExclusiveCopy({ ...exclusiveText, subject })} /><LetterField label="Title" value={exclusiveText.title} onChange={title => setExclusiveCopy({ ...exclusiveText, title })} /><LetterField label="Yield line" value={exclusiveText.yieldLine} onChange={yieldLine => setExclusiveCopy({ ...exclusiveText, yieldLine })} /><LetterField label="Opening" value={exclusiveText.intro} onChange={intro => setExclusiveCopy({ ...exclusiveText, intro })} rows={4} /><LetterField label="Terms" value={exclusiveText.both} onChange={both => setExclusiveCopy({ ...exclusiveText, both })} rows={3} /><LetterField label="Rate enhancements" value={exclusiveText.enhance} onChange={enhance => setExclusiveCopy({ ...exclusiveText, enhance })} rows={3} /><LetterField label="Offer window" value={exclusiveText.windowNote} onChange={windowNote => setExclusiveCopy({ ...exclusiveText, windowNote })} rows={3} /><LetterField label="FDIC" value={exclusiveText.fdic} onChange={fdic => setExclusiveCopy({ ...exclusiveText, fdic })} rows={3} /><LetterField label="Ready heading" value={exclusiveText.readyTitle} onChange={readyTitle => setExclusiveCopy({ ...exclusiveText, readyTitle })} /><LetterField label="Ready" value={exclusiveText.ready} onChange={ready => setExclusiveCopy({ ...exclusiveText, ready })} rows={3} /><LetterField label="How to start" value={exclusiveText.start} onChange={start => setExclusiveCopy({ ...exclusiveText, start })} rows={4} /><LetterField label="Availability" value={exclusiveText.urge} onChange={urge => setExclusiveCopy({ ...exclusiveText, urge })} rows={3} /><LetterField label="Closing" value={exclusiveText.closing} onChange={closing => setExclusiveCopy({ ...exclusiveText, closing })} rows={2} /><LetterField label="Disclosures" value={exclusiveText.disclosures} onChange={disclosures => setExclusiveCopy({ ...exclusiveText, disclosures })} rows={8} /><p className="text-xs text-fg">Wrap words in **double asterisks** to make them bold. {{company}}, {{apy}}, {{terms}}, {{window}}, and {{minimum}} fill in from the account.</p><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setExclusiveCopy(null)}>Restore the standard text</button></div> : null}{editing && (kind === "htr" || kind === "htr-call") ? <div className="grid gap-3 border-b border-border bg-white px-5 py-4"><LetterField label="Subject" value={htrText.subject} onChange={next => setHtrCopy({
             ...htrText,
             subject: next
           })} /><LetterField label="Opening" value={htrText.opening} onChange={opening => setHtrCopy({
@@ -2415,7 +2463,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} featured CD emails` : "Send featured CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} featured CD emails` : "Send featured CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "exclusive-fdic" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} FDIC promos` : "Send exclusive promo FDIC" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "htr-call" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR with form emails` : "Send HTR with form" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2562,7 +2610,6 @@ function emptyLead() {
     liquidity: "",
     source: "",
     status: "",
-    notes: "",
     advisorId: "",
     process: "assisted",
     leadNumber: "",
@@ -2646,11 +2693,13 @@ async function downloadLeadTemplate() {
 const QUICK_MAIL = [
   ["rates", "Rates introduction", "lead_intro"],
   ["exclusive", "Exclusive promo", "lead_exclusive"],
+  ["exclusive-fdic", "Exclusive promo FDIC", "lead_exclusive_fdic"],
   ["promo", "Promo application", "lead_promo"],
   ["reminder", "Promo reminder", "lead_promo_reminder"],
   ["followup", "Promo follow-up", "lead_followup"],
   ["extension", "Rate extension", "lead_extension"],
   ["htr", "HTR", "lead_htr"],
+  ["htr-call", "HTR with form", "lead_htr_call"],
   ["cdars-intro", "CDARS intro", "lead_cdars_intro"],
   ["cdars", "CDARS application", "lead_cdars"],
   ["wealth", "Featured CDs", "lead_wealth"],
@@ -2668,6 +2717,7 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
   const [cdarsRates, setCdarsRates] = useState([]);
   const [emailStyles, setEmailStyles] = useState({ advisor: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
   const [origin, setOrigin] = useState("");
+  const [ratePick, setRatePick] = useState(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const advisor = advisors.find((item) => item.id === advisorId);
@@ -2675,6 +2725,14 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
   const blankOffer = { intro: "", protection: "", finePrint: "", startsOn: "", endsOn: "", tiers: [] };
   const promoSet = new Set(promoMonths(offer ?? blankOffer));
   const promoTerms = terms.filter((term) => promoSet.has(Number(term.months)));
+  const promoTermList = [...promoTerms].sort((a, b) => a.months - b.months);
+  const selectedRates = (ratePick ?? promoTermList.map((term) => term.months)).filter((month) => promoSet.has(month));
+  function toggleRate(month) {
+    setRatePick((current) => {
+      const base = current ?? promoTermList.map((term) => term.months);
+      return base.includes(month) ? base.filter((item) => item !== month) : [...base, month].sort((a, b) => a - b);
+    });
+  }
   const previewOrigin = /^https?:\/\//i.test(brand.publicDomain.trim()) ? brand.publicDomain.trim().replace(/\/$/, "") : origin;
   const previewLink = previewOrigin ? `${previewOrigin}/application?invite=preview` : "";
 
@@ -2692,10 +2750,12 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
     if (!lead) return null;
     const name = lead.name.trim() || "there";
     const common = { leadName: name, company: brand.companyName, advisor, logo: brand.emailLogo, portalUrl: brand.publicDomain, companyPhone: brand.companyPhone };
-    if (kind === "rates") return offer ? leadLetter({ ...common, terms, offer }) : null;
-    if (kind === "exclusive") return exclusiveLetter({ ...common, terms, offer: offer ?? blankOffer, minimum: "$100,000" });
+    if (kind === "rates") return offer ? leadLetter({ ...common, terms, offer, months: selectedRates }) : null;
+    if (kind === "exclusive") return exclusiveLetter({ ...common, terms, offer: offer ?? blankOffer, minimum: "$100,000", months: selectedRates });
+    if (kind === "exclusive-fdic") return exclusiveLetter({ ...common, terms, offer: offer ?? blankOffer, minimum: "$100,000", months: selectedRates, fdicStyle: "standard" });
     if (kind === "extension") return extensionLetter(common);
-    if (kind === "htr") return htrLetter({ ...common, link: previewOrigin ? `${previewOrigin}/call?token=preview` : "" });
+    if (kind === "htr") return htrLetter(common);
+    if (kind === "htr-call") return htrLetter({ ...common, schedule: true, link: `${previewOrigin || "https://preview.local"}/call?token=preview` });
     if (kind === "followup") return followupLetter({ ...common, link: previewLink || "#", promoCode: "" });
     if (kind === "reminder") return promoReminderLetter({ ...common, link: previewLink || "#", promoCode: "" });
     if (kind === "cdars") return cdarsLetter({ ...common, terms: cdarsRates, link: previewLink || "#" });
@@ -2703,8 +2763,8 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
     if (kind === "wealth") return wealthIntroLetter({ leadName: name, company: brand.companyName, advisor, portalUrl: brand.publicDomain, companyPhone: brand.companyPhone, link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : "" });
     const copy = defaultApplicationCopy({ leadName: name, company: brand.companyName, months: 0, advisorName: advisor?.name, variant: "promo" });
     if (lead.process === "portal") copy.instruction = "Please use the button below to access your application and create a password. Once submitted, you can continue in the investor portal.";
-    return applicationLetter({ ...common, months: 0, apy: "", terms: promoTerms, offer: offer ?? blankOffer, link: previewLink, variant: "promo", copy });
-  }, [lead, kind, advisor, brand, terms, offer, cdarsRates, previewLink, previewOrigin, promoTerms]);
+    return applicationLetter({ ...common, months: 0, apy: "", terms: promoTerms.filter((term) => selectedRates.includes(term.months)), offer: offer ?? blankOffer, link: previewLink, variant: "promo", copy });
+  }, [lead, kind, advisor, brand, terms, offer, cdarsRates, previewLink, previewOrigin, promoTerms, selectedRates]);
 
   const step = QUICK_MAIL.find((item) => item[0] === kind)?.[2] || "lead_intro";
   const preview = letter ? renderStep(step, "client", {
@@ -2726,6 +2786,10 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
       setError("Select an advisor.");
       return;
     }
+    if ((kind === "rates" || kind === "exclusive" || kind === "exclusive-fdic" || kind === "promo") && !selectedRates.length) {
+      setError("Select at least one promotional term.");
+      return;
+    }
     setPending(true);
     let sent = 0;
     const failed = [];
@@ -2737,14 +2801,14 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
         else if (kind === "cdars") await sendLeadCdars({ data });
         else if (kind === "reminder") await sendLeadPromoReminder({ data });
         else if (kind === "followup") await sendLeadFollowup({ data });
-        else if (kind === "htr") await sendLeadHtr({ data });
-        else if (kind === "exclusive") await sendLeadExclusive({ data });
+        else if (kind === "htr" || kind === "htr-call") await sendLeadHtr({ data: { ...data, schedule: kind === "htr-call" } });
+        else if (kind === "exclusive" || kind === "exclusive-fdic") await sendLeadExclusive({ data: { ...data, rateMonths: selectedRates, fdicStyle: kind === "exclusive-fdic" ? "standard" : "added" } });
         else if (kind === "extension") await sendLeadExtension({ data });
         else if (kind === "promo") {
           const copy = defaultApplicationCopy({ leadName: item.name, company: brand.companyName, months: 0, advisorName: advisor?.name, variant: "promo" });
           if (item.process === "portal") copy.instruction = "Please use the button below to access your application and create a password. Once submitted, you can continue in the investor portal.";
-          await sendLeadApplication({ data: { ...data, months: 0, kind: "promo", process: item.process === "portal" ? "portal" : "assisted", copy } });
-        } else await sendLeadIntro({ data });
+          await sendLeadApplication({ data: { ...data, months: 0, kind: "promo", process: item.process === "portal" ? "portal" : "assisted", copy, rateMonths: selectedRates } });
+        } else await sendLeadIntro({ data: kind === "rates" ? { ...data, rateMonths: selectedRates } : data });
         sent += 1;
       } catch (caught) {
         failed.push(`${item.name}: ${caught instanceof Error && caught.message ? caught.message : "could not be sent"}`);
@@ -2785,6 +2849,7 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
         <input className={`${controlClass} mt-1`} value={cc} placeholder="Optional. Separate addresses with commas" onChange={(event) => setCc(event.target.value)} />
       </label>
     </div>
+    {(kind === "rates" || kind === "exclusive" || kind === "promo") ? <div className="mt-3"><PromoRateChecks terms={promoTermList} selected={selectedRates} onToggle={toggleRate} /></div> : null}
     {leads.length > 1 ? <div className="mt-3 flex flex-wrap gap-2">{leads.map((item, index) => <button key={item.id} type="button" className={"min-h-9 rounded-full border px-3 text-sm " + (index === Math.min(previewAt, leads.length - 1) ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setPreviewAt(index)}>{item.name}</button>)}</div> : null}
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {preview ? <LetterPreview html={preview.html} title={letter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-14 text-[#8c8c8c]">From</span>{advisor?.mailbox ? `${advisor.name} <${advisor.mailbox}>` : advisor?.name || "Advisor"}</p><p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">To</span>{`${lead.name} <${lead.email}>`}</p>{cc.trim() ? <p className="mt-1"><span className="inline-block w-14 text-[#8c8c8c]">CC</span>{cc.trim()}</p> : null}<p className="mt-1 font-semibold text-primary"><span className="inline-block w-14 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /> : <p className="mt-3 text-sm text-fg">Loading the letter…</p>}
@@ -2811,6 +2876,7 @@ function PipelineLeadsPanel() {
   const [importing, setImporting] = useState(false);
   const [sheetLeads, setSheetLeads] = useState([]);
   const [sheetName, setSheetName] = useState("");
+  const [importReport, setImportReport] = useState(null);
   const [importAdvisorId, setImportAdvisorId] = useState("");
   const [importProcess, setImportProcess] = useState("assisted");
   const [exporting, setExporting] = useState(false);
@@ -2860,18 +2926,6 @@ function PipelineLeadsPanel() {
       setNotice("Lead saved.");
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "Could not save this lead.");
-    }
-  }
-
-  async function setProcess(lead, process) {
-    setError("");
-    setNotice("");
-    try {
-      await saveCrmLead({ data: { ...lead, process } });
-      if (draft.id === lead.id) setDraft({ ...draft, process });
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error && caught.message ? caught.message : "Could not update this lead.");
     }
   }
 
@@ -2947,6 +3001,15 @@ function PipelineLeadsPanel() {
     setMailLeads(ready);
   }
 
+  async function reviewSheet(leads, advisor = importAdvisorId, process = importProcess) {
+    if (!leads.length) {
+      setImportReport(null);
+      return;
+    }
+    const report = await previewCrmLeadImport({ data: { leads, advisorId: advisor, process } });
+    setImportReport(report);
+  }
+
   async function chooseSheet(file) {
     setError("");
     setNotice("");
@@ -2955,10 +3018,13 @@ function PipelineLeadsPanel() {
       const leads = await readLeadWorkbook(file);
       setSheetLeads(leads);
       setSheetName(file.name);
+      setImportReport(null);
       setImportOpen(true);
+      await reviewSheet(leads);
     } catch (caught) {
       setSheetLeads([]);
       setSheetName("");
+      setImportReport(null);
       setError(caught instanceof Error && caught.message ? caught.message : "The spreadsheet could not be read.");
     }
   }
@@ -2978,6 +3044,7 @@ function PipelineLeadsPanel() {
       setImportOpen(false);
       setSheetLeads([]);
       setSheetName("");
+      setImportReport(null);
     } catch (caught) {
       setError(caught instanceof Error && caught.message ? caught.message : "The leads could not be imported.");
     } finally {
@@ -3041,25 +3108,49 @@ function PipelineLeadsPanel() {
           <input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void chooseSheet(file); }} />
         </label>
       </div>
-      {sheetName ? <p className="mt-3 text-sm text-fg">{sheetName} · {sheetLeads.length} {sheetLeads.length === 1 ? "lead" : "leads"} ready</p> : null}
-      {sheetLeads.length ? <ul className="mt-2 max-h-40 overflow-auto text-sm text-fg">{sheetLeads.slice(0, 8).map((lead, index) => <li key={`${lead.email}-${index}`}>{lead.name || "No name"}{lead.email ? ` · ${lead.email}` : ""}</li>)}{sheetLeads.length > 8 ? <li>and {sheetLeads.length - 8} more</li> : null}</ul> : null}
+      {sheetName ? <p className="mt-3 text-sm text-fg">{sheetName} · {sheetLeads.length} {sheetLeads.length === 1 ? "row" : "rows"} in the file{importReport ? "" : " · checking who is already here…"}</p> : null}
+      {importReport ? <div className="mt-3">
+        <p className="text-sm text-fg">{importReport.created} new · {importReport.existing} already in · {importReport.updated} number {importReport.updated === 1 ? "update" : "updates"} · {importReport.duplicates} repeated in the file · {importReport.problems} {importReport.problems === 1 ? "problem" : "problems"}</p>
+        <div className="mt-2 max-h-96 overflow-auto rounded-md border border-border">
+          <table className="min-w-full text-left text-sm">
+            <thead className="sticky top-0 bg-[#f7f7f7] text-xs uppercase tracking-wide text-heading">
+              <tr>
+                <th className="px-3 py-2">Row</th>
+                <th className="px-3 py-2">Result</th>
+                <th className="px-3 py-2">In the file</th>
+                <th className="px-3 py-2">Already here</th>
+                <th className="px-3 py-2">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {importReport.rows.map((row) => <tr key={`${row.line}-${row.email}`} className="border-t border-border">
+                <td className="px-3 py-2 whitespace-nowrap">{row.line}</td>
+                <td className="px-3 py-2 whitespace-nowrap font-semibold text-primary">{row.action === "new" ? "New" : row.action === "update" ? "Update #" : row.action === "exists" ? "Already in" : row.action === "duplicate" ? "Repeated" : "Problem"}</td>
+                <td className="px-3 py-2">{row.name || "No name"}{row.email ? ` · ${row.email}` : ""}{row.leadNumber ? ` · #${row.leadNumber}` : ""}</td>
+                <td className="px-3 py-2">{row.existingName ? `${row.existingName}${row.existingNumber ? ` · #${row.existingNumber}` : ""}${row.existingStatus ? ` · ${row.existingStatus}` : ""}${row.existingAdvisor ? ` · ${row.existingAdvisor}` : ""}` : "—"}</td>
+                <td className="px-3 py-2 text-fg">{row.note}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>
+      </div> : null}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">
           <span className="font-semibold text-primary">Advisor when the file does not name one</span>
-          <select className={`${controlClass} mt-1`} value={importAdvisorId} onChange={(event) => setImportAdvisorId(event.target.value)}>
+          <select className={`${controlClass} mt-1`} value={importAdvisorId} onChange={(event) => { const value = event.target.value; setImportAdvisorId(value); if (sheetLeads.length) void reviewSheet(sheetLeads, value, importProcess).catch(() => setError("The import report could not be refreshed.")); }}>
             <option value="">Unassigned</option>
             {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}
           </select>
         </label>
         <label className="block text-sm">
           <span className="font-semibold text-primary">Who completes the certificate</span>
-          <select className={`${controlClass} mt-1`} value={importProcess} onChange={(event) => setImportProcess(event.target.value)}>
+          <select className={`${controlClass} mt-1`} value={importProcess} onChange={(event) => { const value = event.target.value; setImportProcess(value); if (sheetLeads.length) void reviewSheet(sheetLeads, importAdvisorId, value).catch(() => setError("The import report could not be refreshed.")); }}>
             <option value="assisted">Advisor processes the deal</option>
             <option value="portal">Client uses the portal</option>
           </select>
         </label>
       </div>
-      <button type="button" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={importing || !sheetLeads.length} onClick={() => void importSheet()}>{importing ? "Importing…" : sheetLeads.length ? `Add ${sheetLeads.length} leads` : "Add leads"}</button>
+      <button type="button" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={importing || !importReport || (!importReport.created && !importReport.updated)} onClick={() => void importSheet()}>{importing ? "Importing…" : !importReport ? "Checking the file…" : importReport.created || importReport.updated ? `Import ${importReport.created} new${importReport.updated ? `, update ${importReport.updated} #` : ""}` : "Nothing new to import"}</button>
     </div> : null}
     {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}
@@ -3121,7 +3212,6 @@ function PipelineLeadsPanel() {
             <LeadSortHeader label="Lead" column="name" sort={sort} direction={direction} onSort={chooseSort} />
             <LeadSortHeader label="Status" column="status" sort={sort} direction={direction} onSort={chooseSort} />
             <LeadSortHeader label="Advisor" column="advisor" sort={sort} direction={direction} onSort={chooseSort} />
-            <LeadSortHeader label="Deal" column="deal" sort={sort} direction={direction} onSort={chooseSort} />
           </tr>
         </thead>
         <tbody>
@@ -3135,7 +3225,6 @@ function PipelineLeadsPanel() {
                 <span className="block font-semibold text-primary">{lead.name}</span>
                 <span className="text-fg">{[lead.email, lead.phone].filter(Boolean).join(" · ") || "No contact"}</span>
                 {calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()) ? <span className="mt-1 block text-sm font-semibold text-primary">Call {callDay(calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).callOn)} · {calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).callTime}{calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).timeZone ? ` ${calls.find((call) => call.email.toLowerCase() === (lead.email || "").toLowerCase()).timeZone}` : ""}</span> : null}
-                {lead.notes ? <span className="mt-1 block max-w-xs truncate text-xs text-[#8c8c8c]">{lead.notes.split("\n")[0]}</span> : null}
                 <div className="mt-1 flex gap-1" onClick={(event) => event.stopPropagation()}>
                   <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => openMail([lead])}>Email</button>
                   <button type="button" className="min-h-11 px-3 text-sm font-semibold text-primary" onClick={() => { setDraft(lead); document.getElementById("lead-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>Edit</button>
@@ -3149,15 +3238,9 @@ function PipelineLeadsPanel() {
                   {advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.name}</option>)}
                 </select>
               </td>
-              <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                <select className={controlClass} aria-label={`Who completes the certificate for ${lead.name}`} value={lead.process === "portal" ? "portal" : "assisted"} onChange={(event) => void setProcess(lead, event.target.value)}>
-                  <option value="assisted">Advisor processes</option>
-                  <option value="portal">Client portal</option>
-                </select>
-              </td>
             </tr>
             {openId === lead.id ? <tr className="border-b border-border bg-bg">
-              <td className="px-4 py-4" colSpan={6}>
+              <td className="px-4 py-4" colSpan={5}>
                 <dl className="grid gap-3 sm:grid-cols-3">
                   {[["#", lead.leadNumber], ["Amount", lead.amount], ["Term", lead.term], ["Objective", [lead.objective, lead.liquidity].filter(Boolean).join(" · ")], ["Source", lead.source], ["Received", lead.receivedAt ? new Date(lead.receivedAt).toLocaleString() : ""]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold tracking-wide text-primary uppercase">{label}</dt><dd className="mt-1 text-sm text-fg">{value || "—"}</dd></div>)}
                 </dl>
@@ -3177,7 +3260,7 @@ function PipelineLeadsPanel() {
     </div> : null}
     <form id="lead-editor" className="mt-6 grid gap-3 rounded-md border border-border bg-surface p-4 sm:grid-cols-2" onSubmit={(event) => void save(event)}>
       <h2 className="text-lg font-semibold text-primary sm:col-span-2">{draft.id ? "Edit lead" : "Add lead"}</h2>
-      <AdminField label="#" value={draft.leadNumber} onChange={(leadNumber) => setDraft({ ...draft, leadNumber })} />
+      <p className="text-sm text-fg sm:col-span-2"><span className="font-medium text-primary">#</span> {draft.leadNumber || "—"} · set only by Perfex sync or Excel import</p>
       <AdminField label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
       <AdminField label="Email" value={draft.email} onChange={(email) => setDraft({ ...draft, email })} />
       <AdminField label="Phone" value={draft.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
@@ -3202,7 +3285,6 @@ function PipelineLeadsPanel() {
         <p className="mt-2 text-sm text-fg">{draft.process === "portal" ? "The application asks for a password and the client continues in the portal." : "Default. The application does not ask for a password. You complete the certificate."}</p>
       </div>
       {draft.status ? <p className="text-sm text-fg sm:col-span-2">Status: {draft.status}</p> : null}
-      {draft.notes ? <label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-medium">Notes</span><textarea className={`${controlClass} min-h-28`} readOnly value={draft.notes} /></label> : null}
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium">Lead receive time</span>
         <input type="datetime-local" className={controlClass} value={leadTimeInput(draft.receivedAt)} onChange={(event) => setDraft({ ...draft, receivedAt: event.target.value ? new Date(event.target.value).toISOString() : "" })} />
@@ -3865,7 +3947,6 @@ function IntroOpensPanel({
               liquidity: "",
               source: "",
               status: "",
-              notes: "",
               advisorId: row.advisorId,
               receivedAt: new Date().toISOString()
             })}>Application email</button> : null}

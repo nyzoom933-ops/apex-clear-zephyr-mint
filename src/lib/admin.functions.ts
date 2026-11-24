@@ -178,12 +178,12 @@ export const submitApplication = createServerFn({ method: "POST" })
     const id = crypto.randomUUID();
     const email = data.email.trim().toLowerCase();
     const inviteToken = data.inviteToken?.trim() || "";
-    let invited: { months: number; promoCode: string; kind: string; exclusiveApy: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string } | null = null;
+    let invited: { months: number; promoCode: string; kind: string; exclusiveApy: string; process: "assisted" | "portal"; advisorName: string; advisorMailbox: string; promoTerms: number[] } | null = null;
     if (inviteToken) {
       const { readLeadInvite } = await import("@/lib/lead-invites.server");
       const invite = await readLeadInvite(sql, inviteToken);
       if (invite.status !== "open") throw new Error("This application link has expired.");
-      invited = { months: invite.months, promoCode: invite.promoCode, kind: invite.kind, exclusiveApy: invite.exclusiveApy || "", process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox };
+      invited = { months: invite.months, promoCode: invite.promoCode, kind: invite.kind, exclusiveApy: invite.exclusiveApy || "", process: invite.process, advisorName: invite.advisorName, advisorMailbox: invite.advisorMailbox, promoTerms: invite.promoTerms || [] };
     }
     const assisted = invited?.process === "assisted";
     if (assisted && !(invited?.advisorMailbox || "").trim()) throw new Error("This link has no advisor mailbox. Ask your advisor for a new one.");
@@ -202,6 +202,7 @@ export const submitApplication = createServerFn({ method: "POST" })
     const months = Number(stored.preferredTerm);
     const offer = await loadPromo(sql);
     if (invited?.kind === "promo" && invited.months <= 0 && !promoMonths(offer).includes(months)) throw new Error("Choose a promotional term.");
+    if (invited?.kind === "promo" && invited.promoTerms.length && !invited.promoTerms.includes(months)) throw new Error("Choose one of the promotional terms from your email.");
     if (invited?.kind === "exclusive" && (!invited.months || !invited.exclusiveApy)) throw new Error("This exclusive application is missing its term or rate.");
     if (invited?.kind === "cdars") {
       if (!CDARS_TERMS.includes(months as 1 | 3 | 6 | 12)) throw new Error("Choose a 1-, 3-, 6-, or 12-month CDARS term.");
@@ -2198,6 +2199,11 @@ export type Advisor = { id: string; name: string; phone: string; email: string; 
 
 export type AdminFunding = FundingPosition & { email: string; advisorId: string; billing: InvoiceBilling; contactPhone: string; contactBy: string };
 
+function cleanRateMonths(value: unknown) {
+  if (!Array.isArray(value)) return [] as number[];
+  return [...new Set(value.map((item) => Number(item)).filter((month) => Number.isInteger(month) && month > 0 && month < 121))].sort((a, b) => a - b);
+}
+
 function leadCc(input: { cc?: string }) {
   const unique = [...new Set(String(input.cc || "").split(/[,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))];
   if (unique.length > 5) throw new Error("Use no more than 5 CC addresses.");
@@ -2208,7 +2214,7 @@ function leadCc(input: { cc?: string }) {
 }
 
 export const sendLeadIntro = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; copy?: LeadCopy | null }) => {
+  .validator((input: { advisorId: string; name: string; email: string; copy?: LeadCopy | null; rateMonths?: number[] }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
@@ -2227,7 +2233,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
           thanks: clip(input.copy.thanks, 400),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input), rateMonths: cleanRateMonths(input.rateMonths) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2244,6 +2250,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
     const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
     const types = await sql<{ minimum_investment: string; capital_protection: string }>`select minimum_investment, capital_protection from investment_types where id = 'cd'`;
     const offer = await loadPromo(sql);
+    if (data.rateMonths.length && !data.rateMonths.some((month) => offer.tiers.some((tier) => tier.months.includes(month)))) throw new Error("Select at least one promotional term.");
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const logo = settings.find((row) => row.key === "email_logo")?.value || null;
     const portalUrl = settings.find((row) => row.key === "public_domain")?.value || "";
@@ -2259,6 +2266,7 @@ export const sendLeadIntro = createServerFn({ method: "POST" })
       portalUrl,
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       copy: data.copy,
+      months: data.rateMonths,
     });
     await sendStep(sql, {
       step: "lead_intro",
@@ -2340,7 +2348,7 @@ export const sendLeadExtension = createServerFn({ method: "POST" })
   });
 
 export const sendLeadExclusive = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").ExclusiveCopy | null }) => {
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").ExclusiveCopy | null; rateMonths?: number[]; fdicStyle?: "added" | "standard" }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
@@ -2367,7 +2375,7 @@ export const sendLeadExclusive = createServerFn({ method: "POST" })
           disclosures: clip(input.copy.disclosures, 2500),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input), rateMonths: cleanRateMonths(input.rateMonths), fdicStyle: input.fdicStyle === "standard" ? "standard" as const : "added" as const };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2383,6 +2391,7 @@ export const sendLeadExclusive = createServerFn({ method: "POST" })
     if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const offer = await loadPromo(sql);
+    if (data.rateMonths.length && !data.rateMonths.some((month) => offer.tiers.some((tier) => tier.months.includes(month)))) throw new Error("Select at least one promotional term.");
     const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
     const types = await sql<{ minimum_investment: string }>`select minimum_investment from investment_types where id = 'cd'`;
     const rawMinimum = types[0]?.minimum_investment?.trim() || "";
@@ -2399,9 +2408,11 @@ export const sendLeadExclusive = createServerFn({ method: "POST" })
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       minimum,
       copy: data.copy,
+      months: data.rateMonths,
+      fdicStyle: data.fdicStyle,
     });
     await sendStep(sql, {
-      step: "lead_exclusive",
+      step: data.fdicStyle === "standard" ? "lead_exclusive_fdic" : "lead_exclusive",
       clientEmail: data.email,
       cc: data.cc,
       clientName: data.name,
@@ -2479,7 +2490,7 @@ async function assignExclusivePromoCodes(sql: Sql) {
 }
 
 export const sendLeadHtr = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").HtrCopy | null }) => {
+  .validator((input: { advisorId: string; name: string; email: string; copy?: import("@/lib/email-templates").HtrCopy | null; schedule?: boolean }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
@@ -2495,7 +2506,7 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
           closing: clip(input.copy.closing, 400),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input) };
+    return { advisorId: input.advisorId, name, email, copy, cc: leadCc(input), schedule: Boolean(input.schedule) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -2518,10 +2529,11 @@ export const sendLeadHtr = createServerFn({ method: "POST" })
       portalUrl: settings.find((row) => row.key === "public_domain")?.value || "",
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       copy: data.copy,
-      link: await callScheduleLink(sql, data.email, data.name, advisor.name),
+      schedule: data.schedule,
+      link: data.schedule ? await callScheduleLink(sql, data.email, data.name, advisor.name) : "",
     });
     await sendStep(sql, {
-      step: "lead_htr",
+      step: data.schedule ? "lead_htr_call" : "lead_htr",
       clientEmail: data.email,
       cc: data.cc,
       clientName: data.name,
@@ -3226,7 +3238,7 @@ export const sendLeadExclusiveApplication = createServerFn({ method: "POST" })
   });
 
 export const sendLeadApplication = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; months: number; kind?: "custom" | "promo"; process?: "assisted" | "portal"; copy?: ApplicationCopy | null }) => {
+  .validator((input: { advisorId: string; name: string; email: string; months: number; kind?: "custom" | "promo"; process?: "assisted" | "portal"; copy?: ApplicationCopy | null; rateMonths?: number[] }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
     const kind = input.kind === "promo" ? "promo" : "custom";
@@ -3249,7 +3261,7 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
           promoCode: clip(input.copy.promoCode, 40),
         }
       : null;
-    return { advisorId: input.advisorId, name, email, months, kind, process: input.process === "portal" ? "portal" as const : "assisted" as const, copy, cc: leadCc(input) };
+    return { advisorId: input.advisorId, name, email, months, kind, process: input.process === "portal" ? "portal" as const : "assisted" as const, copy, cc: leadCc(input), rateMonths: cleanRateMonths(input.rateMonths) };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
@@ -3268,8 +3280,9 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const offer = await loadPromo(sql);
     const promoMonths = new Set(offer.tiers.flatMap((tier) => tier.months));
     const promoTerms = allTerms.filter((term) => promoMonths.has(Number(term.months))).map((term) => ({ months: Number(term.months), apy: term.apy }));
+    const shownPromo = data.rateMonths.length ? promoTerms.filter((term) => data.rateMonths.includes(term.months)) : promoTerms;
     const chosen = allTerms.find((term) => Number(term.months) === data.months);
-    if (data.kind === "promo" && !promoTerms.length) throw new Error("Add a promotional term before sending this email.");
+    if (data.kind === "promo" && !shownPromo.length) throw new Error("Select at least one promotional term.");
     if (data.kind === "custom" && !chosen) throw new Error("Choose a certificate term.");
     if (data.kind === "custom" && promoMonths.has(data.months)) throw new Error("Choose a term that is not on promotion.");
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
@@ -3287,14 +3300,14 @@ export const sendLeadApplication = createServerFn({ method: "POST" })
     const process = stored[0]?.process === "portal" ? "portal" as const : stored[0] ? "assisted" as const : data.process;
     const kind = data.kind === "promo" ? "promo" : "custom";
     const promoCode = kind === "promo" ? data.copy?.promoCode || `CD${randomBytes(3).toString("hex").toUpperCase()}` : data.copy?.promoCode || "";
-    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode, kind, process, advisor });
+    const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: data.months, promoCode, kind, process, advisor, promoTerms: kind === "promo" ? shownPromo.map((term) => term.months) : [] });
     const link = inviteApplicationUrl(origin, token);
     const letter = applicationLetter({
       leadName: data.name,
       company: await readCompanyName(sql),
       months: kind === "promo" ? 0 : data.months,
       apy: chosen?.apy || "",
-      terms: kind === "promo" ? promoTerms : undefined,
+      terms: kind === "promo" ? shownPromo : undefined,
       offer,
       advisor,
       minimum: types[0]?.minimum_investment,
@@ -3338,8 +3351,8 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
     await sql`alter table lead_invites add column if not exists advisor_personal_phone text not null default ''`;
     await sql`alter table lead_invites add column if not exists exclusive_apy text not null default ''`;
     await sql`alter table lead_invites add column if not exists process text not null default 'portal'`;
-    const invites = await sql<{ name: string; months: number; promo_code: string; kind: string; process: string; exclusive_apy: string; advisor_name: string; advisor_email: string; advisor_mailbox: string; advisor_phone: string; advisor_role: string; advisor_personal_phone: string }>`
-      select name, months, promo_code, kind, coalesce(process, 'assisted') as process, coalesce(exclusive_apy, '') as exclusive_apy, advisor_name, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_phone, '') as advisor_phone, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone
+    const invites = await sql<{ name: string; months: number; promo_code: string; kind: string; process: string; exclusive_apy: string; promo_terms: string; advisor_name: string; advisor_email: string; advisor_mailbox: string; advisor_phone: string; advisor_role: string; advisor_personal_phone: string }>`
+      select name, months, promo_code, kind, coalesce(process, 'assisted') as process, coalesce(exclusive_apy, '') as exclusive_apy, coalesce(promo_terms, '') as promo_terms, advisor_name, advisor_email, coalesce(advisor_mailbox, '') as advisor_mailbox, coalesce(advisor_phone, '') as advisor_phone, coalesce(advisor_role, '') as advisor_role, coalesce(advisor_personal_phone, '') as advisor_personal_phone
       from lead_invites
       where lower(email) = ${data.email}
       order by created_at desc
@@ -3382,6 +3395,7 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
     const { createLeadInvite, inviteApplicationUrl } = await import("@/lib/lead-invites.server");
     const process = invite.process === "portal" ? "portal" as const : "assisted" as const;
     const kind = invite.kind === "custom" || invite.kind === "exclusive" || invite.kind === "cdars" || invite.kind === "promo" ? invite.kind : "promo";
+    const savedTerms = String(invite.promo_terms || "").split(",").map((item) => Number(item)).filter((month) => Number.isInteger(month) && month > 0);
     const token = await createLeadInvite(sql, {
       email: data.email,
       name: invite.name || data.email,
@@ -3390,6 +3404,7 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
       kind,
       process,
       exclusiveApy: invite.exclusive_apy || "",
+      promoTerms: savedTerms,
       advisor: mailAdvisor,
     });
     const link = inviteApplicationUrl(origin, token);
@@ -3418,7 +3433,7 @@ export const resendOpenApplication = createServerFn({ method: "POST" })
         company,
         months: kind === "promo" && months <= 0 ? 0 : months,
         apy: kind === "exclusive" ? invite.exclusive_apy : chosen?.apy || "",
-        terms: kind === "promo" ? allTerms.filter((term) => promoMonths.has(Number(term.months))).map((term) => ({ months: Number(term.months), apy: term.apy })) : undefined,
+        terms: kind === "promo" ? allTerms.filter((term) => promoMonths.has(Number(term.months)) && (!savedTerms.length || savedTerms.includes(Number(term.months)))).map((term) => ({ months: Number(term.months), apy: term.apy })) : undefined,
         offer,
         advisor: mailAdvisor,
         logo,
@@ -3481,7 +3496,7 @@ async function ensureCrmLeads(sql: Sql) {
       set status = 'HTR'
       where status is distinct from 'HTR'
         and email <> ''
-        and lower(email) in (select lower(recipient) from notifications where step = 'lead_htr' and delivery = 'sent')
+        and lower(email) in (select lower(recipient) from notifications where step in ('lead_htr', 'lead_htr_call') and delivery = 'sent')
     `;
   }
 }
@@ -3497,7 +3512,6 @@ export type CrmLead = {
   liquidity: string;
   source: string;
   status: string;
-  notes: string;
   advisorId: string;
   process: "assisted" | "portal";
   leadNumber: string;
@@ -3597,30 +3611,26 @@ export const listCrmLeads = createServerFn({ method: "GET" })
       liquidity: string;
       source: string;
       status: string;
-      notes: string;
-      notes_at: string | Date | null;
       perfex_id: string;
       advisor_id: string;
       process: string;
       lead_number: string;
       received_at: string | Date;
     }>(
-      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at
+      `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at
        from crm_leads ${clause}
        order by ${leadOrderSql(data.sort, data.direction)}
        limit $${params.length + 1} offset $${params.length + 2}`,
       [...params, LEAD_PAGE_SIZE, offset],
     );
-    await attachPerfexNotes(sql, rows);
     const sources = await sql.query<{ source: string }>(`select distinct source from crm_leads where source <> '' order by source limit 200`);
     const statuses = await sql.query<{ status: string }>(`select distinct status from crm_leads where status <> '' order by status limit 100`);
     const focused = data.focusId
-      ? await sql.query<{ id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status: string; notes: string; notes_at: string | Date | null; perfex_id: string; advisor_id: string; process: string; received_at: string | Date }>(
-          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(notes, '') as notes, notes_at, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at from crm_leads where id = $1 limit 1`,
+      ? await sql.query<{ id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status: string; perfex_id: string; advisor_id: string; process: string; lead_number: string; received_at: string | Date }>(
+          `select id, name, email, phone, amount, term, objective, liquidity, source, coalesce(status, '') as status, coalesce(lead_number, '') as lead_number, coalesce(perfex_id, '') as perfex_id, coalesce(advisor_id, '') as advisor_id, case when process = 'portal' then 'portal' else 'assisted' end as process, received_at from crm_leads where id = $1 limit 1`,
           [data.focusId],
         )
       : [];
-    if (focused[0]) await attachPerfexNotes(sql, focused);
     return {
       rows: rows.map(mapCrmLead),
       total,
@@ -3632,7 +3642,7 @@ export const listCrmLeads = createServerFn({ method: "GET" })
     };
   });
 
-function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; notes?: string; advisor_id?: string; process?: string; lead_number?: string; received_at: string | Date }): CrmLead {
+function mapCrmLead(row: { id: string; name: string; email: string; phone: string; amount: string; term: string; objective: string; liquidity: string; source: string; status?: string; advisor_id?: string; process?: string; lead_number?: string; received_at: string | Date }): CrmLead {
   return {
     id: row.id,
     name: row.name,
@@ -3644,7 +3654,6 @@ function mapCrmLead(row: { id: string; name: string; email: string; phone: strin
     liquidity: row.liquidity,
     source: row.source,
     status: row.status || "",
-    notes: row.notes || "",
     advisorId: row.advisor_id || "",
     process: row.process === "portal" ? "portal" : "assisted",
     leadNumber: row.lead_number || "",
@@ -3672,7 +3681,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
   .validator((input: { from?: string; to?: string; step?: string; advisorId?: string }) => {
     const from = (input.from || "").slice(0, 10);
     const to = (input.to || "").slice(0, 10);
-    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "lead_wealth"];
+    const allowed = ["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_htr_call", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_exclusive_fdic", "lead_cdars", "lead_cdars_intro", "lead_wealth"];
     const step = allowed.includes(input.step || "") ? input.step || "" : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error("Choose a date range.");
     return { from, to, step, advisorId: (input.advisorId || "").slice(0, 80) };
@@ -3717,7 +3726,7 @@ export const listLeadMailReport = createServerFn({ method: "GET" })
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join lead_invites i on i.token = n.related_id
       where n.audience = 'client'
-        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth')
+        and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_invite_reminder', 'lead_extension', 'lead_htr', 'lead_htr_call', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_exclusive_fdic', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth')
         and n.created_at >= ${start}
         and n.created_at < ${endDate.toISOString()}
       order by n.created_at desc
@@ -3847,7 +3856,7 @@ export const removeIntroOpen = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     await ensureOpenTrash(sql);
-    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth') and lower(recipient) = ${data.email}`;
+    await sql`delete from notifications where audience = 'client' and step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_exclusive_fdic', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth') and lower(recipient) = ${data.email}`;
     await sql`delete from open_trash where lower(email) = ${data.email}`;
     return { ok: true as const };
   });
@@ -3908,7 +3917,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
           from notifications intro
           where intro.audience = 'client'
             and lower(intro.recipient) = lower(n.recipient)
-            and intro.step in ('lead_intro', 'lead_exclusive', 'lead_wealth')
+            and intro.step in ('lead_intro', 'lead_exclusive', 'lead_exclusive_fdic', 'lead_wealth')
             and intro.delivery = 'sent'
           order by intro.created_at desc
           limit 1
@@ -4018,7 +4027,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
       from notifications n
       left join crm_leads l on lower(l.email) = lower(n.recipient)
       left join advisors a on a.id = n.advisor_id
-      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth') and n.delivery = 'sent'
+      where n.audience = 'client' and n.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_exclusive_fdic', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth') and n.delivery = 'sent'
         and (${trash}::boolean = (
           exists (select 1 from open_trash t where lower(t.email) = lower(n.recipient))
           and not exists (
@@ -4026,7 +4035,7 @@ async function readIntroOpens(sql: Sql, trash: boolean, range?: { from?: string 
             where newer.audience = 'client'
               and lower(newer.recipient) = lower(n.recipient)
               and newer.delivery = 'sent'
-              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth')
+              and newer.step in ('lead_intro', 'lead_application', 'lead_promo', 'lead_followup', 'lead_promo_reminder', 'lead_exclusive', 'lead_exclusive_fdic', 'lead_cdars', 'lead_cdars_intro', 'lead_wealth')
               and newer.created_at > (select t.created_at from open_trash t where lower(t.email) = lower(n.recipient))
           )
         ))
@@ -4084,7 +4093,6 @@ export const saveCrmLead = createServerFn({ method: "POST" })
       source: clip(input.source),
       advisorId: input.advisorId == null ? null : (input.advisorId || "").trim().slice(0, 80),
       process: input.process === "portal" ? "portal" as const : "assisted" as const,
-      leadNumber: (input.leadNumber || "").trim().slice(0, 40),
       receivedAt: received.toISOString(),
     };
   })
@@ -4095,7 +4103,7 @@ export const saveCrmLead = createServerFn({ method: "POST" })
     await ensureCrmLeads(sql);
     const id = data.id || crypto.randomUUID();
     await sql`
-      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, process, lead_number, received_at)
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, advisor_id, process, received_at)
       values (
         ${id},
         ${data.name},
@@ -4108,7 +4116,6 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         ${data.source},
         ${data.advisorId || ""},
         ${data.process},
-        ${data.leadNumber},
         ${data.receivedAt}
       )
       on conflict (id) do update set
@@ -4122,37 +4129,104 @@ export const saveCrmLead = createServerFn({ method: "POST" })
         source = excluded.source,
         advisor_id = coalesce(${data.advisorId}, crm_leads.advisor_id),
         process = excluded.process,
-        lead_number = excluded.lead_number,
         received_at = excluded.received_at
     `;
     return { id };
   });
 
-export const importCrmLeads = createServerFn({ method: "POST" })
-  .validator((input: { leads?: Array<Record<string, string>>; advisorId?: string; process?: string }) => {
-    const rows = Array.isArray(input.leads) ? input.leads.slice(0, 500) : [];
-    if (!rows.length) throw new Error("The file has no leads.");
-    const clip = (value: unknown, max = 240) => String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+function cleanLeadImport(input: { leads?: Array<Record<string, string>>; advisorId?: string; process?: string }) {
+  const rows = Array.isArray(input.leads) ? input.leads.slice(0, 500) : [];
+  if (!rows.length) throw new Error("The file has no leads.");
+  const clip = (value: unknown, max = 240) => String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+  return {
+    leads: rows.map((row) => ({
+      name: clip(row?.name, 120),
+      email: clip(row?.email, 180).toLowerCase(),
+      phone: clip(row?.phone),
+      amount: clip(row?.amount),
+      term: clip(row?.term),
+      objective: clip(row?.objective),
+      liquidity: clip(row?.liquidity),
+      source: clip(row?.source),
+      status: clip(row?.status, 80),
+      leadNumber: clip(row?.leadNumber, 40),
+      advisor: clip(row?.advisor, 120),
+      process: clip(row?.process, 40).toLowerCase(),
+      receivedAt: clip(row?.receivedAt, 40),
+    })),
+    advisorId: (input.advisorId || "").trim().slice(0, 80),
+    process: input.process === "portal" ? "portal" as const : "assisted" as const,
+  };
+}
+
+export const previewCrmLeadImport = createServerFn({ method: "POST" })
+  .validator(cleanLeadImport)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await ensureCrmLeads(sql);
+    const advisors = await sql<{ id: string; name: string; email: string }>`select id, name, coalesce(email, '') as email from advisors`;
+    const existing = await sql<{ email: string; name: string; lead_number: string; status: string; phone: string; advisor_name: string }>`
+      select lower(l.email) as email, l.name, coalesce(l.lead_number, '') as lead_number, coalesce(l.status, '') as status, coalesce(l.phone, '') as phone, coalesce(a.name, '') as advisor_name
+      from crm_leads l
+      left join advisors a on a.id = l.advisor_id
+      where l.email <> ''
+    `;
+    const byEmail = new Map(existing.map((row) => [row.email, row]));
+    const seen = new Set<string>();
+    const rows = data.leads.flatMap((lead, index) => {
+      if (!lead.name && !lead.email && !lead.leadNumber) return [];
+      const line = index + 2;
+      const current = lead.email ? byEmail.get(lead.email) : undefined;
+      let action: "new" | "exists" | "update" | "duplicate" | "problem" = "new";
+      let note = "Will be added.";
+      if (lead.email && seen.has(lead.email)) {
+        action = "duplicate";
+        note = "This email is already earlier in the file.";
+      } else if (current) {
+        const nextNumber = lead.leadNumber && lead.leadNumber !== current.lead_number;
+        action = nextNumber ? "update" : "exists";
+        note = nextNumber ? `Already in. # will change from ${current.lead_number || "blank"} to ${lead.leadNumber}.` : "Already in. This row will be left as it is.";
+      } else if (lead.name.length < 2) {
+        action = "problem";
+        note = "Enter a name.";
+      } else if (lead.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email)) {
+        action = "problem";
+        note = "This is not a valid email.";
+      } else if (lead.advisor) {
+        const needle = lead.advisor.toLowerCase();
+        const found = advisors.find((item) => item.name.trim().toLowerCase() === needle || item.email.trim().toLowerCase() === needle);
+        if (!found) note = `Will be added. Advisor “${lead.advisor}” was not found, so the selected advisor will be used.`;
+      }
+      if (lead.email) seen.add(lead.email);
+      return [{
+        line,
+        action,
+        name: lead.name,
+        email: lead.email,
+        leadNumber: lead.leadNumber,
+        existingName: current?.name || "",
+        existingNumber: current?.lead_number || "",
+        existingStatus: current?.status || "",
+        existingAdvisor: current?.advisor_name || "",
+        existingPhone: current?.phone || "",
+        note,
+      }];
+    });
+    const count = (action: string) => rows.filter((row) => row.action === action).length;
     return {
-      leads: rows.map((row) => ({
-        name: clip(row?.name, 120),
-        email: clip(row?.email, 180).toLowerCase(),
-        phone: clip(row?.phone),
-        amount: clip(row?.amount),
-        term: clip(row?.term),
-        objective: clip(row?.objective),
-        liquidity: clip(row?.liquidity),
-        source: clip(row?.source),
-        status: clip(row?.status, 80),
-        leadNumber: clip(row?.leadNumber, 40),
-        advisor: clip(row?.advisor, 120),
-        process: clip(row?.process, 40).toLowerCase(),
-        receivedAt: clip(row?.receivedAt, 40),
-      })),
-      advisorId: (input.advisorId || "").trim().slice(0, 80),
-      process: input.process === "portal" ? "portal" as const : "assisted" as const,
+      rows,
+      created: count("new"),
+      existing: count("exists") + count("update"),
+      updated: count("update"),
+      duplicates: count("duplicate"),
+      problems: count("problem"),
     };
-  })
+  });
+
+export const importCrmLeads = createServerFn({ method: "POST" })
+  .validator(cleanLeadImport)
   .handler(async ({ data }) => {
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
@@ -4359,7 +4433,7 @@ export const importPerfexLeads = createServerFn({ method: "POST" }).handler(asyn
     if (lead.email && byEmail.has(lead.email)) {
       const found = byEmail.get(lead.email)!;
       if (!found.perfexId) {
-        await sql`update crm_leads set perfex_id = ${lead.perfexId} where id = ${found.id} and perfex_id = ''`;
+        await sql`update crm_leads set perfex_id = ${lead.perfexId}, lead_number = case when lead_number = '' then ${lead.perfexId} else lead_number end where id = ${found.id} and perfex_id = ''`;
         found.perfexId = lead.perfexId;
         byPerfex.set(lead.perfexId, found.id);
         updates.push({ perfexId: lead.perfexId, status: lead.status, amount: lead.amount, term: lead.term, objective: lead.objective });
@@ -4369,8 +4443,8 @@ export const importPerfexLeads = createServerFn({ method: "POST" }).handler(asyn
     }
     const id = crypto.randomUUID();
     await sql`
-      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, status, received_at, perfex_id)
-      values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, '', ${lead.source}, ${lead.status}, ${lead.receivedAt}, ${lead.perfexId})
+      insert into crm_leads (id, name, email, phone, amount, term, objective, liquidity, source, status, received_at, perfex_id, lead_number)
+      values (${id}, ${lead.name}, ${lead.email}, ${lead.phone}, ${lead.amount}, ${lead.term}, ${lead.objective}, '', ${lead.source}, ${lead.status}, ${lead.receivedAt}, ${lead.perfexId}, ${lead.perfexId})
     `;
     byPerfex.set(lead.perfexId, id);
     if (lead.email) byEmail.set(lead.email, { id, perfexId: lead.perfexId });
@@ -4604,73 +4678,15 @@ async function updatePerfexDetails(sql: Sql, rows: { perfexId: string; status: s
     await sql.query(
       `update crm_leads as lead
        set status = case when lead.status = 'HTR' then lead.status else incoming.status end,
+           lead_number = case when lead.lead_number = '' then incoming.perfex_id else lead.lead_number end,
            amount = case when incoming.amount <> '' then incoming.amount else lead.amount end,
            term = case when incoming.term <> '' then incoming.term else lead.term end,
-           objective = case when incoming.objective <> '' then incoming.objective else lead.objective end,
-           notes_at = case
-             when lead.status <> 'HTR' and lead.status is distinct from incoming.status
-               or (incoming.amount <> '' and lead.amount is distinct from incoming.amount)
-               or (incoming.term <> '' and lead.term is distinct from incoming.term)
-               or (incoming.objective <> '' and lead.objective is distinct from incoming.objective)
-             then null
-             else lead.notes_at
-           end
+           objective = case when incoming.objective <> '' then incoming.objective else lead.objective end
        from (values ${tuples.join(", ")}) as incoming(perfex_id, status, amount, term, objective)
        where lead.perfex_id = incoming.perfex_id`,
       values,
     );
   }
-}
-
-async function attachPerfexNotes(sql: Sql, rows: { perfex_id: string; notes: string; notes_at: string | Date | null }[]) {
-  const pending = rows.filter((row) => row.perfex_id && !row.notes_at);
-  if (!pending.length) return;
-  const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('perfex_url', 'perfex_token')`;
-  const base = (settings.find((row) => row.key === "perfex_url")?.value || "").trim().replace(/\/+$/, "");
-  const token = (settings.find((row) => row.key === "perfex_token")?.value || "").trim();
-  if (!/^https?:\/\//i.test(base) || !token) return;
-  const headers = { Authtoken: token, Authorization: `Bearer ${token}`, accept: "application/json" };
-  let blocked = false;
-  const queue = [...pending];
-  async function pull() {
-    while (!blocked && queue.length) {
-      const row = queue.shift();
-      if (!row) return;
-      try {
-        const response = await fetch(`${base}/api/notes/lead/${encodeURIComponent(row.perfex_id)}`, { headers, signal: AbortSignal.timeout(8000) });
-        if (response.status === 401 || response.status === 403) {
-          blocked = true;
-          return;
-        }
-        const payload = response.ok ? await response.json().catch(() => null) : null;
-        const notes = response.status === 404 ? "" : perfexNotesText(payload);
-        row.notes = notes;
-        row.notes_at = new Date().toISOString();
-        await sql.query(`update crm_leads set notes = $1, notes_at = now() where perfex_id = $2`, [notes, row.perfex_id]);
-      } catch {
-        // Leave this lead unmarked so the next page load can try again.
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(6, pending.length) }, () => pull()));
-}
-
-function perfexNotesText(payload: unknown) {
-  const list = Array.isArray(payload)
-    ? payload
-    : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
-      ? ((payload as { data: unknown[] }).data)
-      : [];
-  const lines = list
-    .map((item) => {
-      if (!item || typeof item !== "object") return "";
-      const note = item as Record<string, unknown>;
-      const text = perfexText(note, "description", "note", "content").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      const added = perfexText(note, "dateadded", "date_added").slice(0, 16);
-      return text ? (added ? `${added} — ${text}` : text) : "";
-    })
-    .filter(Boolean);
-  return lines.join("\n").slice(0, 4000);
 }
 
 export const deleteCrmLead = createServerFn({ method: "POST" })
@@ -5986,7 +6002,14 @@ async function advisorInvoiceLetter(sql: Sql, id: string) {
     token = randomBytes(24).toString("hex");
     await sql`update fundings set invoice_token = ${token} where id = ${row.id}`;
   }
-  const clientName = row.applicant_name || row.email;
+  await ensureCrmLeads(sql);
+  const leads = await sql<{ name: string }>`
+    select name from crm_leads
+    where lower(email) = lower(${row.email}) and name <> ''
+    order by received_at desc
+    limit 1
+  `;
+  const clientName = leads[0]?.name?.trim() || row.applicant_name || row.email;
   const billing = resolveInvoiceBilling(row.invoice_billing, clientName, row.reference_number);
   if (!billing.crn) throw new Error("Add the CRN on the invoice before sending this letter.");
   const rates = row.final_apy ? { promo: row.promo_apy || "—", final: row.final_apy } : ratesFor(row.term_label, row.amount, (await loadPromo(sql)).tiers);
@@ -6428,6 +6451,21 @@ export const listNotifications = createServerFn({ method: "GET" }).handler(async
   const sql = await getSql();
   await ensureMailColumn(sql);
   await ensureCrmLeads(sql);
+  const inbox = await sql<{ ok: string | null }>`select to_regclass('inbox_messages')::text as ok`;
+  if (inbox[0]?.ok) {
+    const missing = await sql<{ id: string; received_at: string; to_email: string; subject: string; body_text: string; advisor_id: string }>`
+      select m.id, m.received_at::text as received_at, m.to_email, m.subject, m.body_text, coalesce(m.advisor_id, '') as advisor_id
+      from inbox_messages m
+      where m.direction = 'out' and m.to_email <> ''
+        and not exists (select 1 from notifications n where n.step = 'inbox_note' and n.related_id = m.id)
+    `;
+    for (const row of missing) {
+      await sql`
+        insert into notifications (id, created_at, audience, recipient, step, subject, body, html, related_id, delivery, resend_id, mail_status, mail_provider, advisor_id)
+        values (${crypto.randomUUID()}, ${row.received_at}::timestamptz, 'client', ${row.to_email}, 'inbox_note', ${row.subject || "(no subject)"}, ${row.body_text || ""}, '', ${row.id}, 'sent', '', 'sent', 'smtp2go', ${row.advisor_id})
+      `;
+    }
+  }
   const leads = await sql<{ id: string; email: string }>`select id, lower(email) as email from crm_leads where email <> '' order by received_at desc`;
   const applications = await sql<{ id: string; email: string; status: string }>`
     select distinct on (lower(email)) id, lower(email) as email, status

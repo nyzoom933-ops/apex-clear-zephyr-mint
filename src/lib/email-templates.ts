@@ -22,20 +22,23 @@ export type MailStep =
   | "lead_invite_reminder"
   | "lead_extension"
   | "lead_htr"
+  | "lead_htr_call"
   | "lead_followup"
   | "lead_promo_reminder"
   | "lead_exclusive"
+  | "lead_exclusive_fdic"
   | "lead_cdars"
   | "lead_cdars_intro"
   | "lead_wealth"
   | "lead_account_ready"
-  | "invoice_advisor";
+  | "invoice_advisor"
+  | "inbox_note";
 
 export function mailStepLabel(step: string) {
   return STEPS[step as MailStep]?.label || step;
 }
 
-export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_cdars", "lead_cdars_intro", "lead_wealth", "lead_account_ready", "invoice_advisor"]);
+export const ADVISOR_MAIL_STEPS = new Set<MailStep>(["lead_intro", "lead_application", "lead_promo", "lead_invite_reminder", "lead_extension", "lead_htr", "lead_htr_call", "lead_followup", "lead_promo_reminder", "lead_exclusive", "lead_exclusive_fdic", "lead_cdars", "lead_cdars_intro", "lead_wealth", "lead_account_ready", "invoice_advisor", "inbox_note"]);
 
 export type MailAudience = "client" | "admin";
 
@@ -210,6 +213,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminSubject: "HTR follow-up sent to {{name}}",
     adminLead: "A follow-up was sent to {{name}} ({{email}}) after they could not be reached.",
   },
+  lead_htr_call: {
+    label: "HTR with form",
+    clientSubject: "Following Up on Your CD Information Request",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "HTR with form sent to {{name}}",
+    adminLead: "A follow-up with a call form was sent to {{name}} ({{email}}).",
+  },
   lead_followup: {
     label: "Promo application follow-up",
     clientSubject: "Follow-Up: 10 & 22 Month Promotional CD Opportunities",
@@ -233,6 +244,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     clientNext: "",
     adminSubject: "Exclusive promo sent to {{name}}",
     adminLead: "The exclusive new-client CD promotion was sent to {{name}} ({{email}}).",
+  },
+  lead_exclusive_fdic: {
+    label: "Exclusive promo FDIC",
+    clientSubject: "Exclusive new-client CD promotion",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Exclusive promo FDIC sent to {{name}}",
+    adminLead: "The exclusive new-client CD promotion with standard FDIC insurance was sent to {{name}} ({{email}}).",
   },
   lead_cdars: {
     label: "CDARS application",
@@ -273,6 +292,14 @@ const STEPS: Record<MailStep, StepCopy> = {
     clientNext: "",
     adminSubject: "Advisor invoice letter sent to {{name}}",
     adminLead: "An advisor sent {{name}} ({{email}}) a personal invoice letter.",
+  },
+  inbox_note: {
+    label: "Inbox email",
+    clientSubject: "A note from your advisor",
+    clientLead: "",
+    clientNext: "",
+    adminSubject: "Inbox email sent to {{name}}",
+    adminLead: "An advisor sent {{name}} ({{email}}) a message from the inbox.",
   },
 };
 
@@ -451,7 +478,7 @@ export function renderStep(
   const subject = fill(input.copy?.subject ?? (audience === "client" ? item.clientSubject : item.adminSubject), name, input.email, company);
   const nextRaw = input.copy?.next ?? item.clientNext;
   const next = audience === "client" && nextRaw ? fill(nextRaw, name, input.email, company) : "";
-  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "lead_wealth" || step === "lead_account_ready" || step === "invoice_advisor";
+  const fullLetterStep = step === "lead_intro" || step === "lead_application" || step === "lead_promo" || step === "lead_invite_reminder" || step === "lead_extension" || step === "lead_htr" || step === "lead_htr_call" || step === "lead_followup" || step === "lead_promo_reminder" || step === "lead_exclusive" || step === "lead_exclusive_fdic" || step === "lead_cdars" || step === "lead_cdars_intro" || step === "lead_wealth" || step === "lead_account_ready" || step === "invoice_advisor";
   const isFullLetter = fullLetterStep && audience === "client";
   const portalUrl = audience === "client" ? (fullLetterStep ? applicationUrl(input.portalUrl) : cleanPortalUrl(input.portalUrl)) : "";
   const lines = isFullLetter || input.extraHtml ? [] : input.detail.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -466,7 +493,7 @@ export function renderStep(
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
-      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_account_ready" ? sampleAccountReadyLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_wealth" ? sampleWealthIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
+      (step === "invoice_advisor" ? sampleInvoiceAdvisorLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_account_ready" ? sampleAccountReadyLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_wealth" ? sampleWealthIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars_intro" ? sampleCdarsIntroLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_cdars" ? sampleCdarsLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_exclusive_fdic" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone, "standard") : step === "lead_exclusive" ? sampleExclusiveLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo_reminder" ? samplePromoReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_followup" ? sampleFollowupLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr_call" ? sampleHtrCallLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_htr" ? sampleHtrLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_intro" ? sampleLeadLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_extension" ? sampleExtensionLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_promo" ? samplePromoLetter(input.portalUrl, input.advisor, input.companyPhone) : step === "lead_invite_reminder" ? sampleReminderLetter(input.portalUrl, input.advisor, input.companyPhone) : sampleApplicationLetter(input.portalUrl, input.advisor, input.companyPhone));
   const chosenStyle = isFullLetter ? input.advisorStyle : input.transactionalStyle;
   return {
     step,
@@ -499,7 +526,7 @@ export function renderPair(step: MailStep, input: { name: string; email: string;
 
 export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "", styles?: { advisor?: string | null; transactional?: string | null; colors?: Partial<EmailColors> | null }) {
   const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone, advisorStyle: styles?.advisor, transactionalStyle: styles?.transactional, emailColors: styles?.colors };
-  return (Object.keys(STEPS) as MailStep[]).flatMap((step) => [
+  return (Object.keys(STEPS) as MailStep[]).filter((step) => step !== "inbox_note").flatMap((step) => [
     renderStep(step, "client", sample),
     renderStep(step, "admin", sample),
   ]);
@@ -559,8 +586,8 @@ function advisorSignature(advisor: MailAdvisor | undefined, company: string, ext
   const phone = direct ? signatureTextLink(direct, `tel:${direct.replace(/[^\d+]/g, "")}`) : "";
   const mail = email ? signatureTextLink(email, `mailto:${email}`) : "";
   const rows = [phone ? row("Direct", phone) : "", mail ? row("Email", mail) : ""].join("");
-  const html = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
-    <tr><td style="padding:0 0 10px 0; font-size:15px; line-height:22px;">${escapeHtml(closing)},</td></tr>
+  const html = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0; border-collapse:collapse; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+    <tr><td style="padding:0 0 8px 0; font-size:15px; line-height:22px;">${escapeHtml(closing)},</td></tr>
     <tr><td style="border-left:3px solid #006fcf; padding:0 0 0 12px;">
       <p style="margin:0; font-size:16px; line-height:22px; font-weight:700; color:#12315c;">${escapeHtml(name)}</p>
       ${role ? `<p style="margin:2px 0 0 0; font-size:13px; line-height:18px; color:#3d3d3d;">${escapeHtml(role)}</p>` : ""}
@@ -603,7 +630,7 @@ export function advisorNoteLetter(input: { company: string; companyPhone?: strin
           <div style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${message}</div>
         </td></tr>
         ${quote}
-        <tr><td style="padding:18px 36px 8px 36px; font-size:15px; line-height:23px;">${sign.html}</td></tr>
+        <tr><td style="padding:4px 36px 8px 36px;">${sign.html}</td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 32px; color:#ffffff; font-family:Arial, Helvetica, sans-serif;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
           <p style="margin:0; font-size:14px; line-height:21px; color:#ffffff;">For assistance or to speak with a representative, ${help}</p>
@@ -654,6 +681,10 @@ function messageHtml(source: string) {
       index += 1;
     }
     blocks.push(`<p style="margin:0 0 14px 0; font-size:15px; line-height:23px;">${inlineMarkdown(paragraph.join("\n")).replace(/\n/g, "<br>")}</p>`);
+  }
+  if (blocks.length) {
+    const last = blocks.length - 1;
+    blocks[last] = blocks[last].replace('style="margin:0 0 14px 0;', 'style="margin:0;').replace('style="margin:0 0 14px 18px;', 'style="margin:0 0 0 18px;');
   }
   return blocks.join("") || `<p style="margin:0; font-size:15px; line-height:23px;">&nbsp;</p>`;
 }
@@ -725,6 +756,13 @@ export function defaultLeadCopy(input: { leadName: string; company: string; advi
   };
 }
 
+function chosenMonths(published: number[], picked?: number[]) {
+  const allowed = (picked || []).filter((month) => Number.isInteger(month) && month > 0);
+  if (!allowed.length) return published;
+  const set = new Set(allowed);
+  return published.filter((month) => set.has(month));
+}
+
 export function leadLetter(input: {
   leadName: string;
   company: string;
@@ -737,6 +775,7 @@ export function leadLetter(input: {
   portalUrl?: string;
   companyPhone?: string;
   copy?: LeadCopy | null;
+  months?: number[];
 }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.leadName.trim() || "Client";
@@ -745,6 +784,7 @@ export function leadLetter(input: {
   const minimum = input.minimum?.trim() || "$100,000";
   const fine = input.offer.finePrint.trim();
   const window = input.offer.startsOn && input.offer.endsOn ? `Offer available from ${formatOfferDate(input.offer.startsOn)} – ${formatOfferDate(input.offer.endsOn)}` : "";
+  const partnerNote = `*Certain Promotional Certificate of Deposit (CD) offerings are facilitated through affiliated partner banks. The issuing and holding institution may differ from ${company}.`;
   const fallback = defaultLeadCopy({
     leadName: name,
     company,
@@ -760,7 +800,7 @@ export function leadLetter(input: {
   const protectionText = copy?.protection.trim() || fallback.protection;
   const ready = copy?.ready.trim() || fallback.ready;
   const thanks = copy?.thanks.trim() || fallback.thanks;
-  const months = [...new Set(input.offer.tiers.flatMap((tier) => tier.months))].sort((a, b) => a - b);
+  const months = chosenMonths([...new Set(input.offer.tiers.flatMap((tier) => tier.months))].sort((a, b) => a - b), input.months);
   const cards = months.map((month) => {
     const term = input.terms.find((item) => item.months === month);
     const apy = (term?.apy || "—").replace(/\s*APY/i, "");
@@ -772,12 +812,14 @@ export function leadLetter(input: {
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
   const termList = cards.map((card) => `${card.month}-month`).join(cards.length === 2 ? " and " : ", ") || "the terms below";
   const cardRows: string[] = [];
-  for (let index = 0; index < Math.max(cards.length, 0); index += 2) {
-    const pair = cards.slice(index, index + 2);
+  const perRow = cards.length === 3 ? 3 : 2;
+  for (let index = 0; index < cards.length; index += perRow) {
+    const pair = cards.slice(index, index + perRow);
     const cells = pair
       .map((card, cell) => {
-        const side = pair.length === 1 ? "" : cell === 0 ? "padding-right:6px;" : "padding-left:6px;";
-        return `<td class="stack" width="${pair.length === 1 ? "100%" : "50%"}" valign="top" style="${side}">
+        const width = pair.length === 3 ? "33%" : pair.length === 1 ? "100%" : "50%";
+        const gap = pair.length === 1 ? "" : cell === 0 ? "padding-right:6px;" : cell === pair.length - 1 ? "padding-left:6px;" : "padding-left:6px;padding-right:6px;";
+        return `<td class="stack" width="${width}" valign="top" style="${gap}">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
             <tr><td style="background:#006fcf; padding:10px; text-align:center; color:#ffffff; font-weight:700; letter-spacing:0.6px;">${card.month}-MONTH CD</td></tr>
             <tr><td style="padding:18px; text-align:center; background:#f7fbfe;"><span style="font-size:36px; font-weight:700; color:#12315c;">${escapeHtml(card.apy)}</span><br><span style="color:#006fcf; font-weight:700; letter-spacing:1px;">APY</span></td></tr>
@@ -792,7 +834,7 @@ export function leadLetter(input: {
       const last = index === input.offer.tiers.length - 1;
       const background = last ? "#e7f3fb" : index % 2 ? "#f7fbfe" : "#ffffff";
       const rule = last ? "" : "border-bottom:1px solid #e7eef4;";
-      const total = promotionalTotal(input.terms, tier.months, tier.bonusPercent);
+      const total = promotionalTotal(input.terms.filter((term) => months.includes(term.months)), tier.months.filter((month) => months.includes(month)), tier.bonusPercent);
       return `<tr>
         <td style="padding:11px 14px; background:${background}; ${rule} ${last ? "font-weight:700; color:#12315c;" : ""}">${escapeHtml(amountRange(tier))}</td>
         <td align="right" style="padding:11px 14px; background:${background}; ${rule} font-weight:700; color:${last ? "#006fcf" : "#12315c"};">${escapeHtml(formatBonus(tier.bonusPercent))}</td>
@@ -809,7 +851,8 @@ export function leadLetter(input: {
     cards.map((card) => `${card.month}-month CD ${card.apy} APY`).join("\n"),
     `Early withdrawal penalties may apply. Minimum balance to open: ${minimum} new money required.`,
     offerText,
-    input.offer.tiers.map((tier) => `${amountRange(tier)} · additional bonus ${formatBonus(tier.bonusPercent)} · total promotional APY ${promotionalTotal(input.terms, tier.months, tier.bonusPercent, "text")}`).join("\n"),
+    input.offer.tiers.map((tier) => `${amountRange(tier)} · additional bonus ${formatBonus(tier.bonusPercent)} · total promotional APY ${promotionalTotal(input.terms.filter((term) => months.includes(term.months)), tier.months.filter((month) => months.includes(month)), tier.bonusPercent, "text")}`).join("\n"),
+    partnerNote,
     window,
     protectionText,
     ready,
@@ -882,6 +925,7 @@ export function leadLetter(input: {
                 </tr>
                 ${bonuses || `<tr><td colspan="3" style="padding:11px 14px;">No bonus tiers are set.</td></tr>`}
               </table>
+              <p style="margin:10px 0 0 0; text-align:center; font-size:13px; font-style:italic; color:#333;">${escapeHtml(partnerNote)}</p>
               ${window ? `<p style="margin:10px 0 0 0; text-align:center; font-size:13px; font-style:italic; color:#333;">${escapeHtml(window)}</p>` : ""}
             </td>
           </tr>
@@ -896,7 +940,7 @@ export function leadLetter(input: {
               <p style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#12315c;">Ready to get started?</p>
               <p style="margin:0; font-size:14px; line-height:21px;">${escapeHtml(ready)}</p>
               <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${escapeHtml(thanks)}</p>
-              <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+              <div style="margin:12px 0 0 0;">${sign.html}</div>
             </td>
           </tr>
           <tr>
@@ -1066,8 +1110,9 @@ export function applicationLetter(input: {
     : "";
   const rateCards = rateTerms.map((term) => {
     const shown = (term.apy || "—").replace(/\s*APY/i, "");
-    return `<td class="stack" valign="top" style="padding:0 6px 10px 0;">
-      <table role="presentation" width="220" cellspacing="0" cellpadding="0" border="0"><tr><td style="border:1px solid #d6e4ef;">
+    const width = rateTerms.length >= 3 ? `${Math.floor(100 / rateTerms.length)}%` : rateTerms.length === 2 ? "50%" : "220";
+    return `<td class="stack" width="${width}" valign="top" style="padding:0 6px 10px 0;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="border:1px solid #d6e4ef;">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
           <tr><td style="background:#006fcf; padding:8px; text-align:center; color:#fff; font-size:12px; font-weight:700;">${term.months}-MONTH CD</td></tr>
           <tr><td style="padding:14px; text-align:center; background:#f7fbfe; font-size:28px; font-weight:700; color:#12315c;">${escapeHtml(shown)} <span style="font-size:12px; color:#006fcf;">APY</span></td></tr>
@@ -1075,11 +1120,11 @@ export function applicationLetter(input: {
       </td></tr></table>
     </td>`;
   }).join("");
-  const termNames = rateTerms.map((term) => `${term.months}-month`).join(" and ");
+  const termNames = rateTerms.map((term) => `${term.months}-month`).join(rateTerms.length === 2 ? " and " : ", ");
   const rateBlock = rateTerms.length
     ? `<p style="margin:18px 0 4px 0; font-size:16px; font-weight:700; color:#12315c;">${promo ? "Choose Your Promotional CD Term" : rateTerms.length > 1 ? "Choose either promotional term on the application" : "New-client rate on this application"}</p>
-       ${promo ? `<p style="margin:0 0 8px 0; font-size:14px; line-height:21px; color:#333;">Select either promotional term when completing your application.</p>` : ""}
-       <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>${rateCards}</tr></table>`
+       ${promo ? `<p style="margin:0 0 8px 0; font-size:14px; line-height:21px; color:#333;">${rateTerms.length === 2 ? "Select either promotional term when completing your application." : "Select a promotional term when completing your application."}</p>` : ""}
+       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>${rateCards}</tr></table>`
     : "";
   const fine = promo
     ? "Promotional rates are subject to eligibility requirements, qualifying deposit amounts, and applicable account terms. Rates are subject to change. Please refer to the applicable account disclosures for complete details."
@@ -1100,7 +1145,7 @@ export function applicationLetter(input: {
           ${promo ? `${rateBlock}${bonusBlock}` : ""}
           <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${inlineMarkdown(followUp)}</p>
           <p style="margin:14px 0 0 0; font-size:14px; line-height:21px;">${inlineMarkdown(thanks)}</p>
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>`;
+          <div style="margin:12px 0 0 0;">${sign.html}</div>`;
   const text = [`Dear ${name},`, hope, ready, instruction, promoCode ? `Promotional code: ${promoCode}` : "", rateTerms.map((term) => `${term.months}-month CD ${(term.apy || "—").replace(/\s*APY/i, "")} APY`).join("\n"), followUp, thanks, link ? `${buttonLabel}: ${link}` : "", sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1278,8 +1323,7 @@ export function inviteReminderLetter(input: { leadName: string; company: string;
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">The link for your ${escapeHtml(term)}${input.months > 0 && apy && apy !== "—" ? ` at ${escapeHtml(apy)} APY` : ""} is still open, and it expires in about 2 hours. Use the button below to finish the application. ${input.months > 0 ? "" : "Choose the promotional term on the form."}</p>
         ${code}
         <p style="margin:18px 0 0 0;">${button}</p>
-        <p style="margin:18px 0 0 0; font-size:14px; line-height:21px;">If the link expires, ask ${escapeHtml(input.advisor?.name || input.advisorName || "your advisor")} for a new one.</p>
-        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        <div style="margin:12px 0 0 0;">${sign.html}</div>
       </td></tr>
       <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
         <p style="margin:0 0 4px 0; font-size:14px; font-weight:700;">We’re here to help.</p>
@@ -1417,7 +1461,7 @@ export function extensionLetter(input: { leadName: string; company: string; advi
           ${paragraph(contact)}
           ${paragraph(urgency)}
           ${paragraph(closing)}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+          <div style="margin:12px 0 0 0;">${sign.html}</div>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -1452,7 +1496,7 @@ export function defaultHtrCopy(): HtrCopy {
   };
 }
 
-export function htrLetter(input: { leadName: string; company: string; advisor?: MailAdvisor; logo?: string | null; portalUrl?: string; companyPhone?: string; copy?: HtrCopy | null; link?: string }) {
+export function htrLetter(input: { leadName: string; company: string; advisor?: MailAdvisor; logo?: string | null; portalUrl?: string; companyPhone?: string; copy?: HtrCopy | null; link?: string; schedule?: boolean }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.leadName.trim() || "Client";
   const fallback = defaultHtrCopy();
@@ -1462,8 +1506,8 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
   const offer = copy?.offer.trim() || fallback.offer;
   const decline = copy?.decline.trim() || fallback.decline;
   const closing = copy?.closing.trim() || fallback.closing;
-  const link = input.link?.trim() || "";
-  const ask = "Use the button below to ask for a call. Include the best day, time, time zone, and phone number, and an advisor will call you.";
+  const link = input.schedule ? input.link?.trim() || "" : "";
+  const ask = input.schedule ? "Use the button below to ask for a call. Include the best day, time, time zone, and phone number, and an advisor will call you." : "";
   const logo = emailLogoSrc(input.logo, input.portalUrl);
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
@@ -1496,11 +1540,11 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
           <p style="margin:16px 0 0 0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
           ${paragraph(opening)}
           ${paragraph(offer)}
-          ${paragraph(ask)}
+          ${input.schedule ? paragraph(ask) : ""}
           ${button}
           ${paragraph(decline)}
           ${paragraph(closing)}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+          <div style="margin:12px 0 0 0;">${sign.html}</div>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -1517,7 +1561,12 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
 }
 
 function sampleHtrLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
-  return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone, link: portalUrl ? `${portalUrl.replace(/\/$/, "")}/call?token=preview` : "" }).html;
+  return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone }).html;
+}
+
+function sampleHtrCallLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+  const base = (portalUrl || "").trim().replace(/\/$/, "");
+  return htrLetter({ leadName: "Jonah Hale", company: DEFAULT_COMPANY_NAME, portalUrl, advisor, companyPhone, schedule: true, link: `${base || "https://preview.local"}/call?token=preview` }).html;
 }
 
 export type FollowupCopy = {
@@ -1666,7 +1715,7 @@ export function followupLetter(input: {
           ${paragraph(change)}
           ${paragraph(other)}
           ${paragraph(thanks)}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+          <div style="margin:12px 0 0 0;">${sign.html}</div>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -1806,7 +1855,7 @@ export function accountReadyLetter(input: {
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">This email is to confirm that your application for the Promotional CD account, along with the photo identification have been received and approved.</p>
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Your Promotional CD account for the amount of <strong>${escapeHtml(amount)}</strong>, with a <strong>${escapeHtml(apy)} APY</strong> - <strong>${escapeHtml(term)}</strong>, has now been successfully established and is ready for funding.</p>
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Once you confirm that you are ready to proceed, we will provide the funding instructions and one of our Senior Advisors will assist you through the process.</p>
-        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        <div style="margin:12px 0 0 0;">${sign.html}</div>
       </td></tr>
       <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
         <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -1977,10 +2026,10 @@ export function defaultExclusiveCopy(): ExclusiveCopy {
     both: "Both {{terms}} are available, with total promotional APYs of up to **{{apy}}**, depending on the qualifying deposit amount.",
     enhance: "Qualifying deposits are eligible for an additional rate enhancement based on the total deposit amount. The applicable enhancement is reflected in the total promotional APY shown below.",
     windowNote: "Promotional offer valid {{window}}. Promotional APYs are available to qualifying new clients meeting applicable new-money and deposit requirements. Rates and availability are subject to change.",
-    fdic: "Eligible deposits are insured by the Federal Deposit Insurance Corporation (FDIC) up to **$250,000 per depositor, per insured bank, per ownership category**, including principal and accrued interest, subject to applicable FDIC rules.",
+    fdic: "All deposits placed at {{company}} are covered by the standard FDIC insurance amount of $250,000 per customer. If your deposits exceed this amount, we can help you unlock more insurance protection for greater peace of mind. We'll split your deposit into increments less than $250,000 and place these funds across our network of well-capitalized banks. By doing this, your entire deposit remains fully protected, while you continue to work with just one bank.",
     readyTitle: "Ready to secure your promotional rate?",
     ready: "If you are considering taking advantage of this offer, I would be happy to help you identify the most suitable term and promotional rate based on your intended deposit amount.",
-    start: "**To get started, simply reply to this email with the approximate amount you are considering depositing and your preferred CD term (10 or 22 months).** I can then walk you through the next steps and assist with getting your application underway.",
+    start: "**To get started, simply reply to this email with the approximate amount you are considering depositing and your preferred CD term ({{termChoice}}).** I can then walk you through the next steps and assist with getting your application underway.",
     urge: "Promotional rates are subject to availability and may change during the offer period, so I encourage you to reach out while the current promotion is available.",
     closing: "I look forward to helping you take advantage of this opportunity.",
     codeNote: "Enter this code on the application to apply the promotional rate.",
@@ -2002,35 +2051,56 @@ export function exclusiveLetter(input: {
   link?: string;
   promoCode?: string;
   copy?: ExclusiveCopy | null;
+  months?: number[];
+  fdicStyle?: "added" | "standard";
 }) {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.leadName.trim() || "Client";
   const fallback = defaultExclusiveCopy();
   const copy = input.copy;
   const pick = (value: string | undefined, standard: string) => value?.trim() || standard;
-  const months = [...new Set(input.offer.tiers.flatMap((tier) => tier.months))].sort((a, b) => a - b);
+  const months = chosenMonths([...new Set(input.offer.tiers.flatMap((tier) => tier.months))].sort((a, b) => a - b), input.months);
   const cards = months.map((month) => {
     const term = input.terms.find((item) => item.months === month);
     return { month, apy: (term?.apy || "—").replace(/\s*APY/i, "").replace(/%/g, "").trim() || "—" };
   });
-  const maxApy = maxPromotionalApy(input.terms, input.offer) || "5.75%";
+  const shownTerms = input.terms.filter((term) => months.includes(term.months));
+  const maxApy = maxPromotionalApy(shownTerms, {
+    ...input.offer,
+    tiers: input.offer.tiers.map((tier) => ({ ...tier, months: tier.months.filter((month) => months.includes(month)) })),
+  }) || "—";
   const termLabel = cards.length ? cards.map((card) => `${card.month}-month`).join(" and ") + (cards.length === 1 ? " term" : " terms") : "10-month and 22-month terms";
+  const termChoice = cards.length === 1
+    ? `${cards[0].month} months`
+    : cards.length === 2
+      ? `${cards[0].month} or ${cards[1].month} months`
+      : cards.length
+        ? `${cards.slice(0, -1).map((card) => card.month).join(", ")}, or ${cards[cards.length - 1].month} months`
+        : "10 or 22 months";
   const window = exclusiveWindow(input.offer);
-  const minimum = input.minimum?.trim() || "$100,000";
+  const bandFloors = input.offer.tiers
+    .map((tier) => tier.minAmount)
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+  const minimum = bandFloors.length ? `$${Math.min(...bandFloors).toLocaleString("en-US")}` : input.minimum?.trim() || "$100,000";
+  const rateNote = `Minimum opening deposit: ${minimum} in qualifying new funds.`;
   const fillCopy = (value: string) => value
     .replaceAll("{{company}}", company)
     .replaceAll("{{apy}}", maxApy)
     .replaceAll("{{terms}}", termLabel)
+    .replaceAll("{{termChoice}}", termChoice)
+    .replaceAll("(10 or 22 months)", `(${termChoice})`)
     .replaceAll("{{window}}", window)
     .replaceAll("{{minimum}}", minimum);
   const subject = fillCopy(pick(copy?.subject, fallback.subject));
   const title = fillCopy(pick(copy?.title, fallback.title));
-  const yieldLine = fillCopy(pick(copy?.yieldLine, fallback.yieldLine));
+  const yieldLine = fillCopy(pick(copy?.yieldLine, fallback.yieldLine)).replaceAll("5.75%", maxApy === "—" ? "5.75%" : maxApy);
   const intro = fillCopy(pick(copy?.intro, fallback.intro));
-  const both = fillCopy(pick(copy?.both, fallback.both));
+  const both = fillCopy(pick(copy?.both, fallback.both)).replaceAll("5.75%", maxApy === "—" ? "5.75%" : maxApy);
   const enhance = fillCopy(pick(copy?.enhance, fallback.enhance));
   const windowNote = fillCopy(pick(copy?.windowNote, fallback.windowNote));
-  const fdic = fillCopy(pick(copy?.fdic, fallback.fdic));
+  const standardFdic = "Eligible deposits are insured by the Federal Deposit Insurance Corporation (FDIC) up to **$250,000 per depositor, per insured bank, per ownership category**, including principal and accrued interest, subject to applicable FDIC rules.";
+  const fdic = fillCopy(input.fdicStyle === "standard" ? standardFdic : pick(copy?.fdic, fallback.fdic));
+  const fdicTitle = input.fdicStyle === "standard" ? "FDIC insured" : "Added FDIC Insurance on Your Deposits";
   const readyTitle = fillCopy(pick(copy?.readyTitle, fallback.readyTitle));
   const ready = fillCopy(pick(copy?.ready, fallback.ready));
   const start = fillCopy(pick(copy?.start, fallback.start));
@@ -2060,7 +2130,7 @@ export function exclusiveLetter(input: {
     const background = last ? "#e7f3fb" : index % 2 ? "#f7fbfe" : "#ffffff";
     const weight = last ? "font-weight:700;" : "";
     const rule = last ? "" : "border-bottom:1px solid #e7eef4;";
-    const total = promotionalTotal(input.terms, tier.months, tier.bonusPercent);
+    const total = promotionalTotal(input.terms.filter((term) => months.includes(term.months)), tier.months.filter((month) => months.includes(month)), tier.bonusPercent);
     return `<tr>
       <td style="padding:11px 14px; background:${background}; ${rule} ${weight}">${escapeHtml(amountRange(tier))}</td>
       <td align="center" style="padding:11px 14px; background:${background}; ${rule} ${weight} color:#12315c;">${escapeHtml(formatBonus(tier.bonusPercent))}</td>
@@ -2079,12 +2149,12 @@ export function exclusiveLetter(input: {
     stripMarks(both),
     "Available CD terms",
     ...cards.map((card) => `${card.month}-month CD ${card.apy === "—" ? "—" : `${card.apy}%`} APY · Fixed Rate`),
-    `Minimum opening deposit: ${minimum} in qualifying new funds.`,
+    rateNote,
     "New-client promotional rate enhancements",
     stripMarks(enhance),
-    ...input.offer.tiers.map((tier) => `${amountRange(tier)} · ${formatBonus(tier.bonusPercent)} · ${promotionalTotal(input.terms, tier.months, tier.bonusPercent, "text")}`),
+    ...input.offer.tiers.map((tier) => `${amountRange(tier)} · ${formatBonus(tier.bonusPercent)} · ${promotionalTotal(input.terms.filter((term) => months.includes(term.months)), tier.months.filter((month) => months.includes(month)), tier.bonusPercent, "text")}`),
     stripMarks(windowNote),
-    "FDIC insured",
+    fdicTitle,
     stripMarks(fdic),
     stripMarks(readyTitle),
     stripMarks(ready),
@@ -2121,7 +2191,7 @@ export function exclusiveLetter(input: {
           ${paragraph(both)}
           ${heading("Available CD terms")}
           <div style="margin-top:12px;">${termTable}</div>
-          <p style="margin:12px 0 0 0; font-size:14px; line-height:21px;"><strong>Minimum opening deposit: ${escapeHtml(minimum)} in qualifying new funds.</strong></p>
+          <p style="margin:12px 0 0 0; font-size:14px; line-height:21px;"><strong>${escapeHtml(rateNote)}</strong></p>
           ${heading("New-client promotional rate enhancements")}
           ${paragraph(enhance)}
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:12px; border:1px solid #d6e4ef;">
@@ -2133,14 +2203,14 @@ export function exclusiveLetter(input: {
             ${tierRows || `<tr><td colspan="3" style="padding:11px 14px;">No promotional tiers are set.</td></tr>`}
           </table>
           <p style="margin:12px 0 0 0; font-size:13px; line-height:20px; font-style:italic; color:#333333;">${richText(windowNote)}</p>
-          ${heading("FDIC insured")}
+          ${input.fdicStyle === "standard" ? heading(fdicTitle) : `<p style="margin:22px 0 0 0; font-size:16px; line-height:22px; font-weight:700; color:#12315c;">${escapeHtml(fdicTitle)}</p>`}
           ${paragraph(fdic)}
           ${heading(readyTitle)}
           ${paragraph(ready)}
           ${paragraph(start)}
           ${paragraph(urge)}
           ${paragraph(closing)}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+          <div style="margin:12px 0 0 0;">${sign.html}</div>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -2184,7 +2254,7 @@ function exclusiveWindow(offer: PromoOffer) {
   return `${startMonth} ${start.getUTCDate()}, ${start.getUTCFullYear()} – ${endMonth} ${end.getUTCDate()}, ${end.getUTCFullYear()}`;
 }
 
-function sampleExclusiveLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string) {
+function sampleExclusiveLetter(portalUrl?: string, advisor?: MailAdvisor, companyPhone?: string, fdicStyle?: "added" | "standard") {
   return exclusiveLetter({
     leadName: "Jonah Hale",
     company: DEFAULT_COMPANY_NAME,
@@ -2192,6 +2262,7 @@ function sampleExclusiveLetter(portalUrl?: string, advisor?: MailAdvisor, compan
     advisor,
     companyPhone,
     minimum: "$100,000",
+    fdicStyle,
     terms: [
       { months: 10, apy: "4.50%" },
       { months: 22, apy: "4.50%" },
@@ -2276,7 +2347,7 @@ export function cdarsLetter(input: {
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">1. One competitive rate on the entire amount.<br>2. A fixed rate of return.<br>3. Interest compounded daily and paid at maturity.</p>
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Early withdrawal is subject to a penalty. To move forward, complete the application below and choose the term.</p>
         ${button}
-        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        <div style="margin:12px 0 0 0;">${sign.html}</div>
       </td></tr>
       <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
         <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -2350,7 +2421,7 @@ export function cdarsIntroLetter(input: {
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">1. One competitive rate on the entire amount.<br>2. A fixed rate for the term you choose.<br>3. Interest compounded daily and paid at maturity.</p>
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">The minimum placement is <strong>$500,000</strong>. The maximum is <strong>$50 million</strong>. An early withdrawal is subject to a penalty.</p>
         <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">If this fits what you are looking for, reply to this email or call us. We will walk through the terms and send the application when you are ready.</p>
-        <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+        <div style="margin:12px 0 0 0;">${sign.html}</div>
       </td></tr>
       <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
         <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>
@@ -2417,13 +2488,18 @@ export function invoiceAdvisorLetter(input: {
   const company = input.company.trim() || DEFAULT_COMPANY_NAME;
   const name = input.clientName.trim() || "Client";
   const rate = input.finalApy.includes("%") ? input.finalApy : `${input.finalApy}%`;
-  const term = input.term ? ` (${input.term})` : "";
+  const termMonths = input.term.match(/(\d+)/)?.[1];
+  const termLabel = termMonths ? `${termMonths} months` : input.term.trim();
   const subject = "Your CD is ready for funding";
-  const ready = `Thank you for choosing ${company} for your financial needs. We are pleased to inform you that your Certificate of Deposit (CD) for ${input.amount} @ ${rate} APY${term} is now ready for funding.`;
+  const ready = `Thank you for choosing ${company} for your financial needs. We are pleased to inform you that your Certificate of Deposit (CD) is now ready for funding.`;
+  const details = [
+    ["Deposit amount:", input.amount],
+    ["Interest Rate:", rate],
+    ...(termLabel ? [["Term:", termLabel] as [string, string]] : []),
+  ];
   const crnNote = input.promo
     ? `When making the payment, kindly pay extra attention to the Customer Reference Number (CRN). This number is the same as your Customer ID: ${input.crn} and is unique to you. It is crucial that this CRN is used correctly, as it will be used to confirm that the funds are allocated to the correct CD with your chosen promotional offer for new customers.`
     : `When making the payment, kindly pay extra attention to the Customer Reference Number (CRN). This number is the same as your Customer ID: ${input.crn} and is unique to you. It is crucial that this CRN is used correctly, as it will be used to confirm that the funds are allocated to the correct CD.`;
-  const penalty = "Please note that after the first 90 days from the date your funds are credited to your CD account, there are no early-withdrawal penalties.";
   const proof = "Once you have made payment into your CD, kindly reply to this email with proof of payment so I can follow it up with the accounts department.";
   const questions = "If you have any questions or need further assistance, please do not hesitate to reach out.";
   const logo = emailLogoSrc(input.logo, input.portalUrl);
@@ -2434,7 +2510,7 @@ export function invoiceAdvisorLetter(input: {
   const help = companyHelp(input.companyPhone);
   const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(value)}</p>`;
   const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:18px 0 0 0;"><tr><td style="background:#006fcf;"><a href="${escapeHtml(input.link || "#")}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">CD Payment Invoice</a></td></tr></table>`;
-  const text = [`Dear ${name},`, ready, "Please find the link to your invoice below:", input.link ? `CD Payment Invoice\n${input.link}` : "", crnNote, penalty, proof, questions, sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
+  const text = [`Dear ${name},`, ready, "CD Details:", ...details.map(([label, value]) => `• ${label} ${value}`), "Please find the link to your invoice below:", input.link ? `CD Payment Invoice\n${input.link}` : "", crnNote, proof, questions, sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2453,13 +2529,16 @@ export function invoiceAdvisorLetter(input: {
         <tr><td style="padding:28px 36px 8px 36px;">
           <p style="margin:0; font-size:15px; line-height:23px;">Dear ${escapeHtml(name)},</p>
           ${paragraph(ready)}
+          <p style="margin:18px 0 8px 0; font-size:15px; line-height:23px; font-weight:700;">CD Details:</p>
+          <ul style="margin:0; padding:0 0 0 20px; font-size:15px; line-height:23px;">
+            ${details.map(([label, value]) => `<li style="margin:0 0 6px 0;"><strong>${escapeHtml(label)}</strong> ${escapeHtml(value)}</li>`).join("")}
+          </ul>
           <p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">Please find the link to your invoice below:</p>
           ${button}
           ${paragraph(crnNote)}
-          ${paragraph(penalty)}
           ${paragraph(proof)}
           ${paragraph(questions)}
-          <p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">${sign.html}</p>
+          <div style="margin:12px 0 0 0;">${sign.html}</div>
         </td></tr>
         <tr><td class="help-bar" style="background:#12315c; padding:18px 36px; color:#ffffff;">
           <p style="margin:0 0 4px 0; font-size:14px; font-weight:700; color:#ffffff;">We’re here to help.</p>

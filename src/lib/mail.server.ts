@@ -634,10 +634,22 @@ export async function syncResendStatuses(sql: Sql, options?: { quiet?: boolean }
       const recipient = event.recipient || event.to || "";
       if (recipient && event.subject) bestByLetter.set(activityKey(recipient, event.subject), keep(bestByLetter.get(activityKey(recipient, event.subject)) || "", next));
     }
+    const usedLetters = new Set<string>();
     for (const row of smtpRows) {
-      const status = bestById.get(row.resend_id.trim()) || bestByLetter.get(activityKey(row.recipient, row.subject)) || "";
+      const letter = activityKey(row.recipient, row.subject);
+      const idStatus = row.resend_id.trim() ? bestById.get(row.resend_id.trim()) || "" : "";
+      if (idStatus) usedLetters.add(letter);
+      const letterStatus = !idStatus && !usedLetters.has(letter) ? bestByLetter.get(letter) || "" : "";
+      if (letterStatus) usedLetters.add(letter);
+      const status = idStatus || letterStatus;
       if (!status || (STATUS_RANK[status] || 0) <= (STATUS_RANK[row.mail_status] || 0)) continue;
-      await sql`update notifications set mail_status = ${status}, status_at = now() where id = ${row.id}`;
+      const saved = await sql<{ id: string }>`
+        update notifications
+        set mail_status = ${status}, status_at = now()
+        where id = ${row.id} and coalesce(mail_status, '') = ${row.mail_status}
+        returning id
+      `;
+      if (!saved.length) continue;
       updated += 1;
       if (status === "opened" || status === "clicked") opened += 1;
       changes.push({ recipient: row.recipient, subject: row.subject, status });
@@ -679,11 +691,26 @@ export async function watchMailStatuses() {
   const sql = await getSql();
   const mail = await readMailConfig(sql);
   if (!mail.statusWatch || !mail.smtpKey) return { checked: 0, updated: 0 };
+  const now = Date.now();
+  const claimed = await sql<{ key: string }>`
+    insert into site_settings (key, value) values ('mail_status_lock', ${String(now)})
+    on conflict (key) do update set value = excluded.value
+    where site_settings.value ~ '^[0-9]+$' and site_settings.value::bigint < ${now - 90_000}
+    returning key
+  `;
+  if (!claimed.length) return { checked: 0, updated: 0 };
   const result = await syncResendStatuses(sql, { quiet: true });
-  if (result.changes.length) {
-    const lines = result.changes.slice(0, 12).map((change) => `${STATUS_LABEL[change.status] || change.status} · ${change.recipient}\n${change.subject}`);
-    const more = result.changes.length > 12 ? `\n\n+${result.changes.length - 12} more` : "";
-    const subject = result.changes.length === 1 ? `Email ${(STATUS_LABEL[result.changes[0].status] || result.changes[0].status).toLowerCase()}` : `${result.changes.length} email statuses changed`;
+  const seen = new Set<string>();
+  const changes = result.changes.filter((change) => {
+    const key = `${change.status}|${change.recipient.trim().toLowerCase()}|${change.subject.trim().toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (changes.length) {
+    const lines = changes.slice(0, 12).map((change) => `${STATUS_LABEL[change.status] || change.status} · ${change.recipient}\n${change.subject}`);
+    const more = changes.length > 12 ? `\n\n+${changes.length - 12} more` : "";
+    const subject = changes.length === 1 ? `Email ${(STATUS_LABEL[changes[0].status] || changes[0].status).toLowerCase()}` : `${changes.length} email statuses changed`;
     await sendTelegramNotice(sql, subject, `${lines.join("\n\n")}${more}`);
   }
   return { checked: result.checked, updated: result.updated };
