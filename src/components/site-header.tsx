@@ -150,11 +150,7 @@ export function SiteHeader({ eyebrow, action }: { eyebrow: string; action?: Reac
     <header className="border-b border-border bg-surface">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
         <div className="min-w-0">
-          {logo ? (
-            <img src={logo} alt={name} className="h-8 w-auto max-w-[180px] object-contain" />
-          ) : (
-            <p className="text-sm font-bold tracking-wide text-primary">{name.toUpperCase()}</p>
-          )}
+          {logo ? <img src={logo} alt={name} className="h-8 w-auto max-w-[180px] object-contain" /> : <span className="block h-8" />}
           <p className="mt-2 text-xs font-semibold tracking-widest text-action uppercase">{eyebrow}</p>
         </div>
         {action}

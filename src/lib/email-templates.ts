@@ -787,7 +787,8 @@ export function leadLetter(input: {
   const name = input.leadName.trim() || "Client";
   const advisor = input.advisor;
   const protection = input.offer.protection.trim() || input.protection?.trim() || "Deposits are FDIC insured. Capital protection covers the first $250,000 per individual or $500,000 per joint account.";
-  const minimum = input.minimum?.trim() || "$100,000";
+  const bandFloors = input.offer.tiers.map((tier) => tier.minAmount).filter((amount) => Number.isFinite(amount) && amount > 0);
+  const minimum = bandFloors.length ? `$${Math.min(...bandFloors).toLocaleString("en-US")}` : input.minimum?.trim() || "$100,000";
   const fine = input.offer.finePrint.trim();
   const window = input.offer.startsOn && input.offer.endsOn ? `Offer available from ${formatOfferDate(input.offer.startsOn)} – ${formatOfferDate(input.offer.endsOn)}` : "";
   const partnerNote = `*Certain Promotional Certificate of Deposit (CD) offerings are facilitated through affiliated partner banks. The issuing and holding institution may differ from ${company}.`;
