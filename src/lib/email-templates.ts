@@ -412,6 +412,12 @@ export function applyEmailStyle(html: string, style: EmailStyle | string | null 
   return next;
 }
 
+function mailButton(href: string, label: string, margin = "0") {
+  const link = escapeHtml(href || "#");
+  const text = escapeHtml(label);
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:${margin};"><tr><td align="center" bgcolor="#006fcf" style="background:#006fcf; border-radius:6px;"><a href="${link}" target="_blank" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; letter-spacing:0.3px; line-height:20px; color:#ffffff; text-decoration:none; background:#006fcf; border:1px solid #006fcf; border-radius:6px;">${text}</a></td></tr></table>`;
+}
+
 function paletteFor(style: EmailStyle, colors?: Partial<EmailColors> | null): EmailColors {
   const next = { ...STYLE_PALETTES[style] };
   if (!colors) return next;
@@ -1086,7 +1092,7 @@ export function applicationLetter(input: {
   const help = companyHelp(input.companyPhone);
   const buttonLabel = input.variant === "promo" || !months ? "Click here for application" : `${months}-Month CD Application`;
   const buttonHref = link || "#";
-  const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(buttonHref)}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">${escapeHtml(buttonLabel)}</a></td></tr></table>`;
+  const button = mailButton(buttonHref, buttonLabel);
   const codeBox = promoCode
     ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#e7f3fb; border-left:4px solid #006fcf;"><tr><td style="padding:16px 18px;">
         <p style="margin:0 0 4px 0; font-size:12px; font-weight:700; letter-spacing:0.8px; color:#006fcf;">YOUR PROMOTIONAL CODE</p>
@@ -1300,7 +1306,7 @@ export function inviteReminderLetter(input: { leadName: string; company: string;
   const mark = logo
     ? `<img src="${logo}" alt="${escapeHtml(company)}" height="32" style="display:block;height:32px;width:auto;border:0;">`
     : `<span style="font-family:Arial, Helvetica, sans-serif; font-size:26px; font-weight:700; letter-spacing:1px; color:#ffffff;">${escapeHtml(company)}</span>`;
-  const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td style="background:#006fcf;"><a href="${escapeHtml(input.link || "#")}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Open the application</a></td></tr></table>`;
+  const button = mailButton(input.link || "#", "Open the application");
   const code = input.promoCode.trim()
     ? `<p style="margin:16px 0 0 0; font-size:14px; line-height:21px;">Your promotional code is <strong>${escapeHtml(input.promoCode.trim())}</strong>.</p>`
     : "";
@@ -1516,7 +1522,7 @@ export function htrLetter(input: { leadName: string; company: string; advisor?: 
   const help = companyHelp(input.companyPhone);
   const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(value)}</p>`;
   const button = link
-    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:16px;"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(link)}" style="display:inline-block; padding:14px 22px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Request an advisor call</a></td></tr></table>`
+    ? mailButton(link, "Request an advisor call", "16px 0 0")
     : "";
   const text = [`Dear ${name},`, stripMarks(opening), stripMarks(offer), ask, link ? `Request an advisor call: ${link}` : "", stripMarks(decline), stripMarks(closing), sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
@@ -1651,7 +1657,7 @@ export function followupLetter(input: {
   const paragraph = (value: string) => value.trim() ? `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${richText(value)}</p>` : "";
   const heading = (value: string) => `<p style="margin:22px 0 0 0; font-size:18px; line-height:24px; font-weight:700; color:#12315c;">${richText(value)}</p>`;
   const button = link
-    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:10px;"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(link)}" style="display:inline-block; padding:14px 22px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Click here for application</a></td></tr></table>`
+    ? mailButton(link, "Click here for application", "10px 0 0")
     : "";
   const codeBox = promoCode
     ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:16px; background:#e7f3fb; border-left:4px solid #006fcf;"><tr><td style="padding:16px 18px;">
@@ -2305,7 +2311,7 @@ export function cdarsLetter(input: {
   const help = companyHelp(input.companyPhone);
   const link = input.link?.trim() || "";
   const button = link
-    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:16px;"><tr><td style="background:#006fcf; border-radius:2px;"><a href="${escapeHtml(link)}" style="display:inline-block; padding:14px 22px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Click here for application</a></td></tr></table>`
+    ? mailButton(link, "Click here for application", "16px 0 0")
     : "";
   const heads = terms.map((term) => `<td style="background:#006fcf; color:#ffffff; padding:10px 8px; text-align:center; font-size:12px; font-weight:700;">${term.months}-MONTH</td>`).join("");
   const rates = terms.map((term) => `<td style="background:#f7fbfe; padding:16px 8px; text-align:center; font-size:22px; font-weight:700; color:#12315c;">${escapeHtml(term.apy.replace(/\s*APY/i, "").replace(/%/g, ""))}% <span style="font-size:12px; color:#006fcf;">APY</span></td>`).join("");
@@ -2509,7 +2515,7 @@ export function invoiceAdvisorLetter(input: {
   const sign = advisorSignature(input.advisor, company, { closing: "Sincerely" });
   const help = companyHelp(input.companyPhone);
   const paragraph = (value: string) => `<p style="margin:14px 0 0 0; font-size:15px; line-height:23px;">${escapeHtml(value)}</p>`;
-  const button = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:18px 0 0 0;"><tr><td style="background:#006fcf;"><a href="${escapeHtml(input.link || "#")}" style="display:inline-block; padding:14px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">CD Payment Invoice</a></td></tr></table>`;
+  const button = mailButton(input.link || "#", "CD Payment Invoice", "18px 0 0");
   const text = [`Dear ${name},`, ready, "CD Details:", ...details.map(([label, value]) => `• ${label} ${value}`), "Please find the link to your invoice below:", input.link ? `CD Payment Invoice\n${input.link}` : "", crnNote, proof, questions, sign.text, input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : ""].filter(Boolean).join("\n\n");
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -2647,7 +2653,7 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
     ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;">${input.extraHtml}</td></tr>`
     : "";
   const portal = input.portalUrl
-    ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;"><a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:#006fcf;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 18px;border-radius:6px;">${escapeHtml(input.portalLabel || "Open the investor portal")}</a></td></tr>`
+    ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;">${mailButton(input.portalUrl, input.portalLabel || "Open the investor portal")}</td></tr>`
     : "";
   const who = input.audience === "client" ? "Investor note" : "Desk note";
   const logo = emailLogoSrc(input.logo, input.portalUrl);
