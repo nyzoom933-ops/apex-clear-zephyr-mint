@@ -145,10 +145,10 @@ async function readEmailLogo(sql: Sql) {
   return rows[0]?.value || null;
 }
 
-export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; transactional: EmailStyle; font: string; buttonText: string; colors: EmailColors & { font: string; buttonText: string } }> {
+export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; transactional: EmailStyle; font: string; buttonText: string; headerText: string; colors: EmailColors & { font: string; buttonText: string; headerText: string } }> {
   const rows = await sql<{ key: string; value: string }>`
     select key, value from site_settings where key in (
-      'email_style_advisor', 'email_style_transactional', 'email_font', 'email_button_text',
+      'email_style_advisor', 'email_style_transactional', 'email_font', 'email_button_text', 'email_header_text',
       'email_color_header', 'email_color_button', 'email_color_heading', 'email_color_accent',
       'email_color_paper', 'email_color_card', 'email_color_text', 'email_color_border', 'email_color_muted'
     )
@@ -158,13 +158,14 @@ export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; 
   const transactional = rows.find((row) => row.key === "email_style_transactional")?.value;
   const font = normalizeEmailFont(rows.find((row) => row.key === "email_font")?.value);
   const buttonText = normalizeEmailHex(rows.find((row) => row.key === "email_button_text")?.value);
+  const headerText = normalizeEmailHex(rows.find((row) => row.key === "email_header_text")?.value);
   for (const row of rows) {
     if (!row.key.startsWith("email_color_")) continue;
     const id = row.key.slice("email_color_".length) as keyof EmailColors;
     stored[id] = row.value;
   }
   const colors = normalizeEmailColors(stored);
-  return { advisor: normalizeEmailStyle(advisor), transactional: normalizeEmailStyle(transactional), font, buttonText, colors: { ...colors, font, buttonText } };
+  return { advisor: normalizeEmailStyle(advisor), transactional: normalizeEmailStyle(transactional), font, buttonText, headerText, colors: { ...colors, font, buttonText, headerText } };
 }
 
 export async function readMailConfig(sql: Sql) {

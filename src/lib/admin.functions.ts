@@ -1212,11 +1212,12 @@ export const getEmailStyles = createServerFn({ method: "GET" }).handler(async ()
 });
 
 export const saveEmailStyles = createServerFn({ method: "POST" })
-  .validator((input: { advisor?: string; transactional?: string; font?: string; buttonText?: string; colors?: Partial<Record<"header" | "button" | "heading" | "accent" | "paper" | "card" | "text" | "border" | "muted", string>> }) => ({
+  .validator((input: { advisor?: string; transactional?: string; font?: string; buttonText?: string; headerText?: string; colors?: Partial<Record<"header" | "button" | "heading" | "accent" | "paper" | "card" | "text" | "border" | "muted", string>> }) => ({
     advisor: normalizeEmailStyle(input.advisor),
     transactional: normalizeEmailStyle(input.transactional),
     font: normalizeEmailFont(input.font),
     buttonText: normalizeEmailHex(input.buttonText),
+    headerText: normalizeEmailHex(input.headerText),
     colors: normalizeEmailColors(input.colors),
   }))
   .handler(async ({ data }) => {
@@ -1242,6 +1243,13 @@ export const saveEmailStyles = createServerFn({ method: "POST" })
         on conflict (key) do update set value = excluded.value
       `;
     }
+    if (!data.headerText) await sql`delete from site_settings where key = 'email_header_text'`;
+    else {
+      await sql`
+        insert into site_settings (key, value) values ('email_header_text', ${data.headerText})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
     for (const field of EMAIL_COLOR_FIELDS) {
       const value = data.colors[field.id];
       await sql`
@@ -1249,7 +1257,7 @@ export const saveEmailStyles = createServerFn({ method: "POST" })
         on conflict (key) do update set value = excluded.value
       `;
     }
-    return { ...data, colors: { ...data.colors, font: data.font, buttonText: data.buttonText } };
+    return { ...data, colors: { ...data.colors, font: data.font, buttonText: data.buttonText, headerText: data.headerText } };
   });
 
 export const setDeskSwitch = createServerFn({ method: "POST" })

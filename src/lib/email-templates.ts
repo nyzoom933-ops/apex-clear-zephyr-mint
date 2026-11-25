@@ -394,16 +394,18 @@ export function normalizeEmailColors(value: Partial<EmailColors> | null | undefi
   return next;
 }
 
-export type EmailPaint = Partial<EmailColors> & { font?: string; buttonText?: string };
+export type EmailPaint = Partial<EmailColors> & { font?: string; buttonText?: string; headerText?: string };
 
 export function applyEmailStyle(html: string, style: EmailStyle | string | null | undefined, colors?: EmailPaint | null) {
   if (!html || typeof html !== "string") return typeof html === "string" ? html : "";
   const chosen = normalizeEmailStyle(style);
   const palette = paletteFor(chosen, colors);
   let next = paintEmailRoles(html, palette);
-  const headerInk = inkOn(palette.header);
+  const customHeader = normalizeEmailHex(colors?.headerText);
+  const headerInk = customHeader || inkOn(palette.header);
   const buttonInk = normalizeEmailHex(colors?.buttonText) || inkOn(palette.button);
   const headingInk = inkOn(palette.heading);
+  const headerSoft = customHeader || (headerInk === "#ffffff" ? "#d6ebff" : palette.muted);
   next = next
     .replaceAll("letter-spacing:1px; color:#ffffff;", `letter-spacing:1px; color:${headerInk};`)
     .replaceAll("letter-spacing:0.14em;color:#ffffff;", `letter-spacing:0.14em;color:${headerInk};`)
@@ -411,7 +413,8 @@ export function applyEmailStyle(html: string, style: EmailStyle | string | null 
     .replaceAll("color:#ffffff;text-decoration:none;", `color:${buttonInk}; text-decoration:none;`)
     .replaceAll("color:#ffffff; font-weight:700;", `color:${headerInk}; font-weight:700;`)
     .replaceAll("color:#fff; font-size:12px;", `color:${headerInk}; font-size:12px;`)
-    .replaceAll("color:#d6ebff;", `color:${headerInk === "#ffffff" ? "#d6ebff" : palette.muted};`)
+    .replaceAll("color:#d6ebff;", `color:${headerSoft};`)
+    .replaceAll("color:#d6ecfa;", `color:${headerSoft};`)
     .replaceAll(`background:${palette.heading}; padding:18px 32px; color:#ffffff;`, `background:${palette.heading}; padding:18px 32px; color:${headingInk};`)
     .replaceAll("font-weight:700; color:#ffffff;\">We’re here to help.", `font-weight:700; color:${headingInk};">We’re here to help.`)
     .replaceAll("line-height:21px; color:#ffffff;\">For assistance", `line-height:21px; color:${headingInk};">For assistance`);
@@ -561,8 +564,8 @@ export function renderPair(step: MailStep, input: { name: string; email: string;
   };
 }
 
-export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "", styles?: { advisor?: string | null; transactional?: string | null; font?: string | null; buttonText?: string | null; colors?: EmailPaint | null }) {
-  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone, advisorStyle: styles?.advisor, transactionalStyle: styles?.transactional, emailColors: { ...(styles?.colors || {}), font: styles?.font || styles?.colors?.font, buttonText: styles?.buttonText ?? styles?.colors?.buttonText } };
+export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "", styles?: { advisor?: string | null; transactional?: string | null; font?: string | null; buttonText?: string | null; headerText?: string | null; colors?: EmailPaint | null }) {
+  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone, advisorStyle: styles?.advisor, transactionalStyle: styles?.transactional, emailColors: { ...(styles?.colors || {}), font: styles?.font || styles?.colors?.font, buttonText: styles?.buttonText ?? styles?.colors?.buttonText, headerText: styles?.headerText ?? styles?.colors?.headerText } };
   return (Object.keys(STEPS) as MailStep[]).filter((step) => step !== "inbox_note").flatMap((step) => [
     renderStep(step, "client", sample),
     renderStep(step, "admin", sample),
