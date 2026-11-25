@@ -397,7 +397,8 @@ async function deliver(to: string, subject: string, text: string, html: string, 
   const from = fromAddress || mail.from;
   if (!mail.smtpKey) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Add the SMTP2GO API key in Settings." };
   if (!from) return { delivery: "failed", messageId: "", provider: "smtp2go", error: "Add the SMTP2GO from address in Settings." };
-  return deliverSmtp2go(to, subject, text, html, mail.smtpKey, from, replyTo, replyName, attachments, cc);
+  const prepared = await inlineEmailLogo(sql, html, attachments);
+  return deliverSmtp2go(to, subject, text, prepared.html, mail.smtpKey, from, replyTo, replyName, prepared.files, cc);
 }
 
 async function deliverSmtp2go(to: string, subject: string, text: string, html: string, apiKey: string, from: string, replyTo: string, replyName: string, attachments: MailFile[], cc: string[] = []) {
@@ -440,16 +441,39 @@ export async function sendFromMailbox(
   input: { to: string; subject: string; text: string; html: string; fromAddress: string; replyTo: string; replyName: string; attachments?: MailFile[] },
 ) {
   const mail = await readMailConfig(sql);
-  return deliverSmtp2go(input.to, input.subject, input.text, input.html, mail.smtpKey, input.fromAddress, input.replyTo, input.replyName, input.attachments || []);
+  const prepared = await inlineEmailLogo(sql, input.html, input.attachments || []);
+  return deliverSmtp2go(input.to, input.subject, input.text, prepared.html, mail.smtpKey, input.fromAddress, input.replyTo, input.replyName, prepared.files);
 }
 
 export function emailLogoFile(logo: string | null | undefined): MailFile | null {
-  const match = logo?.trim().match(/^data:(image\/(?:png|jpeg|gif|webp));base64,([a-zA-Z0-9+/=\s]+)$/i);
+  const match = logo?.trim().match(/^data:(image\/(?:png|jpeg|gif|webp|svg\+xml));base64,([a-zA-Z0-9+/=\s]+)$/i);
   if (!match?.[2]) return null;
   const type = match[1].toLowerCase();
-  const extension = type.includes("png") ? "png" : type.includes("gif") ? "gif" : type.includes("webp") ? "webp" : "jpg";
+  const extension = type.includes("svg") ? "svg" : type.includes("png") ? "png" : type.includes("gif") ? "gif" : type.includes("webp") ? "webp" : "jpg";
   const filename = `logo.${extension}`;
   return { filename, content: match[2].replace(/\s/g, ""), contentType: type, contentId: filename };
+}
+
+async function inlineEmailLogo(sql: Sql, html: string, files: MailFile[]) {
+  if (!html.includes("<img")) return { html, files };
+  const logo = (await readEmailLogo(sql))?.trim() || "";
+  const file = emailLogoFile(logo);
+  const origin = await portalOrigin(sql);
+  if (!file?.contentId) {
+    if (origin && html.includes("/email-logo")) html = html.replace(/src=(["'])\/email-logo/gi, `src=$1${origin}/email-logo`);
+    return { html, files };
+  }
+  const cid = file.contentId;
+  const used = html.includes(`cid:${cid}`) || /\/email-logo/i.test(html) || (logo.startsWith("data:image/") && html.includes(logo.slice(0, 64)));
+  if (!used) return { html, files };
+  if (file.content.length > 400_000) {
+    if (origin) html = html.replace(/src=(["'])\/email-logo/gi, `src=$1${origin}/email-logo`);
+    return { html, files };
+  }
+  let next = html.replace(/src=(["'])(?:https?:\/\/[^"']+)?\/email-logo(?:\?[^"']*)?\1/gi, `src=$1cid:${cid}$1`);
+  if (logo.startsWith("data:image/") && next.includes(logo)) next = next.split(logo).join(`cid:${cid}`);
+  const attached = files.some((item) => item.contentId === cid);
+  return { html: next, files: attached ? files : [file, ...files] };
 }
 
 function smtpFiles(files: MailFile[]) {

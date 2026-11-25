@@ -14,6 +14,10 @@ import {
   pulseDeskSync,
   getMailSetup,
   approvePayment,
+  approveEmailedPayment,
+  listTransactions,
+  previewPaymentReceipt,
+  sendPaymentReceipt,
   rejectPayment,
   getPaymentFile,
   listAdvisors,
@@ -291,7 +295,7 @@ function Cabinet({
               kind: "promo"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status, silent) => void updateStatus(id, status, silent)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status, silent) => void updateStatus(id, status, silent)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "transactions" ? <TransactionsDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
 }
 function LetterPreview({
   html,
@@ -1168,6 +1172,59 @@ function ImageSetting({
 }) {
   return <div className="rounded-lg border border-border bg-surface p-4"><p className="text-sm font-semibold text-primary">{label}</p>{hint ? <p className="mt-1 text-sm text-fg">{hint}</p> : null}<div className={"mt-3 flex items-center justify-center overflow-hidden rounded-md border border-border bg-bg " + (wide ? "h-36" : "h-16")}>{value ? <img src={value} alt="" className={"max-w-full " + (wide ? "h-full w-full object-cover" : "max-h-12 object-contain")} /> : <span className="text-sm text-fg">No image</span>}</div><input type="file" accept={accept} className="mt-3 block w-full text-sm" onChange={event => onFile(event.target.files?.[0])} /><button type="button" className="mt-3 text-sm font-semibold text-primary" onClick={onClear}>Remove</button></div>;
 }
+function TransactionsDesk() {
+  const [rows, setRows] = useState(null);
+  const [openId, setOpenId] = useState("");
+  const [letter, setLetter] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState("");
+  function load() {
+    return listTransactions().then(setRows).catch(() => setError("Transactions could not be loaded."));
+  }
+  useEffect(() => {
+    void load();
+  }, []);
+  async function preview(id) {
+    setError("");
+    setNotice("");
+    setPending("preview");
+    setOpenId(id);
+    setLetter(null);
+    try {
+      setLetter(await previewPaymentReceipt({
+        data: {
+          id
+        }
+      }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The receipt could not be prepared.");
+    } finally {
+      setPending("");
+    }
+  }
+  async function send(id) {
+    setError("");
+    setNotice("");
+    setPending("send");
+    try {
+      await sendPaymentReceipt({
+        data: {
+          id
+        }
+      });
+      setNotice("The receipt was sent.");
+      setLetter(null);
+      setOpenId("");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The receipt could not be sent.");
+    } finally {
+      setPending("");
+    }
+  }
+  return <section><h1 className="text-3xl font-semibold">Transactions</h1><p className="mt-2 max-w-2xl text-fg">Paid certificates. Preview the receipt, then send it. Nothing is emailed when the invoice is marked paid.</p>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}{!rows ? <p className="mt-4 text-sm text-fg">Loading…</p> : rows.length === 0 ? <p className="mt-4 text-sm text-fg">No paid certificates yet.</p> : <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">Name</th><th className="px-4 py-3 font-semibold">Deposit code</th><th className="px-4 py-3 font-semibold">Amount</th><th className="px-4 py-3 font-semibold">Receipt</th></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-b border-border last:border-0 align-top"><td className="px-4 py-3"><span className="block font-semibold text-primary">{row.name}</span><span className="text-fg">{row.email}</span></td><td className="px-4 py-3">{row.depositCode || "—"}</td><td className="px-4 py-3">{row.amount}</td><td className="px-4 py-3"><button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void preview(row.id)}>{pending === "preview" && openId === row.id ? "Preparing…" : row.receiptSent ? "Preview again" : "Send receipt"}</button>{row.receiptSent ? <p className="mt-1 text-xs text-fg">Already sent</p> : null}{openId === row.id && letter ? <div className="mt-3 max-w-3xl"><LetterPreview html={letter.html} title={letter.subject} height="h-[640px]" meta={<div><p className="mt-3"><span className="inline-block w-16 text-[#8c8c8c]">From</span>{letter.fromName}{letter.fromEmail ? ` <${letter.fromEmail}>` : ""}</p><p className="mt-1"><span className="inline-block w-16 text-[#8c8c8c]">To</span>{letter.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-16 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p><p className="mt-1 text-fg">Attachment: payment-receipt.pdf</p></div>} /><button type="button" className="mt-3 min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void send(row.id)}>{pending === "send" ? "Sending…" : "Send receipt"}</button></div> : null}</td></tr>)}</tbody></table></div>}</section>;
+}
 function InvoicesDesk() {
   const [view, setView] = useState("open");
   const [rows, setRows] = useState(null);
@@ -1368,7 +1425,7 @@ function InvoiceCard({
       setPending("");
     }
   }
-  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated && row.origin !== "desk" ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />Do not send transactional email</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4"><LetterPreview html={letter.html} title={letter.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-16 text-[#8c8c8c]">From</span>{letter.fromName}{letter.fromEmail ? ` <${letter.fromEmail}>` : ""}</p><p className="mt-1"><span className="inline-block w-16 text-[#8c8c8c]">To</span>{letter.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-16 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : null}</li>;
+  return <li className="rounded-lg border border-border bg-surface p-4"><div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-semibold text-primary">{row.signerName || row.email}</p><p className="text-sm text-fg">{row.termLabel || "Certificate"} · {row.amount}</p></div><p className="text-sm text-fg">{row.email}</p><p className="text-sm text-fg">{generated ? "Invoice generated" : "Waiting for approval"}</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{BILLING_FIELDS.map(field => <label key={field.key} className={field.wide ? "block sm:col-span-2" : "block"}><span className="mb-1.5 block text-sm font-medium">{field.label}</span>{field.key === "contactAddress" ? <textarea className={controlClass} rows={2} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} /> : <input className={controlClass} value={billing[field.key]} onChange={event => setField(field.key, event.target.value)} />}</label>)}</div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void save()}>{pending === "save" ? "Saving…" : "Save billing"}</button>{!generated && row.origin !== "desk" ? <label className="flex items-center gap-2 text-sm text-fg"><input type="checkbox" checked={skipEmail} onChange={event => setSkipEmail(event.target.checked)} />Do not send transactional email</label> : null}<button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void approve()}>{pending === "approve" ? "Saving…" : generated ? "Update invoice" : "Approve invoice"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void download()}>{pending === "pdf" ? "Creating…" : "Preview PDF"}</button>{generated ? <button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void emailAdvisor()}>{pending === "preview" ? "Preparing…" : "Preview advisor email"}</button> : null}<button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60" disabled={pending !== ""} onClick={onRemove}>Remove</button></div>{letter ? <div className="mt-4"><LetterPreview html={letter.html} title={letter.subject} height="h-[720px]" meta={<div><p className="mt-3"><span className="inline-block w-16 text-[#8c8c8c]">From</span>{letter.fromName}{letter.fromEmail ? ` <${letter.fromEmail}>` : ""}</p><p className="mt-1"><span className="inline-block w-16 text-[#8c8c8c]">To</span>{letter.to}</p><p className="mt-1 font-semibold text-primary"><span className="inline-block w-16 font-normal text-[#8c8c8c]">Subject</span>{letter.subject}</p></div>} /><div className="mt-3 flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending !== ""} onClick={() => void sendAdvisorLetter()}>{pending === "advisor" ? "Sending…" : "Send"}</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-primary" onClick={() => setLetter(null)}>Close</button></div></div> : null}{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={generated} onChanged={onApproved} /> : generated ? <EmailPaymentApproval id={row.id} onChanged={onApproved} /> : null}</li>;
 }
 function ActiveCdsDesk() {
   const [rows, setRows] = useState(null);
@@ -1777,7 +1834,31 @@ function FundingRow({
         referenceNumber,
         amount,
         openedOn
-      })}>Save</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></div>{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={row.status === "instructions_sent"} onChanged={onReload} /> : null}</li>;
+      })}>Save</button><button type="button" className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-semibold text-danger" onClick={onRemove}>Remove</button></div>{row.paymentFileName ? <PaymentReview id={row.id} name={row.paymentFileName} canReview={row.status === "instructions_sent"} onChanged={onReload} /> : row.status === "instructions_sent" ? <EmailPaymentApproval id={row.id} onChanged={onReload} /> : null}</li>;
+}
+function EmailPaymentApproval({
+  id,
+  onChanged
+}) {
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  async function approve() {
+    if (!window.confirm("Mark this invoice paid? The client sent the wire confirmation by email. The certificate becomes active. Send the receipt from Transactions when you are ready.")) return;
+    setPending(true);
+    setError("");
+    try {
+      await approveEmailedPayment({
+        data: {
+          id
+        }
+      });
+      onChanged();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The payment could not be approved.");
+      setPending(false);
+    }
+  }
+  return <div className="mt-3 border-t border-border pt-3 text-sm"><p className="text-fg">No portal upload yet. Use this when the wire confirmation arrived in the advisor inbox.</p><button type="button" className="mt-2 min-h-11 rounded-md bg-action px-4 py-2 font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void approve()}>{pending ? "Approving…" : "Mark paid from email"}</button>{error ? <p className="mt-2 text-danger">{error}</p> : null}</div>;
 }
 function openDataFile(file, name) {
   const [meta, data] = file.split(",");
@@ -4347,6 +4428,9 @@ var DESK_MENU = [{
   }, {
     id: "invoices",
     label: "Invoices"
+  }, {
+    id: "transactions",
+    label: "Transactions"
   }]
 }, {
   label: "Desk",

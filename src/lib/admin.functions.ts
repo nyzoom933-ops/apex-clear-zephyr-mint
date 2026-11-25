@@ -5193,7 +5193,7 @@ async function paymentReceiptPdf(sql: Sql, id: string) {
       order by submitted_at desc nulls last
       limit 1
     ) app on true
-    where f.id = ${id} and f.status = 'payment_approved' and coalesce(f.payment_file_name, '') <> ''
+    where f.id = ${id} and f.status = 'payment_approved'
   `;
   const row = rows[0];
   if (!row) return "";
@@ -5308,12 +5308,149 @@ export const approvePayment = createServerFn({ method: "POST" })
       returning id
     `;
     if (!rows[0]) throw new Error("A wire confirmation is required before approval.");
-    const detail = await fundingDetail(sql, data.id);
-    if (detail) {
-      const receipt = await paymentReceiptFile(sql, data.id);
-      await sendFundingClient(sql, { id: data.id, step: "payment_approved", attachments: receipt, clientAttachments: receipt });
-    }
     return { ok: true };
+  });
+
+export const approveEmailedPayment = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const gate = await sql<{ origin: string; advisor_id: string; payment_file_name: string }>`
+      select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id, coalesce(payment_file_name, '') as payment_file_name
+      from fundings where id = ${data.id}
+    `;
+    if (!gate[0]) throw new Error("This certificate could not be found.");
+    if (gate[0].origin === "desk" && !gate[0].advisor_id) throw new Error("Assign an advisor before emailing this client.");
+    if (gate[0].payment_file_name) throw new Error("A confirmation is already attached. Use Approve payment.");
+    const rows = await sql<{ id: string }>`
+      update fundings
+      set status = 'payment_approved',
+          payment_approved_at = now(),
+          payment_uploaded_at = coalesce(payment_uploaded_at, now()),
+          payment_file_name = 'Received by email',
+          payment_file = 'email'
+      where id = ${data.id} and status = 'instructions_sent' and coalesce(payment_file_name, '') = ''
+      returning id
+    `;
+    if (!rows[0]) throw new Error("Generate the invoice before marking it paid.");
+    return { ok: true };
+  });
+
+export const listTransactions = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const rows = await sql<{ id: string; name: string; email: string; deposit_code: string; amount: string; confirmed_on: string; receipt_sent: boolean }>`
+    select f.id,
+           coalesce(nullif(app.applicant_name, ''), nullif(f.signer_name, ''), f.email) as name,
+           f.email,
+           coalesce(f.deposit_code, '') as deposit_code,
+           f.amount,
+           coalesce(to_char(f.payment_approved_at at time zone 'UTC', 'YYYY-MM-DD'), '') as confirmed_on,
+           exists (
+             select 1 from notifications n
+             where n.related_id = f.id::text and n.step = 'payment_approved' and n.audience = 'client' and n.delivery = 'sent'
+           ) as receipt_sent
+    from fundings f
+    left join lateral (
+      select applicant_name from applications
+      where lower(email) = lower(f.email)
+      order by submitted_at desc nulls last
+      limit 1
+    ) app on true
+    where f.status = 'payment_approved'
+    order by f.payment_approved_at desc nulls last, f.created_at desc
+  `;
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    depositCode: row.deposit_code,
+    amount: row.amount,
+    confirmedOn: row.confirmed_on,
+    receiptSent: Boolean(row.receipt_sent),
+  }));
+});
+
+async function paymentReceiptPreview(sql: Sql, id: string) {
+  const meta = await sql<{ origin: string; advisor_id: string; email: string; status: string }>`
+    select coalesce(origin, '') as origin, coalesce(advisor_id, '') as advisor_id, email, status
+    from fundings where id = ${id}
+  `;
+  const row = meta[0];
+  if (!row || row.status !== "payment_approved") throw new Error("Mark the invoice paid before sending a receipt.");
+  const name = await investorName(sql, row.email);
+  const body = await detailText(sql, await fundingDetail(sql, id));
+  const { advisorNoteLetter, applyEmailStyle, renderStep } = await import("@/lib/email-templates");
+  const { readEmailStyles, readPortalOrigin, readMailConfig } = await import("@/lib/mail.server");
+  const styles = await readEmailStyles(sql);
+  const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('company_name', 'company_phone', 'email_logo')`;
+  const company = settings.find((item) => item.key === "company_name")?.value?.trim() || DEFAULT_COMPANY_NAME;
+  const companyPhone = settings.find((item) => item.key === "company_phone")?.value?.trim() || "";
+  const logo = settings.find((item) => item.key === "email_logo")?.value || null;
+  const origin = (await readPortalOrigin(sql)).replace(/\/$/, "");
+  if (row.origin === "desk") {
+    if (!row.advisor_id) throw new Error("Assign an advisor before emailing this client.");
+    const advisors = await sql<{ name: string; phone: string; email: string; mailbox: string; role: string; personal_phone: string }>`
+      select name, phone, email, coalesce(mailbox, '') as mailbox, coalesce(role, '') as role, coalesce(personal_phone, '') as personal_phone
+      from advisors where id = ${row.advisor_id}
+    `;
+    const advisor = advisors[0];
+    if (!advisor?.mailbox) throw new Error("Choose an advisor with a verified mailbox.");
+    const copy = DESK_MAIL.payment_approved ?? { subject: "Your payment receipt", message: "Your payment receipt is attached." };
+    const letter = advisorNoteLetter({
+      company,
+      companyPhone,
+      logo,
+      pageUrl: origin,
+      advisor: { name: advisor.name, phone: advisor.phone, email: advisor.email || advisor.mailbox, mailbox: advisor.mailbox, role: advisor.role, personalPhone: advisor.personal_phone },
+      greeting: `Dear ${name},`,
+      message: [copy.message, "", body].filter(Boolean).join("\n"),
+    });
+    return {
+      subject: copy.subject,
+      html: applyEmailStyle(letter.html, styles.advisor, styles.colors),
+      to: row.email,
+      fromName: advisor.name,
+      fromEmail: advisor.mailbox,
+    };
+  }
+  const mail = await readMailConfig(sql);
+  const letter = renderStep("payment_approved", "client", {
+    name,
+    email: row.email,
+    detail: body,
+    companyName: company,
+    companyPhone,
+    emailLogo: logo,
+    portalUrl: origin,
+    transactionalStyle: styles.transactional,
+    emailColors: styles.colors,
+  });
+  return { subject: letter.subject, html: letter.html, to: row.email, fromName: company, fromEmail: mail.from };
+}
+
+export const previewPaymentReceipt = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => ({ id: (input.id || "").trim() }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    return paymentReceiptPreview(await getSql(), data.id);
+  });
+
+export const sendPaymentReceipt = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => ({ id: (input.id || "").trim() }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const pdf = await paymentReceiptPdf(sql, data.id);
+    if (!pdf) throw new Error("The receipt could not be created.");
+    const receipt = [{ filename: "payment-receipt.pdf", content: pdf }];
+    await sendFundingClient(sql, { id: data.id, step: "payment_approved", attachments: receipt, clientAttachments: receipt });
+    return { ok: true as const };
   });
 
 export const rejectPayment = createServerFn({ method: "POST" })

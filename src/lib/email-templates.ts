@@ -239,7 +239,7 @@ const STEPS: Record<MailStep, StepCopy> = {
   },
   lead_exclusive: {
     label: "Promo rates 250+",
-    clientSubject: "Promo rates 250+",
+    clientSubject: "Exclusive new-client CD promotion",
     clientLead: "",
     clientNext: "",
     adminSubject: "Promo rates 250+ sent to {{name}}",
@@ -247,7 +247,7 @@ const STEPS: Record<MailStep, StepCopy> = {
   },
   lead_exclusive_fdic: {
     label: "Promo rates",
-    clientSubject: "Promo rates",
+    clientSubject: "Exclusive new-client CD promotion",
     clientLead: "",
     clientNext: "",
     adminSubject: "Promo rates sent to {{name}}",
@@ -2060,7 +2060,7 @@ export type ExclusiveCopy = {
 
 export function defaultExclusiveCopy(name = "Promo rates 250+"): ExclusiveCopy {
   return {
-    subject: name,
+    subject: "Exclusive new-client CD promotion",
     title: name,
     yieldLine: "Earn up to **{{apy}}** Annual Percentage Yield (APY)",
     intro: "Thank you for your interest in {{company}}. Based on your interest, I wanted to share our current New-Client Promotional CD Offer, which features fixed rates and additional promotional rate enhancements for qualifying new deposits.",
@@ -2137,7 +2137,7 @@ export function exclusiveLetter(input: {
     const text = (value || "").trim();
     return !text || text === "Exclusive new-client CD promotion" || text === "Promo rates" || text === "Promo rates 250+" || text === fallback.subject || text === fallback.title;
   };
-  const subject = fillCopy(stockName(copy?.subject) ? variantName : copy!.subject);
+  const subject = fillCopy(stockName(copy?.subject) ? "Exclusive new-client CD promotion" : copy!.subject);
   const title = fillCopy(stockName(copy?.title) ? variantName : copy!.title);
   const yieldLine = fillCopy(pick(copy?.yieldLine, fallback.yieldLine)).replaceAll("5.75%", maxApy === "—" ? "5.75%" : maxApy);
   const intro = fillCopy(pick(copy?.intro, fallback.intro));
@@ -2737,21 +2737,10 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
 </html>`;
 }
 
-function emailLogoSrc(logo: string | null | undefined, pageUrl: string | undefined) {
+function emailLogoSrc(logo: string | null | undefined, _pageUrl: string | undefined) {
   const stored = logo?.trim() || "";
-  const origin = publicOrigin(pageUrl);
-  if (stored.startsWith("data:image/") && origin) return `${origin}/email-logo?v=${logoVersion(stored)}`;
+  if (/^data:image\//i.test(stored)) return `/email-logo?v=${logoVersion(stored)}`;
   return safeImage(stored);
-}
-
-function publicOrigin(value: string | undefined) {
-  const trimmed = value?.trim() ?? "";
-  if (!/^https?:\/\//i.test(trimmed)) return "";
-  try {
-    return new URL(trimmed).origin;
-  } catch {
-    return "";
-  }
 }
 
 function logoVersion(value: string) {
