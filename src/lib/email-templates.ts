@@ -105,7 +105,7 @@ const STEPS: Record<MailStep, StepCopy> = {
     label: "Certificate requested",
     clientSubject: "We received your certificate request",
     clientLead: "Your certificate request is recorded. It is not funded until you accept the terms and the advisor confirms payment.",
-    clientNext: "Sign in, open the certificate, and accept the terms. A $4.99 dealing fee applies. Do not send a wire yet.",
+    clientNext: "Sign in, open the certificate, and accept the terms. Do not send a wire yet.",
     adminSubject: "New certificate request from {{name}}",
     adminLead: "{{name}} ({{email}}) requested a certificate.",
   },
@@ -153,7 +153,7 @@ const STEPS: Record<MailStep, StepCopy> = {
     label: "Payment receipt",
     clientSubject: "Your payment receipt",
     clientLead: "Your advisor approved the payment. This certificate is active. The payment receipt is attached.",
-    clientNext: "Open Active CDs in the portal to see the term, APY, and maturity date. Keep the receipt with your records. A $4.99 dealing fee applies to this purchase.",
+    clientNext: "Open Active CDs in the portal to see the term, APY, and maturity date. Keep the receipt with your records.",
     adminSubject: "Payment receipt for {{name}}",
     adminLead: "Payment was approved for {{name}} ({{email}}). The certificate is active and the receipt is attached.",
   },
@@ -238,20 +238,20 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminLead: "A promotional application reminder was sent to {{name}} ({{email}}).",
   },
   lead_exclusive: {
-    label: "Exclusive new-client promo",
-    clientSubject: "Exclusive new-client CD promotion",
+    label: "Promo rates 250+",
+    clientSubject: "Promo rates 250+",
     clientLead: "",
     clientNext: "",
-    adminSubject: "Exclusive promo sent to {{name}}",
-    adminLead: "The exclusive new-client CD promotion was sent to {{name}} ({{email}}).",
+    adminSubject: "Promo rates 250+ sent to {{name}}",
+    adminLead: "Promo rates 250+ was sent to {{name}} ({{email}}).",
   },
   lead_exclusive_fdic: {
-    label: "Exclusive promo FDIC",
-    clientSubject: "Exclusive new-client CD promotion",
+    label: "Promo rates",
+    clientSubject: "Promo rates",
     clientLead: "",
     clientNext: "",
-    adminSubject: "Exclusive promo FDIC sent to {{name}}",
-    adminLead: "The exclusive new-client CD promotion with standard FDIC insurance was sent to {{name}} ({{email}}).",
+    adminSubject: "Promo rates sent to {{name}}",
+    adminLead: "Promo rates was sent to {{name}} ({{email}}).",
   },
   lead_cdars: {
     label: "CDARS application",
@@ -323,6 +323,28 @@ export function normalizeEmailStyle(value: string | null | undefined): EmailStyl
   return EMAIL_STYLES.some((item) => item.id === value) ? (value as EmailStyle) : "classic";
 }
 
+export const EMAIL_FONTS = [
+  { id: "style", label: "Match the letter style", stack: "" },
+  { id: "arial", label: "Arial", stack: "Arial, Helvetica, sans-serif" },
+  { id: "verdana", label: "Verdana", stack: "Verdana, Geneva, sans-serif" },
+  { id: "tahoma", label: "Tahoma", stack: "Tahoma, Geneva, sans-serif" },
+  { id: "trebuchet", label: "Trebuchet", stack: "'Trebuchet MS', Helvetica, sans-serif" },
+  { id: "georgia", label: "Georgia", stack: "Georgia, 'Times New Roman', serif" },
+  { id: "times", label: "Times New Roman", stack: "'Times New Roman', Times, serif" },
+  { id: "garamond", label: "Garamond", stack: "Garamond, Palatino, serif" },
+  { id: "courier", label: "Courier", stack: "'Courier New', Courier, monospace" },
+] as const;
+
+export type EmailFont = (typeof EMAIL_FONTS)[number]["id"];
+
+export function normalizeEmailFont(value: string | null | undefined): EmailFont {
+  return EMAIL_FONTS.some((item) => item.id === value) ? (value as EmailFont) : "style";
+}
+
+function emailFontStack(value: string | null | undefined) {
+  return EMAIL_FONTS.find((item) => item.id === normalizeEmailFont(value))?.stack || "";
+}
+
 export const EMAIL_COLOR_FIELDS = [
   { id: "header", label: "Header" },
   { id: "button", label: "Buttons" },
@@ -372,13 +394,15 @@ export function normalizeEmailColors(value: Partial<EmailColors> | null | undefi
   return next;
 }
 
-export function applyEmailStyle(html: string, style: EmailStyle | string | null | undefined, colors?: Partial<EmailColors> | null) {
-  if (!html) return html;
+export type EmailPaint = Partial<EmailColors> & { font?: string; buttonText?: string };
+
+export function applyEmailStyle(html: string, style: EmailStyle | string | null | undefined, colors?: EmailPaint | null) {
+  if (!html || typeof html !== "string") return typeof html === "string" ? html : "";
   const chosen = normalizeEmailStyle(style);
   const palette = paletteFor(chosen, colors);
   let next = paintEmailRoles(html, palette);
   const headerInk = inkOn(palette.header);
-  const buttonInk = inkOn(palette.button);
+  const buttonInk = normalizeEmailHex(colors?.buttonText) || inkOn(palette.button);
   const headingInk = inkOn(palette.heading);
   next = next
     .replaceAll("letter-spacing:1px; color:#ffffff;", `letter-spacing:1px; color:${headerInk};`)
@@ -395,6 +419,13 @@ export function applyEmailStyle(html: string, style: EmailStyle | string | null 
     next = next
       .replaceAll("Arial, Helvetica, sans-serif", "Georgia, 'Times New Roman', serif")
       .replaceAll("Arial,sans-serif", "Georgia, 'Times New Roman', serif");
+  }
+  const stack = emailFontStack(colors?.font);
+  if (stack) {
+    next = next
+      .replaceAll("Georgia, 'Times New Roman', serif", stack)
+      .replaceAll("Arial, Helvetica, sans-serif", stack)
+      .replaceAll("Arial,sans-serif", stack);
   }
   if (chosen !== "classic") {
     next = next
@@ -475,7 +506,7 @@ const CERTIFICATE_STEPS = new Set<MailStep>([
 export function renderStep(
   step: MailStep,
   audience: MailAudience,
-  input: { name: string; email: string; detail: string; companyName?: string; companyPhone?: string; emailLogo?: string | null; portalUrl?: string; extraHtml?: string; advisor?: MailAdvisor; advisorStyle?: string | null; transactionalStyle?: string | null; emailColors?: Partial<EmailColors> | null; copy?: { subject?: string; lead?: string; next?: string } },
+  input: { name: string; email: string; detail: string; companyName?: string; companyPhone?: string; emailLogo?: string | null; portalUrl?: string; extraHtml?: string; advisor?: MailAdvisor; advisorStyle?: string | null; transactionalStyle?: string | null; emailColors?: EmailPaint | null; copy?: { subject?: string; lead?: string; next?: string } },
 ): RenderedEmail {
   const item = STEPS[step];
   const company = input.companyName?.trim() || DEFAULT_COMPANY_NAME;
@@ -495,7 +526,7 @@ export function renderStep(
   const greeting = isFullLetter ? "" : audience === "client" ? `Hello ${name},` : "Operations desk,";
   const text = isFullLetter
     ? [input.detail.trim() || "The letter is in the HTML version.", portalUrl ? `Application\n${portalUrl}` : ""].filter(Boolean).join("\n\n")
-    : [greeting, "", lead, ...(input.detail.trim() ? ["", input.detail.trim()] : []), ...(next ? ["", "What happens next", next] : []), ...(portalUrl ? ["", "Open the investor portal", portalUrl] : []), "", "Please do not reply to this email. This mailbox is not monitored.", input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : "We're here to help.", "", company].join("\n");
+    : [greeting, "", lead, ...(input.detail.trim() ? ["", input.detail.trim()] : []), ...(next ? ["", "What happens next", next] : []), ...(portalUrl ? ["", "Open the investor portal", portalUrl] : []), ...(audience === "client" ? ["", trustBlocks().text] : []), "", "Please do not reply to this email. This mailbox is not monitored.", input.companyPhone?.trim() ? `We're here to help. Call ${input.companyPhone.trim()}.` : "We're here to help.", "", company].join("\n");
   const fullLetter = !isFullLetter
     ? ""
     : input.extraHtml ||
@@ -530,8 +561,8 @@ export function renderPair(step: MailStep, input: { name: string; email: string;
   };
 }
 
-export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "", styles?: { advisor?: string | null; transactional?: string | null; colors?: Partial<EmailColors> | null }) {
-  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone, advisorStyle: styles?.advisor, transactionalStyle: styles?.transactional, emailColors: styles?.colors };
+export function templateCatalog(companyName = DEFAULT_COMPANY_NAME, emailLogo: string | null = null, portalUrl = "", advisor?: MailAdvisor, companyPhone = "", styles?: { advisor?: string | null; transactional?: string | null; font?: string | null; buttonText?: string | null; colors?: EmailPaint | null }) {
+  const sample = { ...SAMPLE_EMAIL, companyName, emailLogo, portalUrl, advisor, companyPhone, advisorStyle: styles?.advisor, transactionalStyle: styles?.transactional, emailColors: { ...(styles?.colors || {}), font: styles?.font || styles?.colors?.font, buttonText: styles?.buttonText ?? styles?.colors?.buttonText } };
   return (Object.keys(STEPS) as MailStep[]).filter((step) => step !== "inbox_note").flatMap((step) => [
     renderStep(step, "client", sample),
     renderStep(step, "admin", sample),
@@ -2024,10 +2055,10 @@ export type ExclusiveCopy = {
   disclosures: string;
 };
 
-export function defaultExclusiveCopy(): ExclusiveCopy {
+export function defaultExclusiveCopy(name = "Promo rates 250+"): ExclusiveCopy {
   return {
-    subject: "Exclusive new-client CD promotion",
-    title: "Exclusive new-client CD promotion",
+    subject: name,
+    title: name,
     yieldLine: "Earn up to **{{apy}}** Annual Percentage Yield (APY)",
     intro: "Thank you for your interest in {{company}}. Based on your interest, I wanted to share our current New-Client Promotional CD Offer, which features fixed rates and additional promotional rate enhancements for qualifying new deposits.",
     both: "Both {{terms}} are available, with total promotional APYs of up to **{{apy}}**, depending on the qualifying deposit amount.",
@@ -2098,8 +2129,13 @@ export function exclusiveLetter(input: {
     .replaceAll("(10 or 22 months)", `(${termChoice})`)
     .replaceAll("{{window}}", window)
     .replaceAll("{{minimum}}", minimum);
-  const subject = fillCopy(pick(copy?.subject, fallback.subject));
-  const title = fillCopy(pick(copy?.title, fallback.title));
+  const variantName = input.fdicStyle === "standard" ? "Promo rates" : "Promo rates 250+";
+  const stockName = (value: string | undefined) => {
+    const text = (value || "").trim();
+    return !text || text === "Exclusive new-client CD promotion" || text === "Promo rates" || text === "Promo rates 250+" || text === fallback.subject || text === fallback.title;
+  };
+  const subject = fillCopy(stockName(copy?.subject) ? variantName : copy!.subject);
+  const title = fillCopy(stockName(copy?.title) ? variantName : copy!.title);
   const yieldLine = fillCopy(pick(copy?.yieldLine, fallback.yieldLine)).replaceAll("5.75%", maxApy === "—" ? "5.75%" : maxApy);
   const intro = fillCopy(pick(copy?.intro, fallback.intro));
   const both = fillCopy(pick(copy?.both, fallback.both)).replaceAll("5.75%", maxApy === "—" ? "5.75%" : maxApy);
@@ -2181,7 +2217,7 @@ export function exclusiveLetter(input: {
   <title>${escapeHtml(subject)}</title>
 </head>
 <body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
-  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">Exclusive new-client CD promotion. Earn up to ${escapeHtml(maxApy)} APY.</div>
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">${escapeHtml(stripMarks(title))}. Earn up to ${escapeHtml(maxApy)} APY.</div>
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;">
     <tr><td align="center" style="padding:20px 10px;">
       <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
@@ -2656,7 +2692,10 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
     ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;">${input.extraHtml}</td></tr>`
     : "";
   const portal = input.portalUrl
-    ? `<tr><td style="padding:16px 32px 8px;font-family:Arial,sans-serif;">${mailButton(input.portalUrl, input.portalLabel || "Open the investor portal")}</td></tr>`
+    ? `<tr><td style="padding:20px 32px 0;font-family:Arial,sans-serif;">${mailButton(input.portalUrl, input.portalLabel || "Open the investor portal")}</td></tr>`
+    : "";
+  const trust = input.audience === "client"
+    ? `<tr><td style="padding:8px 16px 28px;">${trustBlocks().html}</td></tr>`
     : "";
   const who = input.audience === "client" ? "Investor note" : "Desk note";
   const logo = emailLogoSrc(input.logo, input.portalUrl);
@@ -2685,6 +2724,7 @@ function layout(input: { eyebrow: string; greeting: string; lead: string; lines:
         ${extra}
         ${next}
         ${portal}
+        ${trust}
         ${helpFooter(input.companyPhone)}
         <tr><td style="padding:8px 32px 28px;font-family:Arial,sans-serif;font-size:12px;color:#8c8c8c;">${escapeHtml(input.company)} · Investor accounts</td></tr>
       </table>

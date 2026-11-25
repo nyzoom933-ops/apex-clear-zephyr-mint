@@ -6,7 +6,7 @@ import type { Sql } from "@/lib/db";
 import { isWorkspacePreview } from "@/lib/env.server";
 import type { MailFile, MailStep } from "@/lib/mail.server";
 import type { LeadCopy, ApplicationCopy } from "@/lib/email-templates";
-import { normalizeEmailStyle, normalizeEmailColors } from "@/lib/email-templates";
+import { normalizeEmailStyle, normalizeEmailFont, normalizeEmailHex, normalizeEmailColors, EMAIL_COLOR_FIELDS } from "@/lib/email-templates";
 import { dollarInputError, formatBonus, matchTier, parseDollarAmount, PROMO_MINIMUM, promoMonths, type PromoOffer, type PromoTier } from "@/lib/promo";
 import { cdarsAmountError, cdarsRatesReady, CDARS_TERMS, normalizeCdarsRates, type CdarsRate } from "@/lib/cdars";
 import { resolveInvoiceBilling, type InvoiceBilling } from "@/lib/invoice-billing";
@@ -814,6 +814,7 @@ export const investorLogin = createServerFn({ method: "POST" })
 
 export const DEFAULT_THEME = {
   colorAction: "#006fcf",
+  colorActionText: "#ffffff",
   colorHeading: "#12315c",
   colorText: "#3d3d3d",
   colorLabel: "#262626",
@@ -850,6 +851,7 @@ export type SiteBrand = {
   lastBackupAt: string;
   publicDomain: string;
   colorAction: string;
+  colorActionText: string;
   colorHeading: string;
   colorText: string;
   colorLabel: string;
@@ -915,7 +917,7 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const rows = await sql<{ key: string; value: string }>`
-    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'company_phone', 'company_address', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'pdf_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain', 'color_action', 'color_heading', 'color_text', 'color_label', 'color_border', 'color_background', 'page_background')
+    select key, value from site_settings where key in ('logo', 'favicon', 'company_name', 'company_phone', 'company_address', 'cloudflare_code', 'cover', 'social_banner', 'email_logo', 'footer_logo', 'pdf_logo', 'footer_text', 'backup_email', 'backup_at', 'public_domain', 'color_action', 'color_action_text', 'color_heading', 'color_text', 'color_label', 'color_border', 'color_background', 'page_background')
   `;
   const brand: SiteBrand = {
     logo: null,
@@ -951,6 +953,7 @@ export const getSiteBrand = createServerFn({ method: "GET" }).handler(async (): 
     if (row.key === "cloudflare_code") brand.cloudflareCode = row.value;
     if (row.key === "public_domain") brand.publicDomain = row.value;
     if (row.key === "color_action") brand.colorAction = readHex(row.value, DEFAULT_THEME.colorAction);
+    if (row.key === "color_action_text") brand.colorActionText = readHex(row.value, DEFAULT_THEME.colorActionText);
     if (row.key === "color_heading") brand.colorHeading = readHex(row.value, DEFAULT_THEME.colorHeading);
     if (row.key === "color_text") brand.colorText = readHex(row.value, DEFAULT_THEME.colorText);
     if (row.key === "color_label") brand.colorLabel = readHex(row.value, DEFAULT_THEME.colorLabel);
@@ -979,6 +982,7 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     lastBackupAt: input.lastBackupAt || "",
     publicDomain: cleanPublicDomain(input.publicDomain || ""),
     colorAction: cleanHex(input.colorAction, DEFAULT_THEME.colorAction),
+    colorActionText: cleanHex(input.colorActionText, DEFAULT_THEME.colorActionText),
     colorHeading: cleanHex(input.colorHeading, DEFAULT_THEME.colorHeading),
     colorText: cleanHex(input.colorText, DEFAULT_THEME.colorText),
     colorLabel: cleanHex(input.colorLabel, DEFAULT_THEME.colorLabel),
@@ -1058,6 +1062,7 @@ export const setSiteBrand = createServerFn({ method: "POST" })
     }
     const colors = [
       ["color_action", data.colorAction],
+      ["color_action_text", data.colorActionText],
       ["color_heading", data.colorHeading],
       ["color_text", data.colorText],
       ["color_label", data.colorLabel],
@@ -1207,9 +1212,11 @@ export const getEmailStyles = createServerFn({ method: "GET" }).handler(async ()
 });
 
 export const saveEmailStyles = createServerFn({ method: "POST" })
-  .validator((input: { advisor?: string; transactional?: string; colors?: Partial<Record<"header" | "button" | "heading" | "accent" | "paper" | "card" | "text" | "border" | "muted", string>> }) => ({
+  .validator((input: { advisor?: string; transactional?: string; font?: string; buttonText?: string; colors?: Partial<Record<"header" | "button" | "heading" | "accent" | "paper" | "card" | "text" | "border" | "muted", string>> }) => ({
     advisor: normalizeEmailStyle(input.advisor),
     transactional: normalizeEmailStyle(input.transactional),
+    font: normalizeEmailFont(input.font),
+    buttonText: normalizeEmailHex(input.buttonText),
     colors: normalizeEmailColors(input.colors),
   }))
   .handler(async ({ data }) => {
@@ -1224,13 +1231,25 @@ export const saveEmailStyles = createServerFn({ method: "POST" })
       insert into site_settings (key, value) values ('email_style_transactional', ${data.transactional})
       on conflict (key) do update set value = excluded.value
     `;
-    for (const [id, value] of Object.entries(data.colors)) {
+    await sql`
+      insert into site_settings (key, value) values ('email_font', ${data.font})
+      on conflict (key) do update set value = excluded.value
+    `;
+    if (!data.buttonText) await sql`delete from site_settings where key = 'email_button_text'`;
+    else {
       await sql`
-        insert into site_settings (key, value) values (${`email_color_${id}`}, ${value})
+        insert into site_settings (key, value) values ('email_button_text', ${data.buttonText})
         on conflict (key) do update set value = excluded.value
       `;
     }
-    return data;
+    for (const field of EMAIL_COLOR_FIELDS) {
+      const value = data.colors[field.id];
+      await sql`
+        insert into site_settings (key, value) values (${`email_color_${field.id}`}, ${value})
+        on conflict (key) do update set value = excluded.value
+      `;
+    }
+    return { ...data, colors: { ...data.colors, font: data.font, buttonText: data.buttonText } };
   });
 
 export const setDeskSwitch = createServerFn({ method: "POST" })
@@ -6309,7 +6328,7 @@ const DESK_MAIL: Partial<Record<MailStep, { subject: string; message: string }>>
   },
   payment_approved: {
     subject: "Your payment receipt",
-    message: "Your advisor approved the payment. This certificate is active. The payment receipt is attached. Keep it with your records. A $4.99 dealing fee applies to this purchase.",
+    message: "Your advisor approved the payment. This certificate is active. The payment receipt is attached. Keep it with your records.",
   },
   investment_cancelled: {
     subject: "Your certificate request was cancelled",

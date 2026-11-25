@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Menu, X } from "lucide-react";
 import { headerActionClass, SiteHeader, useBrand } from "@/components/site-header";
-import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, accountReadyLetter, cdarsIntroLetter, cdarsLetter, cdUpdateLetter, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
+import { applicationApprovedDefaults, applicationLetter, applyEmailStyle, accountReadyLetter, cdarsIntroLetter, cdarsLetter, cdUpdateLetter, defaultApplicationCopy, defaultExclusiveCopy, defaultExtensionCopy, defaultFollowupCopy, defaultHtrCopy, defaultLeadCopy, defaultPromoReminderCopy, EMAIL_STYLES, EMAIL_FONTS, EMAIL_COLOR_FIELDS, DEFAULT_EMAIL_COLORS, ADVISOR_MAIL_STEPS, exclusiveLetter, extensionLetter, followupLetter, htrLetter, leadLetter, mailStepLabel, promoReminderLetter, renderStep, templateCatalog, advisorNoteLetter } from "@/lib/email-templates";
 import { wealthIntroLetter } from "@/lib/wealth-letter";
 import {
   adminLogin,
@@ -364,7 +364,7 @@ function EmailsPanel() {
   const [audience, setAudience] = useState("all");
   const [origin, setOrigin] = useState("");
   const brand = useBrand();
-  const [emailStyles, setEmailStyles] = useState({ advisor: "classic", transactional: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
+  const [emailStyles, setEmailStyles] = useState({ advisor: "classic", transactional: "classic", font: "style", buttonText: "", colors: { ...DEFAULT_EMAIL_COLORS } });
   const [styleStatus, setStyleStatus] = useState("");
   const signature = advisors.find(item => item.id === signatureId) ?? advisors[0];
   const templates = templateCatalog(brand.companyName, brand.emailLogo, brand.publicDomain || origin, signature, brand.companyPhone, emailStyles).filter(item => audience === "all" || item.audience === audience);
@@ -387,7 +387,7 @@ function EmailsPanel() {
     saveEmailStyles({ data: next }).then(() => setStyleStatus("Saved.")).catch(() => setStyleStatus("Could not save the letter colors."));
   }
   function resetColors() {
-    const next = { ...emailStyles, colors: { ...DEFAULT_EMAIL_COLORS } };
+    const next = { ...emailStyles, buttonText: "", colors: { ...DEFAULT_EMAIL_COLORS } };
     setEmailStyles(next);
     setStyleStatus("Saving…");
     saveEmailStyles({ data: next }).then(() => setStyleStatus("Email colors reset.")).catch(() => setStyleStatus("Could not save the letter colors."));
@@ -398,7 +398,7 @@ function EmailsPanel() {
       setSignatureId(current => current || people[people.length - 1]?.id || "");
     }).catch(() => void 0);
   }, []);
-  return <section><h1 className="text-3xl font-semibold">Email templates</h1><p className="mt-2 max-w-2xl text-fg">Client letters are email. Desk copies of those steps are sent to Telegram. Lead letters sign off with the advisor you select.</p><label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Signature</span><select className={`${controlClass} mt-1`} value={signature?.id ?? ""} onChange={event => setSignatureId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor letters</span><select className={`${controlClass} mt-1`} value={emailStyles.advisor} onChange={event => chooseStyle("advisor", event.target.value)}>{EMAIL_STYLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">{EMAIL_STYLES.find(item => item.id === emailStyles.advisor)?.note}</span></label><label className="block text-sm"><span className="font-semibold text-primary">Transactional notes</span><select className={`${controlClass} mt-1`} value={emailStyles.transactional} onChange={event => chooseStyle("transactional", event.target.value)}>{EMAIL_STYLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">{EMAIL_STYLES.find(item => item.id === emailStyles.transactional)?.note}</span></label></div><div className="mt-4 grid max-w-3xl gap-3 sm:grid-cols-2">{EMAIL_COLOR_FIELDS.map(field => <ColorSetting key={field.id} label={field.label} value={emailStyles.colors?.[field.id] || DEFAULT_EMAIL_COLORS[field.id]} onChange={value => chooseColor(field.id, value)} />)}</div><button type="button" className="mt-3 text-sm font-semibold text-primary" onClick={resetColors}>Reset email colors</button><p className="mt-1 max-w-2xl text-xs text-fg">A color left at its starting value follows the letter style. Change it to use that color in every letter.</p>{styleStatus ? <p className="mt-2 text-sm text-fg">{styleStatus}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{["all", "client", "admin"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (audience === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setAudience(key)}>{key === "all" ? "All" : key === "client" ? "Client" : "Admin"}</button>)}</div><ul className="mt-4 grid gap-4">{templates.map(item => <li key={`${item.step}-${item.audience}`} className="rounded-md border border-border bg-surface px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-action">{item.audience === "admin" ? "Desk" : "Client"} · {item.label}</p><p className="mt-1 font-semibold text-primary">{item.subject}</p><LetterPreview html={item.html} title={item.subject} height="h-[640px]" /></li>)}</ul></section>;
+  return <section><h1 className="text-3xl font-semibold">Email templates</h1><p className="mt-2 max-w-2xl text-fg">Client letters are email. Desk copies of those steps are sent to Telegram. Lead letters sign off with the advisor you select.</p><label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Signature</span><select className={`${controlClass} mt-1`} value={signature?.id ?? ""} onChange={event => setSignatureId(event.target.value)}>{advisors.length === 0 ? <option value="">No advisors yet</option> : null}{advisors.map(item => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}{item.email ? ` · ${item.email}` : ""}</option>)}</select></label><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Advisor letters</span><select className={`${controlClass} mt-1`} value={emailStyles.advisor} onChange={event => chooseStyle("advisor", event.target.value)}>{EMAIL_STYLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">{EMAIL_STYLES.find(item => item.id === emailStyles.advisor)?.note}</span></label><label className="block text-sm"><span className="font-semibold text-primary">Transactional notes</span><select className={`${controlClass} mt-1`} value={emailStyles.transactional} onChange={event => chooseStyle("transactional", event.target.value)}>{EMAIL_STYLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">{EMAIL_STYLES.find(item => item.id === emailStyles.transactional)?.note}</span></label><label className="block text-sm sm:col-span-2"><span className="font-semibold text-primary">Email body font</span><select className={`${controlClass} mt-1`} value={emailStyles.font || "style"} onChange={event => chooseStyle("font", event.target.value)}>{EMAIL_FONTS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><span className="mt-1 block text-xs text-fg">Used for the letter text. Match the letter style keeps Arial, or Georgia on Letterhead and Counsel.</span></label></div><div className="mt-4 grid max-w-3xl gap-3 sm:grid-cols-2">{EMAIL_COLOR_FIELDS.map(field => <ColorSetting key={field.id} label={field.label} value={emailStyles.colors?.[field.id] || DEFAULT_EMAIL_COLORS[field.id]} onChange={value => chooseColor(field.id, value)} />)}<div><ColorSetting label="Button text" value={emailStyles.buttonText || "#ffffff"} onChange={value => chooseStyle("buttonText", value)} /><button type="button" className="mt-1 text-xs font-semibold text-primary" onClick={() => chooseStyle("buttonText", "")}>Use automatic button text</button></div></div><button type="button" className="mt-3 text-sm font-semibold text-primary" onClick={resetColors}>Reset email colors</button><p className="mt-1 max-w-2xl text-xs text-fg">A color left at its starting value follows the letter style. Button text is automatic until you pick a color. Change a color to use it in every letter.</p>{styleStatus ? <p className="mt-2 text-sm text-fg">{styleStatus}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{["all", "client", "admin"].map(key => <button key={key} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (audience === key ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => setAudience(key)}>{key === "all" ? "All" : key === "client" ? "Client" : "Admin"}</button>)}</div><ul className="mt-4 grid gap-4">{templates.map(item => <li key={`${item.step}-${item.audience}`} className="rounded-md border border-border bg-surface px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-action">{item.audience === "admin" ? "Desk" : "Client"} · {item.label}</p><p className="mt-1 font-semibold text-primary">{item.subject}</p><LetterPreview html={item.html} title={item.subject} height="h-[640px]" /></li>)}</ul></section>;
 }
 var MAIL_STATUS_LABEL = {
   opened: "Opened",
@@ -706,6 +706,7 @@ function SettingsPanel({
   const [backupEmail, setBackupEmail] = useState(brand.backupEmail);
   const [publicDomain, setPublicDomain] = useState(brand.publicDomain);
   const [colorAction, setColorAction] = useState(brand.colorAction);
+  const [colorActionText, setColorActionText] = useState(brand.colorActionText || "#ffffff");
   const [colorHeading, setColorHeading] = useState(brand.colorHeading);
   const [colorText, setColorText] = useState(brand.colorText);
   const [colorLabel, setColorLabel] = useState(brand.colorLabel);
@@ -764,6 +765,7 @@ function SettingsPanel({
     setBackupEmail(brand.backupEmail);
     setPublicDomain(brand.publicDomain);
     setColorAction(brand.colorAction);
+    setColorActionText(brand.colorActionText || "#ffffff");
     setColorHeading(brand.colorHeading);
     setColorText(brand.colorText);
     setColorLabel(brand.colorLabel);
@@ -772,7 +774,7 @@ function SettingsPanel({
     setPageBackground(brand.pageBackground);
     setWantImage(Boolean(brand.pageBackground?.startsWith("data:image/")));
     setLastBackupAt(brand.lastBackupAt);
-  }, [brand.logo, brand.favicon, brand.companyName, brand.companyPhone, brand.companyAddress, brand.cloudflareCode, brand.cover, brand.socialBanner, brand.emailLogo, brand.footerLogo, brand.pdfLogo, brand.footerText, brand.backupEmail, brand.publicDomain, brand.lastBackupAt, brand.colorAction, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
+  }, [brand.logo, brand.favicon, brand.companyName, brand.companyPhone, brand.companyAddress, brand.cloudflareCode, brand.cover, brand.socialBanner, brand.emailLogo, brand.footerLogo, brand.pdfLogo, brand.footerText, brand.backupEmail, brand.publicDomain, brand.lastBackupAt, brand.colorAction, brand.colorActionText, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
   useEffect(() => {
     getMailSetup().then(setup => {
       setMailFrom(setup.mailFrom);
@@ -847,6 +849,7 @@ function SettingsPanel({
           lastBackupAt,
           publicDomain,
           colorAction,
+          colorActionText,
           colorHeading,
           colorText,
           colorLabel,
@@ -1118,7 +1121,7 @@ function SettingsPanel({
               setHasTelegram(setup.hasTelegram);
               setNotice("Telegram bot token removed.");
             }).catch(() => setError("Could not remove the Telegram token.")).finally(() => setTelegramPending(false));
-          }}>Remove token</button> : null}</div></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Cloudflare code</span><textarea className={controlClass + " min-h-28 font-mono text-sm"} value={cloudflareCode} placeholder="Paste the Cloudflare Web Analytics snippet or token" onChange={event => setCloudflareCode(event.target.value)} /></label></Fragment> : null}{section === "appearance" ? <Fragment><p className="mt-2 max-w-2xl text-fg">These colors are used for buttons, headings, text, labels, borders, and the page behind the background picture.</p><div className="mt-6 grid max-w-3xl gap-4 sm:grid-cols-2"><ColorSetting label="Button" value={colorAction} onChange={setColorAction} /><ColorSetting label="Headings" value={colorHeading} onChange={setColorHeading} /><ColorSetting label="Text" value={colorText} onChange={setColorText} /><ColorSetting label="Labels" value={colorLabel} onChange={setColorLabel} /><ColorSetting label="Borders" value={colorBorder} onChange={setColorBorder} /><ColorSetting label="Page background" value={colorBackground} onChange={setColorBackground} /></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><p className="text-sm font-semibold text-primary">Background picture</p><div className="mt-3 flex flex-wrap gap-2">{[["pattern", "Built-in pattern"], ["none", "No background"], ["image", "Custom picture"]].map(([id, label]) => {
+          }}>Remove token</button> : null}</div></div><label className="mt-6 block max-w-xl"><span className="mb-1.5 block text-sm font-medium">Cloudflare code</span><textarea className={controlClass + " min-h-28 font-mono text-sm"} value={cloudflareCode} placeholder="Paste the Cloudflare Web Analytics snippet or token" onChange={event => setCloudflareCode(event.target.value)} /></label></Fragment> : null}{section === "appearance" ? <Fragment><p className="mt-2 max-w-2xl text-fg">These colors are used for buttons, the words on buttons, headings, text, labels, borders, and the page behind the background picture.</p><div className="mt-6 grid max-w-3xl gap-4 sm:grid-cols-2"><ColorSetting label="Button" value={colorAction} onChange={setColorAction} /><ColorSetting label="Button text" value={colorActionText} onChange={setColorActionText} /><ColorSetting label="Headings" value={colorHeading} onChange={setColorHeading} /><ColorSetting label="Text" value={colorText} onChange={setColorText} /><ColorSetting label="Labels" value={colorLabel} onChange={setColorLabel} /><ColorSetting label="Borders" value={colorBorder} onChange={setColorBorder} /><ColorSetting label="Page background" value={colorBackground} onChange={setColorBackground} /></div><div className="mt-6 max-w-xl rounded-lg border border-border bg-surface p-4"><p className="text-sm font-semibold text-primary">Background picture</p><div className="mt-3 flex flex-wrap gap-2">{[["pattern", "Built-in pattern"], ["none", "No background"], ["image", "Custom picture"]].map(([id, label]) => {
             const mode = pageBackground === "none" ? "none" : pageBackground?.startsWith("data:image/") || wantImage ? "image" : "pattern";
             return <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (mode === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
               if (id === "none") {
@@ -1137,6 +1140,7 @@ function SettingsPanel({
             setPageBackground(null);
           }} /></div> : <p className="mt-3 text-sm text-fg">The built-in grey pattern repeats behind every page.</p>}</div><button type="button" className="mt-4 text-sm font-semibold text-primary" onClick={() => {
         setColorAction(DEFAULT_THEME.colorAction);
+        setColorActionText(DEFAULT_THEME.colorActionText);
         setColorHeading(DEFAULT_THEME.colorHeading);
         setColorText(DEFAULT_THEME.colorText);
         setColorLabel(DEFAULT_THEME.colorLabel);
@@ -2060,7 +2064,7 @@ function LeadsPanel({
     companyPhone: brand.companyPhone,
     copy: extensionCopy
   });
-  const exclusiveStandard = defaultExclusiveCopy();
+  const exclusiveStandard = defaultExclusiveCopy(kind === "exclusive-fdic" ? "Promo rates" : "Promo rates 250+");
   const exclusiveText = exclusiveCopy ?? exclusiveStandard;
   const exclusiveMail = exclusiveLetter({
     leadName: activeName.trim() || "there",
@@ -2332,7 +2336,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, the exclusive new-client promotion, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a featured brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Exclusive promo"], ["exclusive-fdic", "Exclusive promo FDIC"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["htr-call", "HTR with form"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Featured CDs"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, Promo rates, Promo rates 250+, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a featured brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Promo rates 250+"], ["exclusive-fdic", "Promo rates"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["htr-call", "HTR with form"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Featured CDs"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -2463,7 +2467,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} featured CD emails` : "Send featured CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} promos` : "Send exclusive promo" : kind === "exclusive-fdic" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} FDIC promos` : "Send exclusive promo FDIC" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "htr-call" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR with form emails` : "Send HTR with form" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} featured CD emails` : "Send featured CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} Promo rates 250+` : "Send Promo rates 250+" : kind === "exclusive-fdic" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} Promo rates` : "Send Promo rates" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "htr-call" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR with form emails` : "Send HTR with form" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2692,8 +2696,8 @@ async function downloadLeadTemplate() {
 
 const QUICK_MAIL = [
   ["rates", "Rates introduction", "lead_intro"],
-  ["exclusive", "Exclusive promo", "lead_exclusive"],
-  ["exclusive-fdic", "Exclusive promo FDIC", "lead_exclusive_fdic"],
+  ["exclusive", "Promo rates 250+", "lead_exclusive"],
+  ["exclusive-fdic", "Promo rates", "lead_exclusive_fdic"],
   ["promo", "Promo application", "lead_promo"],
   ["reminder", "Promo reminder", "lead_promo_reminder"],
   ["followup", "Promo follow-up", "lead_followup"],
@@ -3682,7 +3686,7 @@ function IntroOpensPanel({
     setError("");
     setNotice("");
     if (!row.advisorId) {
-      setError("This open has no advisor, so the exclusive promo cannot be sent.");
+      setError("This open has no advisor, so Promo rates 250+ cannot be sent.");
       return;
     }
     setPending(true);
@@ -3695,9 +3699,9 @@ function IntroOpensPanel({
         }
       });
       await load();
-      setNotice(`Exclusive promo sent to ${row.email}.`);
+      setNotice(`Promo rates 250+ sent to ${row.email}.`);
     } catch (caught) {
-      setError(caught instanceof Error && caught.message ? caught.message : "The exclusive promo could not be sent.");
+      setError(caught instanceof Error && caught.message ? caught.message : "Promo rates 250+ could not be sent.");
     } finally {
       setPending(false);
     }
@@ -3850,7 +3854,7 @@ function IntroOpensPanel({
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 className="text-3xl font-semibold">{view === "trash" ? "Trash" : "Opens"}</h1>
-        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "A lead appears after a rates introduction, an exclusive promo, or an application email. Status badges sit under the step. An expired application link can be sent again."}</p>
+        <p className="mt-2 max-w-2xl text-fg">{view === "trash" ? "Restore an open to put it back in the list, or remove it for good." : "A lead appears after a rates introduction, Promo rates, Promo rates 250+, or an application email. Status badges sit under the step. An expired application link can be sent again."}</p>
       </div>
       {view === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button> : null}
     </div>
@@ -3952,7 +3956,7 @@ function IntroOpensPanel({
             })}>Application email</button> : null}
             {view === "open" && row.applicationSent && row.inviteStatus === "open" ? <button type="button" className="min-h-11 rounded-md bg-action px-3 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void resendApplication(row)}>Send new link</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void resendPromo(row)}>Resend promo</button> : null}
-            {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendExclusive(row)}>Exclusive promo</button> : null}
+            {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendExclusive(row)}>Promo rates 250+</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendReminder(row)}>Promo reminder</button> : null}
             {view === "open" ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void sendCdars(row)}>CDARS</button> : null}
             {view === "open" && applied ? <button type="button" className="min-h-11 rounded-md border border-border px-3 py-2 text-sm font-semibold text-primary disabled:opacity-60" disabled={pending} onClick={() => void openAccountReview(row)}>App & ID received</button> : null}

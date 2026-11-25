@@ -65,6 +65,7 @@ export function BrandProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty("--color-action", brand.colorAction);
+    root.style.setProperty("--color-on-primary", brand.colorActionText || "#ffffff");
     root.style.setProperty("--color-heading", brand.colorHeading);
     root.style.setProperty("--color-fg", brand.colorText);
     root.style.setProperty("--color-primary", brand.colorLabel);
@@ -74,7 +75,7 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     if (picture === "none") root.style.setProperty("--page-bg-layers", "none");
     else if (picture?.startsWith("data:image/")) root.style.setProperty("--page-bg-layers", `linear-gradient(rgb(255 255 255 / 30%), rgb(255 255 255 / 30%)), url("${picture}")`);
     else root.style.removeProperty("--page-bg-layers");
-  }, [brand.colorAction, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
+  }, [brand.colorAction, brand.colorActionText, brand.colorHeading, brand.colorText, brand.colorLabel, brand.colorBorder, brand.colorBackground, brand.pageBackground]);
 
   useEffect(() => {
     if (!brand.favicon) return;

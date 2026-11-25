@@ -1,6 +1,6 @@
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
 import type { Sql } from "@/lib/db";
-import { renderStep, type MailStep, normalizeEmailStyle, normalizeEmailColors, type EmailStyle, type EmailColors } from "@/lib/email-templates";
+import { renderStep, type MailStep, normalizeEmailStyle, normalizeEmailFont, normalizeEmailHex, normalizeEmailColors, type EmailStyle, type EmailColors } from "@/lib/email-templates";
 import { env } from "@/lib/env.server";
 
 export type { MailStep };
@@ -145,10 +145,10 @@ async function readEmailLogo(sql: Sql) {
   return rows[0]?.value || null;
 }
 
-export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; transactional: EmailStyle; colors: EmailColors }> {
+export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; transactional: EmailStyle; font: string; buttonText: string; colors: EmailColors & { font: string; buttonText: string } }> {
   const rows = await sql<{ key: string; value: string }>`
     select key, value from site_settings where key in (
-      'email_style_advisor', 'email_style_transactional',
+      'email_style_advisor', 'email_style_transactional', 'email_font', 'email_button_text',
       'email_color_header', 'email_color_button', 'email_color_heading', 'email_color_accent',
       'email_color_paper', 'email_color_card', 'email_color_text', 'email_color_border', 'email_color_muted'
     )
@@ -156,12 +156,15 @@ export async function readEmailStyles(sql: Sql): Promise<{ advisor: EmailStyle; 
   const stored: Partial<EmailColors> = {};
   const advisor = rows.find((row) => row.key === "email_style_advisor")?.value;
   const transactional = rows.find((row) => row.key === "email_style_transactional")?.value;
+  const font = normalizeEmailFont(rows.find((row) => row.key === "email_font")?.value);
+  const buttonText = normalizeEmailHex(rows.find((row) => row.key === "email_button_text")?.value);
   for (const row of rows) {
     if (!row.key.startsWith("email_color_")) continue;
     const id = row.key.slice("email_color_".length) as keyof EmailColors;
     stored[id] = row.value;
   }
-  return { advisor: normalizeEmailStyle(advisor), transactional: normalizeEmailStyle(transactional), colors: normalizeEmailColors(stored) };
+  const colors = normalizeEmailColors(stored);
+  return { advisor: normalizeEmailStyle(advisor), transactional: normalizeEmailStyle(transactional), font, buttonText, colors: { ...colors, font, buttonText } };
 }
 
 export async function readMailConfig(sql: Sql) {

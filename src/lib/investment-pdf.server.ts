@@ -821,15 +821,6 @@ export async function buildInvestmentPdf(input: InvestmentPdfInput) {
   y -= 2;
   const cover = input.capitalProtection || "100% cover on the first $250,000 per individual or $500,000 per joint account";
   for (const line of wrap(cover, 88)) text(line, 10, font);
-  y -= 4;
-  text("Fees", 13, bold);
-  y -= 2;
-  for (const line of wrap(
-    "A fixed $4.99 dealing fee applies to each purchase. Where early liquidation is available, a $4.99 fee applies to each request. If the certificate is held to maturity, no early-liquidation fee applies. Early withdrawal penalties may apply.",
-    88,
-  )) {
-    text(line, 10, font);
-  }
 
   y -= 10;
   text("Investor signature", 13, bold);

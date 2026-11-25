@@ -241,5 +241,5 @@ export function sampleWealthIntroLetter(portalUrl?: string, advisor?: WealthAdvi
     portalUrl: origin,
     companyPhone,
     link: origin ? `${origin}/onboarding?invite=preview` : "",
-  });
+  }).html;
 }

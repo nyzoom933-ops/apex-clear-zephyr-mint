@@ -1985,7 +1985,6 @@ function SignTerms({
         <TermLine icon={Wallet} label="Amount" value={position.amount} />
         <TermLine icon={Percent} label="Promo APY" value={rates.promo} />
         <TermLine icon={BadgePercent} label="Final APY" value={rates.final} />
-        <TermLine icon={Receipt} label="Dealing fee" value="A $4.99 fee applies" />
         <TermLine icon={Lock} label="Callable feature" value="Non-callable" />
         <TermLine icon={TriangleAlert} label="Early withdrawal" value="Penalties may apply" />
         <TermLine icon={Shield} label="Capital protection" value="First $250,000 per individual or $500,000 per joint account" />
@@ -2136,8 +2135,6 @@ function TermsPdf({ id, compact = false, signed = false }: { id: string; compact
           </div>
           <p className="mt-4 font-semibold text-primary">Capital protection</p>
           <p className="mt-1">{sheet.capitalProtection || "100% cover on the first $250,000 per individual or $500,000 per joint account."}</p>
-          <p className="mt-3 font-semibold text-primary">Fees</p>
-          <p className="mt-1">A fixed $4.99 dealing fee applies to each purchase. Early liquidation, where available, is $4.99 per request. No early-liquidation fee applies if the certificate is held to maturity.</p>
           <p className="mt-3 font-semibold text-primary">Signature</p>
           <p className="mt-1">{sheet.signerName ? `${sheet.signerName}${sheet.signedOn ? ` · signed ${sheet.signedOn}` : ""}` : "Not signed yet."}</p>
         </div>
