@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { COUNTRIES } from "@/lib/application-data";
-import { getLeadInvite, submitWealthApplication } from "@/lib/admin.functions";
+import { getBrokeredOffers, getLeadInvite, submitWealthApplication } from "@/lib/admin.functions";
 import { useBrand } from "@/components/site-header";
-import { wealthOfferById } from "@/lib/wealth-letter";
+import { WEALTH_OFFERS, type WealthOffer } from "@/lib/wealth-letter";
 
 const TITLES = ["", "Mr", "Mrs", "Ms", "Mx", "Dr", "Prof"];
 const EMPLOYMENT = ["Employed", "Self-employed", "Retired", "Not employed"];
@@ -51,7 +51,8 @@ async function readUpload(file: File | undefined) {
 
 export function WealthApplication({ invite, offer }: { invite: string; offer: string }) {
   const brand = useBrand();
-  const selected = wealthOfferById(offer);
+  const [offers, setOffers] = useState<WealthOffer[]>(WEALTH_OFFERS);
+  const selected = offers.find((item) => item.id === offer) || null;
   const [status, setStatus] = useState<"loading" | "open" | "missing" | "expired" | "used" | "sent">("loading");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -99,6 +100,9 @@ export function WealthApplication({ invite, offer }: { invite: string; offer: st
     setForm((current) => ({ ...current, [key]: value }));
   }
   useEffect(() => {
+    void getBrokeredOffers().then((next) => {
+      if (next.length) setOffers(next);
+    }).catch(() => undefined);
     if (!invite) {
       setStatus("missing");
       return;

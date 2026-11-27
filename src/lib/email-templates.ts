@@ -270,12 +270,12 @@ const STEPS: Record<MailStep, StepCopy> = {
     adminLead: "A CDARS introduction was sent to {{name}} ({{email}}).",
   },
   lead_wealth: {
-    label: "Featured CD introduction",
-    clientSubject: "Featured brokered CD rates",
+    label: "Brokered CD",
+    clientSubject: "Brokered CD rates",
     clientLead: "",
     clientNext: "",
-    adminSubject: "Featured CD introduction sent to {{name}}",
-    adminLead: "A featured brokered CD introduction was sent to {{name}} ({{email}}).",
+    adminSubject: "Brokered CD sent to {{name}}",
+    adminLead: "A brokered CD introduction was sent to {{name}} ({{email}}).",
   },
   lead_account_ready: {
     label: "Application and ID received",
@@ -396,6 +396,10 @@ export function normalizeEmailColors(value: Partial<EmailColors> | null | undefi
 
 export type EmailPaint = Partial<EmailColors> & { font?: string; buttonText?: string; headerText?: string };
 
+export function fixArticles(value: string) {
+  return value.replace(/(^|[^A-Za-z])([Aa])( +)(?=[aeiouAEIOU])/g, (_match, before: string, article: string, spaces: string) => `${before}${article === "A" ? "An" : "an"}${spaces}`);
+}
+
 export function applyEmailStyle(html: string, style: EmailStyle | string | null | undefined, colors?: EmailPaint | null) {
   if (!html || typeof html !== "string") return typeof html === "string" ? html : "";
   const chosen = normalizeEmailStyle(style);
@@ -443,7 +447,7 @@ export function applyEmailStyle(html: string, style: EmailStyle | string | null 
       .replaceAll(`background:${palette.header};padding:18px 32px;`, `background:${palette.header};border-bottom:1px solid ${palette.button};padding:18px 32px;`)
       .replaceAll(`background:${palette.heading}; height:4px; font-size:0; line-height:0;`, `background:${palette.button}; height:1px; font-size:0; line-height:0;`);
   }
-  return next;
+  return fixArticles(next);
 }
 
 function mailButton(href: string, label: string, margin = "0") {

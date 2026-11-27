@@ -301,7 +301,6 @@ export const submitWealthApplication = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const { EMPTY_FORM } = await import("@/lib/application-data");
     const { readLeadInvite } = await import("@/lib/lead-invites.server");
-    const { wealthOfferById } = await import("@/lib/wealth-letter");
     const sql = await getSql();
     const invite = await readLeadInvite(sql, (data.invite || "").trim());
     if (invite.status !== "open" || invite.kind !== "wealth") throw new Error("This application link has expired.");
@@ -323,7 +322,8 @@ export const submitWealthApplication = createServerFn({ method: "POST" })
       throw new Error("Complete the joint accountholder details.");
     }
     const [dobYear, dobMonth, dobDay] = data.dob.split("-");
-    const offer = wealthOfferById(clean(data.offer, 40));
+    const offers = await readBrokeredOffers(sql);
+    const offer = offers.find((item) => item.id === clean(data.offer, 40)) || null;
     const months = offer?.term.match(/\d+/)?.[0] || "";
     const selectedOffer = offer ? `${offer.bank} · ${offer.term} · ${offer.apy} APY` : "";
     const jointName = joint ? [clean(data.jointTitle, 20), clean(data.jointFirstName, 80), clean(data.jointSurname, 80)].filter(Boolean).join(" ") : "";
@@ -3136,19 +3136,48 @@ export const sendLeadCdarsIntro = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+async function readBrokeredOffers(sql: Sql) {
+  const { WEALTH_OFFERS, normalizeBrokeredOffers } = await import("@/lib/wealth-letter");
+  const rows = await sql<{ value: string }>`select value from site_settings where key = 'brokered_offers'`;
+  if (!rows[0]) return WEALTH_OFFERS;
+  try {
+    return normalizeBrokeredOffers(JSON.parse(rows[0].value || "[]"), false);
+  } catch {
+    return WEALTH_OFFERS;
+  }
+}
+
+export const getBrokeredOffers = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  return readBrokeredOffers(await getSql());
+});
+
+export const saveBrokeredOffers = createServerFn({ method: "POST" })
+  .validator((input: { offers?: unknown }) => ({ offers: Array.isArray(input.offers) ? input.offers : [] }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const { getSql } = await import("@/lib/db");
+    const { normalizeBrokeredOffers } = await import("@/lib/wealth-letter");
+    const sql = await getSql();
+    const offers = normalizeBrokeredOffers(data.offers, false);
+    if (!offers.length) throw new Error("Add at least one bank, with an APY.");
+    await saveSetting(sql, "brokered_offers", JSON.stringify(offers));
+    return offers;
+  });
+
 export const sendLeadWealth = createServerFn({ method: "POST" })
-  .validator((input: { advisorId: string; name: string; email: string; cc?: string }) => {
+  .validator((input: { advisorId: string; name: string; email: string; cc?: string; offers?: unknown }) => {
     const name = input.name.trim().replace(/\s+/g, " ");
     const email = input.email.trim().toLowerCase();
     if (name.length < 2 || name.length > 80) throw new Error("Enter the lead's name.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter the lead's email.");
     if (!input.advisorId) throw new Error("Select an advisor.");
-    return { advisorId: input.advisorId, name, email, cc: leadCc(input) };
+    return { advisorId: input.advisorId, name, email, cc: leadCc(input), offers: Array.isArray(input.offers) ? input.offers : null };
   })
   .handler(async ({ data }) => {
     await requireAdmin();
     const { getSql } = await import("@/lib/db");
-    const { wealthIntroLetter } = await import("@/lib/wealth-letter");
+    const { wealthIntroLetter, normalizeBrokeredOffers } = await import("@/lib/wealth-letter");
     const sql = await getSql();
     await sql`alter table advisors add column if not exists role text not null default ''`;
     await sql`alter table advisors add column if not exists personal_phone text not null default ''`;
@@ -3157,19 +3186,30 @@ export const sendLeadWealth = createServerFn({ method: "POST" })
     if (!found) throw new Error("Select an advisor.");
     const advisor = { ...found, personalPhone: found.personal_phone };
     if (!advisor.mailbox.trim()) throw new Error("Add this advisor's verified mailbox on the Advisors tab.");
+    const offers = data.offers ? normalizeBrokeredOffers(data.offers, false) : await readBrokeredOffers(sql);
+    if (!offers.length) throw new Error("Add at least one brokered bank offer.");
+    if (data.offers) await saveSetting(sql, "brokered_offers", JSON.stringify(offers));
     const settings = await sql<{ key: string; value: string }>`select key, value from site_settings where key in ('email_logo', 'public_domain', 'company_phone')`;
     const origin = settings.find((row) => row.key === "public_domain")?.value || "";
     if (!/^https?:\/\//i.test(origin.trim())) throw new Error("Set the public domain in Settings before sending this email.");
+    const terms = await sql<{ apy: string; months: number }>`select apy, months from cd_terms order by months asc`;
+    const promo = await loadPromo(sql);
     const { createLeadInvite, inviteOnboardingUrl } = await import("@/lib/lead-invites.server");
     const token = await createLeadInvite(sql, { email: data.email, name: data.name, months: 0, promoCode: "", kind: "wealth", process: "assisted", advisor });
     const link = inviteOnboardingUrl(origin, token);
+    const callLink = await callScheduleLink(sql, data.email, data.name, advisor.name);
     const letter = wealthIntroLetter({
       leadName: data.name,
       company: await readCompanyName(sql),
       advisor,
+      logo: settings.find((row) => row.key === "email_logo")?.value || null,
       portalUrl: origin,
       companyPhone: settings.find((row) => row.key === "company_phone")?.value || "",
       link,
+      callLink,
+      offers,
+      terms: terms.map((term) => ({ months: Number(term.months), apy: term.apy })),
+      promo,
     });
     await sendStep(sql, {
       step: "lead_wealth",
@@ -3177,7 +3217,7 @@ export const sendLeadWealth = createServerFn({ method: "POST" })
       cc: data.cc,
       clientName: data.name,
       detail: letter.text,
-      adminDetail: ["Featured brokered CD introduction", link].filter(Boolean).join("\n"),
+      adminDetail: ["Brokered CD", ...offers.map((offer) => `${offer.bank} ${offer.term} ${offer.apy}`), link].filter(Boolean).join("\n"),
       extraHtml: letter.html,
       subject: letter.subject,
       replyTo: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(advisor.email) ? advisor.email : advisor.mailbox,

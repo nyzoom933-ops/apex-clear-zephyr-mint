@@ -1,6 +1,6 @@
 import { DEFAULT_COMPANY_NAME } from "@/lib/company";
 import type { Sql } from "@/lib/db";
-import { renderStep, type MailStep, normalizeEmailStyle, normalizeEmailFont, normalizeEmailHex, normalizeEmailColors, type EmailStyle, type EmailColors } from "@/lib/email-templates";
+import { renderStep, type MailStep, normalizeEmailStyle, normalizeEmailFont, normalizeEmailHex, normalizeEmailColors, fixArticles, type EmailStyle, type EmailColors } from "@/lib/email-templates";
 import { env } from "@/lib/env.server";
 
 export type { MailStep };
@@ -415,8 +415,8 @@ async function deliverSmtp2go(to: string, subject: string, text: string, html: s
           sender: senderAddress(from, replyName),
           to: [to],
           subject,
-          html_body: html,
-          text_body: text,
+          html_body: fixArticles(html),
+          text_body: fixArticles(text),
           ...(cc.length ? { cc } : {}),
           ...(replyTo ? { custom_headers: [{ header: "Reply-To", value: replyTo }] } : {}),
           ...smtpFiles(attachments),

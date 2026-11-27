@@ -103,6 +103,8 @@ import {
   approveInvoice,
   getCdTerms,
   getCdarsRates,
+  getBrokeredOffers,
+  saveBrokeredOffers,
   getInvestmentTypes,
   getPromo,
   DEFAULT_THEME,
@@ -295,7 +297,7 @@ function Cabinet({
               kind: "promo"
             });
             setTab("leads");
-          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status, silent) => void updateStatus(id, status, silent)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "transactions" ? <TransactionsDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
+          }} /> : tab === "clients" ? <ClientsPanel rows={clients} onRefresh={() => refresh()} onStatus={(id, status, silent) => void updateStatus(id, status, silent)} onMailed={noteApproval} onRemove={id => void removeApplication(id)} /> : tab === "investments" ? <RatesAndPromo /> : tab === "brokered" ? <BrokeredOffersPanel /> : tab === "funding" ? <FundingDesk /> : tab === "active" ? <ActiveCdsDesk /> : tab === "invoices" ? <InvoicesDesk /> : tab === "transactions" ? <TransactionsDesk /> : tab === "advisors" ? <AdvisorsPanel /> : tab === "inbox" ? <InboxPanel /> : tab === "leads" ? <LeadsPanel focus={emailFocus} onFocusUsed={() => setEmailFocus(null)} /> : tab === "mail-status" ? <MailStatusPanel /> : tab === "sent" ? <SentMailPanel /> : tab === "emails" ? <EmailsPanel /> : tab === "settings-logos" ? <SettingsPanel section="logos" /> : tab === "settings-appearance" ? <SettingsPanel section="appearance" /> : tab === "settings-misc" ? <SettingsPanel section="misc" /> : <SettingsPanel section="general" />}</div></div></div>;
 }
 function LetterPreview({
   html,
@@ -428,6 +430,7 @@ function MailStatusPanel() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
+  const [query, setQuery] = useState("");
   function load() {
     return listNotifications().then(setRows);
   }
@@ -453,11 +456,18 @@ function MailStatusPanel() {
       setPending(false);
     }
   }
-  return <section><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Email status</h1><p className="mt-2 max-w-2xl text-fg">Advisor letters are sent through SMTP2GO, which records when they are opened. Other desk mail still uses Resend. Status refreshes on its own while this desk is open. Use Sync status to check immediately.</p></div><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button></div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[980px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">When</th><th className="px-4 py-3 font-semibold">To</th><th className="px-4 py-3 font-semibold">Subject</th><th className="px-4 py-3 font-semibold">Sent</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Opened</th><th className="px-4 py-3 font-semibold">Link</th><th className="px-4 py-3 font-semibold">Expires</th></tr></thead><tbody>{(rows ?? []).map(row => {
+  const needle = query.trim().toLowerCase();
+  const shown = (rows ?? []).filter(row => {
+    if (!needle) return true;
+    const status = MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked");
+    const delivery = row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged";
+    return [row.recipient, row.subject, row.step, row.link, status, delivery, row.createdAt].join(" ").toLowerCase().includes(needle);
+  });
+  return <section><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-3xl font-semibold">Email status</h1><p className="mt-2 max-w-2xl text-fg">Advisor letters are sent through SMTP2GO, which records when they are opened. Other desk mail still uses Resend. Status refreshes on its own while this desk is open. Use Sync status to check immediately.</p></div><button type="button" className="min-h-11 rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending} onClick={() => void sync()}>{pending ? "Syncing…" : "Sync status"}</button></div>{error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-3 text-sm text-fg">{notice}</p> : null}<label className="mt-4 block max-w-md text-sm"><span className="font-semibold text-primary">Search</span><input className={`${controlClass} mt-1`} value={query} placeholder="Email, subject, or status" onChange={event => setQuery(event.target.value)} /></label><div className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface"><table className="w-full min-w-[980px] text-left text-sm"><thead className="border-b border-border text-xs tracking-wide text-primary uppercase"><tr><th className="px-4 py-3 font-semibold">When</th><th className="px-4 py-3 font-semibold">To</th><th className="px-4 py-3 font-semibold">Subject</th><th className="px-4 py-3 font-semibold">Sent</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Opened</th><th className="px-4 py-3 font-semibold">Link</th><th className="px-4 py-3 font-semibold">Expires</th></tr></thead><tbody>{shown.map(row => {
             const opened = row.mailStatus === "opened" || row.mailStatus === "clicked";
             const expiry = inviteExpiry(row.expiresAt, row.usedAt);
             return <tr key={row.id} className="border-b border-border last:border-0"><td className="px-4 py-3 whitespace-nowrap">{row.createdAt} UTC</td><td className="px-4 py-3"><span className="block">{row.recipient}</span><span className="text-xs text-[#8c8c8c]">{row.mailProvider === "telegram" ? "Telegram" : row.audience === "admin" ? "Desk" : "Client"}</span></td><td className="px-4 py-3">{row.subject}</td><td className="px-4 py-3">{row.delivery === "sent" ? "Sent" : row.delivery === "failed" ? "Failed" : "Logged"}</td><td className="px-4 py-3">{MAIL_STATUS_LABEL[row.mailStatus] || (row.resendId ? "Waiting" : "Not tracked")}</td><td className="px-4 py-3">{opened ? <span className="font-semibold text-[#0d6e4f]">Opened</span> : "—"}</td><td className="px-4 py-3">{row.link ? <a className="block max-w-[220px] truncate font-semibold text-action" href={row.link} title={row.link} target="_blank" rel="noreferrer">{row.link.replace(/^https?:\/\/[^/]+/, "")}</a> : "—"}</td><td className={"px-4 py-3 whitespace-nowrap " + (expiry === "Expired" ? "font-semibold text-danger" : "")}>{expiry}</td></tr>;
-          })}</tbody></table>{rows && rows.length === 0 ? <p className="px-4 py-6 text-sm text-fg">No emails yet.</p> : null}</div></section>;
+          })}</tbody></table>{rows && shown.length === 0 ? <p className="px-4 py-6 text-sm text-fg">{needle ? "No emails match that search." : "No emails yet."}</p> : null}</div></section>;
 }
 function newRowId() {
   try {
@@ -480,6 +490,35 @@ function alignPromoTerms(offer, terms) {
 function RatesAndPromo() {
   const [terms, setTerms] = useState(null);
   return <div className="grid gap-12"><InvestmentTypesPanel onTerms={setTerms} /><PromoPanel terms={terms} /></div>;
+}
+function BrokeredOffersPanel() {
+  const [offers, setOffers] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    getBrokeredOffers().then(setOffers).catch(() => setError("Brokered offers could not be loaded."));
+  }, []);
+  async function save() {
+    setPending(true);
+    setNotice("");
+    setError("");
+    try {
+      setOffers(await saveBrokeredOffers({ data: { offers: offers || [] } }));
+      setNotice("Brokered offers saved. The Brokered CD email uses this list.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The offers could not be saved.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return <section><h1 className="text-3xl font-semibold">Brokered CDs</h1><p className="mt-2 max-w-2xl text-fg">Rates from other banks shown on the Brokered CD email. Add a bank or edit one already listed.</p>{!offers ? <p className="mt-4 text-sm text-fg">Loading…</p> : <div className="mt-4"><BrokeredOfferFields offers={offers} onChange={setOffers} /></div>}{error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}{notice ? <p className="mt-4 text-sm text-fg">{notice}</p> : null}<button type="button" disabled={pending || !offers} className="mt-6 min-h-11 rounded-md bg-action px-5 py-2 font-semibold text-on-primary disabled:opacity-60" onClick={() => void save()}>{pending ? "Saving…" : "Save brokered offers"}</button></section>;
+}
+function BrokeredOfferFields({ offers, onChange }) {
+  function patch(id, key, value) {
+    onChange(offers.map(item => item.id === id ? { ...item, [key]: value } : item));
+  }
+  return <div className="grid gap-3">{offers.map(offer => <div key={offer.id} className="grid gap-3 rounded-md border border-border bg-surface p-3 sm:grid-cols-3"><AdminField label="Bank" value={offer.bank} onChange={value => patch(offer.id, "bank", value)} /><AdminField label="Badge" value={offer.badge} onChange={value => patch(offer.id, "badge", value)} /><AdminField label="Member line" value={offer.member} onChange={value => patch(offer.id, "member", value)} /><AdminField label="Term" value={offer.term} onChange={value => patch(offer.id, "term", value)} /><AdminField label="Minimum" value={offer.minimum} onChange={value => patch(offer.id, "minimum", value)} /><AdminField label="APY" value={offer.apy} onChange={value => patch(offer.id, "apy", value)} /><button type="button" className="min-h-11 text-left text-sm font-semibold text-primary sm:col-span-3" onClick={() => onChange(offers.filter(item => item.id !== offer.id))}>Remove</button></div>)}<button type="button" className="text-sm font-semibold text-primary" onClick={() => onChange([...offers, { id: `bank-${Date.now().toString(36)}`, badge: "Brokered CD", bank: "", member: "Member FDIC", term: "12 Month CD", minimum: "$100,000 minimum", apy: "" }])}>Add bank</button></div>;
 }
 function InvestmentTypesPanel({
   onTerms
@@ -1969,6 +2008,7 @@ function LeadsPanel({
     { months: 6, apy: "" },
     { months: 12, apy: "" }
   ]);
+  const [brokeredOffers, setBrokeredOffers] = useState([]);
   const [appCopy, setAppCopy] = useState(null);
   const [extCopy, setExtCopy] = useState(null);
   const [exclusiveCopy, setExclusiveCopy] = useState(null);
@@ -2007,6 +2047,9 @@ function LeadsPanel({
   useEffect(() => {
     void getCdarsRates().then(rates => {
       if (rates?.length) setCdarsRates(rates);
+    }).catch(() => undefined);
+    void getBrokeredOffers().then(offers => {
+      if (offers?.length) setBrokeredOffers(offers);
     }).catch(() => undefined);
   }, []);
   useEffect(() => {
@@ -2247,7 +2290,12 @@ function LeadsPanel({
     advisor,
     portalUrl: brand.publicDomain,
     companyPhone: brand.companyPhone,
-    link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : ""
+    logo: brand.emailLogo,
+    link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : "",
+    callLink: previewOrigin ? `${previewOrigin}/call?token=preview` : "https://preview.local/call?token=preview",
+    offers: brokeredOffers,
+    terms,
+    promo: offer
   });
   const letter = kind === "wealth" ? wealthMail : kind === "cdars-intro" ? cdarsIntroMail : kind === "cdars" ? cdarsMail : kind === "reminder" ? reminderMail : kind === "followup" ? followMail : kind === "exclusive-fdic" ? exclusiveFdicMail : kind === "exclusive" ? exclusiveMail : kind === "htr-call" ? htrCallMail : kind === "htr" ? htrMail : kind === "extension" ? extensionMail : kind === "rates" ? ratesLetter : formLetter;
   const preview = letter ? renderStep(kind === "promo" ? "lead_promo" : kind === "custom" || kind === "private" ? "lead_application" : kind === "extension" ? "lead_extension" : kind === "htr-call" ? "lead_htr_call" : kind === "htr" ? "lead_htr" : kind === "followup" ? "lead_followup" : kind === "reminder" ? "lead_promo_reminder" : kind === "cdars" ? "lead_cdars" : kind === "cdars-intro" ? "lead_cdars_intro" : kind === "wealth" ? "lead_wealth" : kind === "exclusive-fdic" ? "lead_exclusive_fdic" : kind === "exclusive" ? "lead_exclusive" : "lead_intro", "client", {
@@ -2417,7 +2465,7 @@ function LeadsPanel({
       setPending(false);
     }
   }
-  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, Promo rates, Promo rates 250+, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a featured brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Promo rates 250+"], ["exclusive-fdic", "Promo rates"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["htr-call", "HTR with form"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Featured CDs"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
+  return <section><h1 className="text-3xl font-semibold">Lead emails</h1><p className="mt-2 max-w-2xl text-fg">Send the rates introduction, Promo rates, Promo rates 250+, a promo application reminder, the November 6 rate extension, an HTR follow-up, a 10 and 22 month application follow-up, a custom-term application, an exclusive application for one client, a brokered CD introduction, a CDARS introduction, a CDARS application, or a promotional application. Application links expire after 48 hours. A reminder goes out about two hours before then.</p><div className="mt-4 flex flex-wrap gap-2">{[["rates", "Rates introduction"], ["exclusive", "Promo rates 250+"], ["exclusive-fdic", "Promo rates"], ["reminder", "Promo reminder"], ["extension", "Rate extension"], ["htr", "HTR"], ["htr-call", "HTR with form"], ["followup", "Promo follow-up"], ["custom", "Custom term"], ["private", "Exclusive application"], ["wealth", "Brokered CD"], ["cdars-intro", "CDARS intro"], ["cdars", "CDARS application"], ["promo", "Promo term"]].map(([id, label]) => <button key={id} type="button" className={"min-h-11 rounded-md border px-3 py-2 text-sm font-semibold " + (kind === id ? "border-action bg-action text-on-primary" : "border-border text-primary")} onClick={() => {
         setKind(id);
         setEditing(false);
         setAppCopy(null);
@@ -2454,7 +2502,7 @@ function LeadsPanel({
         }}><option value="">{leadQuery.trim().length < 2 ? "Type at least 2 letters" : leadOptions.length ? "Choose a lead" : "No matching leads"}</option>{leadOptions.map(item => <option key={item.id} value={item.id}>{item.name} · {item.email}</option>)}</select></label><label className="block text-sm"><span className="font-semibold text-primary">Lead name</span><input className={`${controlClass} mt-1`} value={name} onChange={event => setName(event.target.value)} /></label><label className="block text-sm"><span className="font-semibold text-primary">Lead email</span><input type="email" className={`${controlClass} mt-1`} value={email} onChange={event => setEmail(event.target.value)} /></label></>}{kind === "promo" ? <p className="text-sm text-fg">One application includes the promotional terms you check. The client chooses one of those terms on the form.</p> : null}{(kind === "rates" || kind === "exclusive" || kind === "exclusive-fdic" || kind === "promo") ? <PromoRateChecks terms={promoTermList} selected={selectedRates} onToggle={toggleRate} /> : null}{kind === "custom" ? <label className="block text-sm"><span className="font-semibold text-primary">Custom term</span><select className={`${controlClass} mt-1`} value={selectedTerm ? String(selectedTerm.months) : ""} onChange={event => {
           setTermMonths(event.target.value);
           setAppCopy(null);
-        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{kind === "wealth" ? <p className="text-sm text-fg">Featured brokered CD rates. Each Apply now button opens this lead's application. The link expires in 48 hours. The application does not ask for a password.</p> : null}{kind === "cdars" || kind === "cdars-intro" ? <div className="grid gap-3 sm:grid-cols-4"><p className="text-sm text-fg sm:col-span-4">{kind === "cdars-intro" ? "This introduction explains CDARS and does not include an application link. Filled rates appear in the letter. Blank rates are left out." : "CDARS places $500,000 to $50 million across FDIC-insured banks. Set the rate for each term. The client chooses 1, 3, 6, or 12 months on the application. The link expires in 48 hours."}</p>{cdarsRates.map(rate => <label key={rate.months} className="block text-sm"><span className="font-semibold text-primary">{rate.months}-month APY</span><input className={`${controlClass} mt-1`} value={rate.apy} placeholder="4.25%" onChange={event => setCdarsRates(current => current.map(item => item.months === rate.months ? { ...item, apy: event.target.value } : item))} /></label>)}</div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className={"min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" + (kind === "cdars" || kind === "cdars-intro" || kind === "wealth" ? " hidden" : "")} onClick={() => {
+        }}>{termChoices.length === 0 ? <option value="">No terms in this group</option> : null}{termChoices.map(term => <option key={term.id} value={term.months}>{term.months}-month · {term.apy}</option>)}</select></label> : null}{kind === "private" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm"><span className="font-semibold text-primary">Exclusive term, months</span><input className={`${controlClass} mt-1`} inputMode="numeric" value={exclusiveMonths} placeholder="18" onChange={event => setExclusiveMonths(event.target.value.replace(/[^\d]/g, "").slice(0, 3))} /></label><label className="block text-sm"><span className="font-semibold text-primary">Exclusive rate</span><input className={`${controlClass} mt-1`} value={exclusiveRate} placeholder="5.25%" onChange={event => setExclusiveRate(event.target.value)} /></label><p className="text-sm text-fg sm:col-span-2">This term and rate appear only on this client's application. They are not added to the public certificate list.</p></div> : null}{kind === "wealth" ? <p className="text-sm text-fg">Brokered CD rates from other banks, plus the promotional bonus table. Edit the bank cards under Pricing, Brokered CDs. Each Apply now button opens this lead's application. The link expires in 48 hours.</p> : null}{kind === "cdars" || kind === "cdars-intro" ? <div className="grid gap-3 sm:grid-cols-4"><p className="text-sm text-fg sm:col-span-4">{kind === "cdars-intro" ? "This introduction explains CDARS and does not include an application link. Filled rates appear in the letter. Blank rates are left out." : "CDARS places $500,000 to $50 million across FDIC-insured banks. Set the rate for each term. The client chooses 1, 3, 6, or 12 months on the application. The link expires in 48 hours."}</p>{cdarsRates.map(rate => <label key={rate.months} className="block text-sm"><span className="font-semibold text-primary">{rate.months}-month APY</span><input className={`${controlClass} mt-1`} value={rate.apy} placeholder="4.25%" onChange={event => setCdarsRates(current => current.map(item => item.months === rate.months ? { ...item, apy: event.target.value } : item))} /></label>)}</div> : null}{preview ? <div className="mt-2 overflow-hidden rounded-xl border border-border bg-[#e8e8e8] shadow-sm"><div className="border-b border-border bg-white px-5 py-4 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold tracking-widest text-[#8c8c8c] uppercase">Letter preview</p><div className="flex items-center gap-2">{bulk && pickedLeads.length > 1 ? <><button type="button" aria-label="Previous letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index - 1 + pickedLeads.length) % pickedLeads.length)}>‹</button><span className="min-w-16 text-center text-sm text-primary">{previewAt + 1} of {pickedLeads.length}</span><button type="button" aria-label="Next letter" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-lg font-semibold text-primary" onClick={() => setPreviewIndex(index => (index + 1) % pickedLeads.length)}>›</button></> : null}<button type="button" className="min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" onClick={() => void copyLetterImage(previewFrame.current, setShotStatus, mailHead.current)}>Copy screenshot</button>{shotStatus ? <span className="text-sm text-fg">{shotStatus}</span> : null}<button type="button" className={"min-h-9 rounded-md border border-border px-3 text-sm font-semibold text-primary" + (kind === "cdars" || kind === "cdars-intro" || kind === "wealth" ? " hidden" : "")} onClick={() => {
               if (kind === "cdars" || kind === "cdars-intro" || kind === "wealth") return;
               if (kind === "reminder") setReminderCopy(current => current ?? reminderStandard);else if (kind === "followup") setFollowCopy(current => current ?? followStandard);else if (kind === "exclusive" || kind === "exclusive-fdic") setExclusiveCopy(current => current ?? exclusiveStandard);else if (kind === "htr" || kind === "htr-call") setHtrCopy(current => current ?? htrStandard);else if (kind === "extension") setExtCopy(current => current ?? extensionStandard);else if (kind !== "rates") setAppCopy(current => current ?? appStandard);else setCopy(current => current ?? standard);
               setEditing(open => !open);
@@ -2548,7 +2596,7 @@ function LeadsPanel({
           })} rows={3} /><LetterField label="Thank you" value={applicationCopy.thanks} onChange={thanks => setAppCopy({
             ...applicationCopy,
             thanks
-          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} featured CD emails` : "Send featured CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} Promo rates 250+` : "Send Promo rates 250+" : kind === "exclusive-fdic" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} Promo rates` : "Send Promo rates" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "htr-call" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR with form emails` : "Send HTR with form" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
+          })} rows={2} /><button type="button" className="w-fit text-sm font-semibold text-action" onClick={() => setAppCopy(null)}>Restore the standard text</button></div> : null}<iframe ref={previewFrame} title="Letter preview" sandbox="allow-same-origin" className="h-[1100px] w-full bg-[#f2f5f8]" srcDoc={preview.html} /></div> : null}<button type="submit" className="min-h-11 w-fit rounded-md bg-action px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60" disabled={pending}>{pending ? "Sending…" : kind === "promo" ? "Send promo email" : kind === "custom" ? "Send custom term email" : kind === "private" ? "Send exclusive application" : kind === "wealth" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} brokered CD emails` : "Send brokered CD email" : kind === "cdars" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} CDARS emails` : "Send CDARS email" : kind === "cdars-intro" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} introductions` : "Send CDARS introduction" : kind === "extension" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} extensions` : "Send extension" : kind === "exclusive" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} Promo rates 250+` : "Send Promo rates 250+" : kind === "exclusive-fdic" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} Promo rates` : "Send Promo rates" : kind === "htr" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR emails` : "Send HTR email" : kind === "htr-call" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} HTR with form emails` : "Send HTR with form" : kind === "reminder" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} reminders` : "Send reminder" : kind === "followup" ? pickedLeads.length > 1 ? `Send ${pickedLeads.length} follow-ups` : "Send follow-up" : pickedLeads.length > 1 ? `Send ${pickedLeads.length} intros` : "Send intro"}</button></form></section>;
 }
 function LetterField({
   label,
@@ -2787,7 +2835,7 @@ const QUICK_MAIL = [
   ["htr-call", "HTR with form", "lead_htr_call"],
   ["cdars-intro", "CDARS intro", "lead_cdars_intro"],
   ["cdars", "CDARS application", "lead_cdars"],
-  ["wealth", "Featured CDs", "lead_wealth"],
+  ["wealth", "Brokered CD", "lead_wealth"],
 ];
 
 function LeadQuickMail({ leads, advisors, onClose, onSent }) {
@@ -2800,6 +2848,7 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
   const [terms, setTerms] = useState([]);
   const [offer, setOffer] = useState(null);
   const [cdarsRates, setCdarsRates] = useState([]);
+  const [brokeredOffers, setBrokeredOffers] = useState([]);
   const [emailStyles, setEmailStyles] = useState({ advisor: "classic", colors: { ...DEFAULT_EMAIL_COLORS } });
   const [origin, setOrigin] = useState("");
   const [ratePick, setRatePick] = useState(null);
@@ -2824,10 +2873,11 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
   useEffect(() => {
     setOrigin(window.location.origin);
     getEmailStyles().then(setEmailStyles).catch(() => undefined);
-    Promise.all([getCdTerms(), getPromo(), getCdarsRates()]).then(([nextTerms, promo, rates]) => {
+    Promise.all([getCdTerms(), getPromo(), getCdarsRates(), getBrokeredOffers()]).then(([nextTerms, promo, rates, banks]) => {
       setTerms(nextTerms);
       setOffer(promo);
       if (rates?.length) setCdarsRates(rates);
+      if (banks?.length) setBrokeredOffers(banks);
     }).catch(() => setError("This email could not be prepared."));
   }, []);
 
@@ -2845,11 +2895,11 @@ function LeadQuickMail({ leads, advisors, onClose, onSent }) {
     if (kind === "reminder") return promoReminderLetter({ ...common, link: previewLink || "#", promoCode: "" });
     if (kind === "cdars") return cdarsLetter({ ...common, terms: cdarsRates, link: previewLink || "#" });
     if (kind === "cdars-intro") return cdarsIntroLetter({ ...common, terms: cdarsRates });
-    if (kind === "wealth") return wealthIntroLetter({ leadName: name, company: brand.companyName, advisor, portalUrl: brand.publicDomain, companyPhone: brand.companyPhone, link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : "" });
+    if (kind === "wealth") return wealthIntroLetter({ leadName: name, company: brand.companyName, advisor, logo: brand.emailLogo, portalUrl: brand.publicDomain, companyPhone: brand.companyPhone, link: previewOrigin ? `${previewOrigin}/onboarding?invite=preview` : "", callLink: previewOrigin ? `${previewOrigin}/call?token=preview` : "https://preview.local/call?token=preview", offers: brokeredOffers, terms, promo: offer });
     const copy = defaultApplicationCopy({ leadName: name, company: brand.companyName, months: 0, advisorName: advisor?.name, variant: "promo" });
     if (lead.process === "portal") copy.instruction = "Please use the button below to access your application and create a password. Once submitted, you can continue in the investor portal.";
     return applicationLetter({ ...common, months: 0, apy: "", terms: promoTerms.filter((term) => selectedRates.includes(term.months)), offer: offer ?? blankOffer, link: previewLink, variant: "promo", copy });
-  }, [lead, kind, advisor, brand, terms, offer, cdarsRates, previewLink, previewOrigin, promoTerms, selectedRates]);
+  }, [lead, kind, advisor, brand, terms, offer, cdarsRates, brokeredOffers, previewLink, previewOrigin, promoTerms, selectedRates]);
 
   const step = QUICK_MAIL.find((item) => item[0] === kind)?.[2] || "lead_intro";
   const preview = letter ? renderStep(step, "client", {
@@ -4476,6 +4526,9 @@ var DESK_MENU = [{
   items: [{
     id: "investments",
     label: "Rates and promo"
+  }, {
+    id: "brokered",
+    label: "Brokered CDs"
   }]
 }];
 function DeskNav({
