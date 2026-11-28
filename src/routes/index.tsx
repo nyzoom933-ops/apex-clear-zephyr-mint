@@ -1,7 +1,10 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  beforeLoad: () => {
-    throw redirect({ to: "/login" });
-  },
+  head: () => ({ meta: [{ title: "\u200b" }] }),
+  component: IndexPage,
 });
+
+function IndexPage() {
+  return <div className="fixed inset-0 z-50 bg-white" />;
+}

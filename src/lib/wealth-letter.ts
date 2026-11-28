@@ -61,9 +61,9 @@ function bonusTable(terms: { months: number; apy: string }[], offer?: PromoOffer
     const last = index === tiers.length - 1;
     const background = last ? "#e7f3fb" : index % 2 ? "#f7fbfe" : "#ffffff";
     return `<tr>
-      <td style="padding:11px 14px; background:${background}; ${last ? "font-weight:700;" : "border-bottom:1px solid #e7eef4;"}">${escapeHtml(amountRange(tier))}</td>
-      <td align="center" style="padding:11px 14px; background:${background}; ${last ? "font-weight:700;" : "border-bottom:1px solid #e7eef4;"}">${escapeHtml(formatBonus(tier.bonusPercent))}</td>
-      <td align="center" style="padding:11px 14px; background:${background}; color:#006fcf; font-weight:700; ${last ? "" : "border-bottom:1px solid #e7eef4;"}">${escapeHtml(cell)}</td>
+      <td style="padding:11px 14px; background:${background}; ${last ? "font-weight:700;" : "border-bottom:1px solid #d6e4ef;"}">${escapeHtml(amountRange(tier))}</td>
+      <td align="center" style="padding:11px 14px; background:${background}; ${last ? "font-weight:700;" : "border-bottom:1px solid #d6e4ef;"}">${escapeHtml(formatBonus(tier.bonusPercent))}</td>
+      <td align="center" style="padding:11px 14px; background:${background}; color:#006fcf; font-weight:700; ${last ? "" : "border-bottom:1px solid #d6e4ef;"}">${escapeHtml(cell)}</td>
     </tr>`;
   }).join("");
   const text = tiers.map((tier) => {
@@ -71,7 +71,7 @@ function bonusTable(terms: { months: number; apy: string }[], offer?: PromoOffer
     return `${amountRange(tier)} · ${formatBonus(tier.bonusPercent)} · ${shown.join(", ") || "—"}`;
   }).join("\n");
   const html = `<p style="margin:0 0 8px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#12315c;">Promotional bonus rates</p>
-    <p style="margin:0 0 12px 0; font-family:Arial, Helvetica, sans-serif; font-size:13px; line-height:19px; color:#4d6272;">These bonuses apply to our promotional certificate terms, based on the qualifying deposit.</p>
+    <p style="margin:0 0 12px 0; font-family:Arial, Helvetica, sans-serif; font-size:13px; line-height:19px; color:#5a6a7a;">These bonuses apply to our promotional certificate terms, based on the qualifying deposit.</p>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d6e4ef;">
       <tr>
         <td style="background:#12315c; color:#ffffff; padding:10px 14px; font-size:11px; font-weight:700;">Qualifying Deposit</td>
@@ -182,7 +182,7 @@ export function wealthIntroLetter(input: {
     "FDIC-eligible deposits, subject to applicable limits",
     "Ongoing cash-management and portfolio support",
   ]
-    .map((item) => `<tr><td style="padding:3px 8px 3px 0; color:#14c8a8; font-size:14px;">✓</td><td style="padding:3px 0; font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:20px; color:#243746;">${item}</td></tr>`)
+    .map((item) => `<tr><td style="padding:3px 8px 3px 0; color:#006fcf; font-size:14px;">✓</td><td style="padding:3px 0; font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:20px; color:#3d3d3d;">${item}</td></tr>`)
     .join("");
   const reasons = [
     ["Direct Access", "Clear points of contact when decisions need attention."],
@@ -235,9 +235,9 @@ export function wealthIntroLetter(input: {
     }
   </style>
 </head>
-<body style="margin:0; padding:0; background:#eef2f4; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
+<body style="margin:0; padding:0; background:#f2f5f8; font-family:Arial, Helvetica, sans-serif; color:#1a1a1a;">
   <div style="display:none; max-height:0; overflow:hidden;">Brokered CD rates from ${escapeHtml(company)}.</div>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eef2f4;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f8;">
     <tr><td align="center" style="padding:20px 10px;">
       <table role="presentation" class="email-container" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px; width:100%; background:#ffffff;">
         <tr><td style="background:#006fcf; padding:16px 32px;">${mark}</td></tr>
@@ -253,7 +253,7 @@ export function wealthIntroLetter(input: {
             </td></tr>
           </table>
         </td></tr>
-        <tr><td style="padding:22px 32px 8px 32px; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:23px; color:#243746;">
+        <tr><td style="padding:22px 32px 8px 32px; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:23px; color:#3d3d3d;">
           <p style="margin:0 0 12px 0;">Dear ${escapeHtml(name)},</p>
           <p style="margin:0 0 12px 0;">${escapeHtml(company)} extends its warm regards and appreciation following your recent consultation with ${article(company)} ${escapeHtml(company)} financial advisor. The session was designed to be both insightful and valuable, helping to shape and strengthen each client's financial path. It is ${escapeHtml(company)}'s priority to ensure that every interaction provides meaningful guidance as clients move toward their financial goals.</p>
           <p style="margin:0;">As part of your ongoing investment and cash-management strategy, we wanted to share information about Certificates of Deposit (CDs), which may appeal to investors seeking safety, predictable returns and preservation of capital.</p>
@@ -290,33 +290,33 @@ export function wealthIntroLetter(input: {
         <tr><td style="padding:18px 32px 8px 32px;">
           <p style="margin:0 0 8px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#12315c;">Why invest through ${escapeHtml(company)}?</p>
           <table role="presentation" cellspacing="0" cellpadding="0" border="0">${checks}</table>
-          <p style="margin:12px 0 0 0; font-family:Arial, Helvetica, sans-serif; font-size:11px; line-height:16px; color:#6a7c8c;">Rates are subject to change. APY = Annual Percentage Yield. Confirm current availability, rate and terms with ${escapeHtml(company)} before opening. FDIC insurance is subject to applicable ownership categories and limits.</p>
+          <p style="margin:12px 0 0 0; font-family:Arial, Helvetica, sans-serif; font-size:11px; line-height:16px; color:#5a6a7a;">Rates are subject to change. APY = Annual Percentage Yield. Confirm current availability, rate and terms with ${escapeHtml(company)} before opening. FDIC insurance is subject to applicable ownership categories and limits.</p>
         </td></tr>
         <tr><td style="padding:8px 32px 8px 32px;">
           <p style="margin:0; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#12315c;">CD Deposit Solutions</p>
-          <p style="margin:4px 0 0 0; font-size:13px; line-height:19px; color:#4d6272;">Explore competitive rates and flexible terms designed to help you grow your cash with confidence.</p>
-          <p style="margin:8px 0 0 0; font-size:13px; line-height:20px; color:#243746;">✓ Terms from 6 to 60 months<br>✓ Competitive fixed rates<br>✓ Eligible for FDIC coverage</p>
+          <p style="margin:4px 0 0 0; font-size:13px; line-height:19px; color:#5a6a7a;">Explore competitive rates and flexible terms designed to help you grow your cash with confidence.</p>
+          <p style="margin:8px 0 0 0; font-size:13px; line-height:20px; color:#3d3d3d;">✓ Terms from 6 to 60 months<br>✓ Competitive fixed rates<br>✓ Eligible for FDIC coverage</p>
           <p style="margin:16px 0 0 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#12315c;">Fixed Income Solutions</p>
-          <p style="margin:4px 0 0 0; font-size:13px; line-height:19px; color:#4d6272;">Build a resilient, income-generating portfolio across a broad range of fixed income investments — from government bonds to corporate bonds and certificates of deposit.</p>
+          <p style="margin:4px 0 0 0; font-size:13px; line-height:19px; color:#5a6a7a;">Build a resilient, income-generating portfolio across a broad range of fixed income investments — from government bonds to corporate bonds and certificates of deposit.</p>
         </td></tr>
         <tr><td style="padding:18px 32px 8px 32px;">
           <p style="margin:0 0 10px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#12315c;">Why clients choose ${escapeHtml(company)}</p>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">${reasonRows}</table>
         </td></tr>
         <tr><td style="padding:8px 32px 18px 32px;">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f8f8;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f7fbfe;">
             <tr><td style="padding:16px;">
               <p style="margin:0; font-size:15px; font-weight:700; color:#12315c;">We're here for you</p>
-              <p style="margin:4px 0 10px 0; font-size:13px; line-height:18px; color:#4d6272;">Continue the conversation with ${escapeHtml(advisorName)}.</p>
+              <p style="margin:4px 0 10px 0; font-size:13px; line-height:18px; color:#5a6a7a;">Continue the conversation with ${escapeHtml(advisorName)}.</p>
               ${contact}
             </td></tr>
           </table>
           <p style="margin:16px 0 0 0; font-size:16px; font-weight:700; color:#12315c;">${escapeHtml(advisorName)}</p>
-          <p style="margin:2px 0 0 0; font-size:13px; line-height:18px; color:#4d6272;">${escapeHtml(role || company)}<br>${escapeHtml(company)}${phone ? `<br>${escapeHtml(phone)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}</p>
+          <p style="margin:2px 0 0 0; font-size:13px; line-height:18px; color:#5a6a7a;">${escapeHtml(role || company)}<br>${escapeHtml(company)}${phone ? `<br>${escapeHtml(phone)}` : ""}${email ? `<br>${escapeHtml(email)}` : ""}</p>
         </td></tr>
-        <tr><td style="padding:16px 24px 22px 24px; background:#10233a;">
-          <p style="margin:0; font-family:Arial, Helvetica, sans-serif; font-size:11px; line-height:16px; color:#d5e4ee;">${escapeHtml(company)} banking products and services are subject to approval. Eligible deposits are insured by the FDIC up to $250,000 per depositor, per insured bank, per ownership category. Brokered CDs are obligations of the issuing bank, not of ${escapeHtml(company)}, and are subject to the issuing bank's terms.</p>
-          <p style="margin:10px 0 0 0; font-family:Arial, Helvetica, sans-serif; font-size:11px; line-height:16px; color:#d5e4ee;">Federal law requires us to obtain, verify and record information that identifies each person who opens an account. The information you provide may be used to verify your identity. This message is not an offer or a commitment to open an account.</p>
+        <tr><td style="padding:16px 24px 22px 24px; background:#12315c;">
+          <p style="margin:0; font-family:Arial, Helvetica, sans-serif; font-size:11px; line-height:16px; color:#ffffff;">${escapeHtml(company)} banking products and services are subject to approval. Eligible deposits are insured by the FDIC up to $250,000 per depositor, per insured bank, per ownership category. Brokered CDs are obligations of the issuing bank, not of ${escapeHtml(company)}, and are subject to the issuing bank's terms.</p>
+          <p style="margin:10px 0 0 0; font-family:Arial, Helvetica, sans-serif; font-size:11px; line-height:16px; color:#ffffff;">Federal law requires us to obtain, verify and record information that identifies each person who opens an account. The information you provide may be used to verify your identity. This message is not an offer or a commitment to open an account.</p>
         </td></tr>
       </table>
     </td></tr>
